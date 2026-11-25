@@ -440,12 +440,12 @@ let s = M.N.S (M.T, U)
 let%expect_test "types are order independent and recursive across modules" =
   check
     {|
-let tree = A.Node (Ptr.make (B.Cons (Ptr.make (A.Leaf, B.Nil))))
+let tree = A.Node (Ptr.make (B.Cons (Box.make (A.Leaf, B.Nil))))
 module A = struct
   type tree = Leaf | Node of ptr[B.forest]
 end
 module B = struct
-  type forest = Nil | Cons of ptr[A.tree * forest]
+  type forest = Nil | Cons of box[A.tree * forest]
   type trees = A.tree * A.tree
 end
 let pair : B.trees = (A.Leaf, tree)
@@ -457,7 +457,7 @@ let pair : B.trees = (A.Leaf, tree)
       type tree = Leaf | Node of ptr[B.forest]
     end
     module B : sig
-      type forest = Nil | Cons of ptr[A.tree * forest]
+      type forest = Nil | Cons of box[A.tree * forest]
       type trees = A.tree * A.tree
     end
     val pair : A.tree * A.tree

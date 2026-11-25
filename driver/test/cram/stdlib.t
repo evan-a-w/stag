@@ -12,12 +12,12 @@ checkout is made outside it.
       val some : 'a -> option['a]
       val is_some : option['a] -> bool
   $ stag check prelude/prelude.stag | head -4
-  type list['a] = Nil | Cons of ptr['a * list['a]]
+  type box['a]
+  type list['a] = Nil | Cons of box['a * list['a]]
   type option['a] = None | Some of 'a
   type result['a, 'b] = Ok of 'a | Error of 'b
-  exception Division_by_zero
   $ cd core && stag check option.stag ../prelude/prelude.stag | grep -c . && cd ..
-  154
+  158
 
 Names in the prelude's sources are as within the prelude, and a file given
 twice is checked once.
@@ -102,8 +102,8 @@ Errors are located in their files.
   16 |     | Cons * (_, rest) -> loop (Int.succc acc) rest
                                        ^^^^^^^^^
   Error: Unbound value Int.succc
-  File "prelude/prelude.stag", line 388, characters 11-25:
-  388 | let oops = Prim.Nope.nope
+  File "prelude/prelude.stag", line 396, characters 11-25:
+  396 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -121,8 +121,8 @@ Prims are only the prelude's.
   16 |     | Cons * (_, rest) -> loop (Int.succc acc) rest
                                        ^^^^^^^^^
   Error: Unbound value Int.succc
-  File "stag/prelude/prelude.stag", line 388, characters 11-25:
-  388 | let oops = Prim.Nope.nope
+  File "stag/prelude/prelude.stag", line 396, characters 11-25:
+  396 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -139,11 +139,11 @@ Without the marker, they are programs.
                                   ^^^^^^^^
   Error: Unbound value Int.pred
   File "stag/core/list.stag", line 80, characters 20-28:
-  80 |     | true -> loop (Int.succ i) (Cons (Ptr.make ( (f i, acc))))
+  80 |     | true -> loop (Int.succ i) (Cons (Box.make ( (f i, acc))))
                            ^^^^^^^^
   Error: Unbound value Int.succ
   File "stag/core/list.stag", line 104, characters 32-40:
-  104 |     | Cons * (x, rest) -> loop (Int.succ i) rest (Cons (Ptr.make ( (f i x, acc))))
+  104 |     | Cons * (x, rest) -> loop (Int.succ i) rest (Cons (Box.make ( (f i x, acc))))
                                         ^^^^^^^^
   Error: Unbound value Int.succ
   File "stag/core/list.stag", line 121, characters 12-20:
@@ -155,7 +155,7 @@ Without the marker, they are programs.
                       ^^^^^^^^
   Error: Unbound value Int.succ
   File "stag/core/list.stag", line 225, characters 43-51:
-  225 |     | Cons * (x, rest), true -> loop rest (Int.pred n) (Cons (Ptr.make ( (x, acc))))
+  225 |     | Cons * (x, rest), true -> loop rest (Int.pred n) (Cons (Box.make ( (x, acc))))
                                                    ^^^^^^^^
   Error: Unbound value Int.pred
   File "stag/core/list.stag", line 233, characters 36-44:

@@ -237,7 +237,7 @@ include .~(let _ = (types, decls, abstract) in Nil)
            (Cons
             (Tuple (Ref (constructor Cons))
              (Cons
-              (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type ptr)))
+              (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type box)))
                (Cons
                 (Stag.Type_expr.Arg.Ty
                  (Stag.Type_expr.Tuple
@@ -296,23 +296,23 @@ let failed =
 let derive =
   reflect
   ^ {|
-let append a b = Stag.Expr.apply (Stag.Expr.var "String.append") (Cons (Ptr.make ( (a, Cons (Ptr.make ( (b, Nil)))))))
+let append a b = Stag.Expr.apply (Stag.Expr.var "String.append") (Cons (Box.make ( (a, Cons (Box.make ( (b, Nil)))))))
 
 let show_arg self ty v =
   match ty with
   | Stag.Type_expr.Con (Stag.Path.Ref r, _) ->
     (match String.equal (Stag.Type_ref.name r) "int" with
-     | true -> Stag.Expr.apply (Stag.Expr.var "Int.to_string") (Cons (Ptr.make ( (v, Nil))))
+     | true -> Stag.Expr.apply (Stag.Expr.var "Int.to_string") (Cons (Box.make ( (v, Nil))))
      | false ->
        (match String.equal (Stag.Type_ref.name r) self with
-        | true -> Stag.Expr.apply (Stag.Expr.var "to_string") (Cons (Ptr.make ( (v, Nil))))
+        | true -> Stag.Expr.apply (Stag.Expr.var "to_string") (Cons (Box.make ( (v, Nil))))
         | false -> Stag.Expr.string "?"))
   | _ -> Stag.Expr.string "?"
 
 let vars i args =
   match args with
   | Nil -> Nil
-  | Cons * (_, rest) -> Cons (Ptr.make ( (String.append "a" (Int.to_string i), vars (Int.add i 1) rest)))
+  | Cons * (_, rest) -> Cons (Box.make ( (String.append "a" (Int.to_string i), vars (Int.add i 1) rest)))
 
 let show_args self acc args vars =
   match (args, vars) with
@@ -335,8 +335,8 @@ let derive ty =
   | Some d ->
     (match d.kind with
      | Variant constructors ->
-       Cons (Ptr.make (
-         ( Stag.Toplevel.let_ "to_string" (Cons (Ptr.make ( ("x", Nil))))
+       Cons (Box.make (
+         ( Stag.Toplevel.let_ "to_string" (Cons (Box.make ( ("x", Nil))))
              (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "x", Stag.map (arm (Stag.Type_ref.name r)) constructors))))
          , Nil ))))
 |}
@@ -387,25 +387,25 @@ module M = struct
   type s = {x : bool}
   let from_t (y : t) = y
   include .~(derive t_type)
-  include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("id", Cons (Ptr.make ( (("y", Stag.Annot.ty (Stag.Type.expr t_type)), Nil))), Stag.Annot.none, Stag.Expr.var "y"), Nil))))
+  include .~(Cons (Box.make ( (Stag.Toplevel.Let ("id", Cons (Box.make ( (("y", Stag.Annot.ty (Stag.Type.expr t_type)), Nil))), Stag.Annot.none, Stag.Expr.var "y"), Nil))))
   include .~(
     match decl (type r) with
     | Some d ->
       (match d.kind with
        | Stag.Type.Kind.Record (Cons * ((x, _), Nil)) ->
-         Cons (Ptr.make (
-           ( Stag.Toplevel.let_ "get_x" (Cons (Ptr.make ( ("v", Nil)))) (Stag.Expr.Field (Ptr.make ( (Stag.Expr.var "v", Stag.Path.Ref x))))
-           , Cons (Ptr.make (
+         Cons (Box.make (
+           ( Stag.Toplevel.let_ "get_x" (Cons (Box.make ( ("v", Nil)))) (Stag.Expr.Field (Ptr.make ( (Stag.Expr.var "v", Stag.Path.Ref x))))
+           , Cons (Box.make (
                ( Stag.Toplevel.let_ "make" Nil
-                   (Stag.Expr.Record (Cons (Ptr.make ( ((Stag.Path.Ref x, Stag.Expr.int 1), Nil)))))
-               , Cons (Ptr.make (
+                   (Stag.Expr.Record (Cons (Box.make ( ((Stag.Path.Ref x, Stag.Expr.int 1), Nil)))))
+               , Cons (Box.make (
                    ( Stag.Toplevel.let_ "b" Nil
                        (match decl t_type with
                         | Some d ->
                           (match d.kind with
                            | Stag.Type.Kind.Variant (Cons * ((a, _), _)) ->
                              Stag.Expr.Construct (Stag.Path.Ref a, Nil)))
-                   , Cons (Ptr.make (
+                   , Cons (Box.make (
                        ( Stag.Toplevel.let_ "c" Nil (Stag.Expr.construct "A" Nil)
                        , Nil ))) ))) ))) ))) ))
 end
@@ -486,7 +486,7 @@ let%expect_test "refs are typed by what they name" =
     (reflect
      ^ {|
 type t = A
-include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "a" Nil (Stag.Expr.Construct (Stag.Path.Ref (head (type t)), Nil)), Nil))))
+include .~(Cons (Box.make ( (Stag.Toplevel.let_ "a" Nil (Stag.Expr.Construct (Stag.Path.Ref (head (type t)), Nil)), Nil))))
 |}
     );
   check
@@ -515,7 +515,7 @@ let f =
   [%expect
     {|
     File "a.stag", line 8, characters 92-107:
-    8 | include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "a" Nil (Stag.Expr.Construct (Stag.Path.Ref (head (type t)), Nil)), Nil))))
+    8 | include .~(Cons (Box.make ( (Stag.Toplevel.let_ "a" Nil (Stag.Expr.Construct (Stag.Path.Ref (head (type t)), Nil)), Nil))))
                                                                                                     ^^^^^^^^^^^^^^^
     Error: This expression has type Stag.Type_ref.t but an expression was expected of type Stag.Constructor_ref.t
     File "a.stag", line 13, characters 69-70:
@@ -565,13 +565,13 @@ let some_ref =
     (match d.kind with
      | Stag.Type.Kind.Variant (Cons * (_, Cons * ((some, _), Nil))) -> some)
 let gen =
-  Cons (Ptr.make (
+  Cons (Box.make (
     ( Stag.Toplevel.Let
         ( "x"
         , Nil
         , Stag.Annot.ty (Stag.Type.expr (type list[option[int]]))
         , Stag.Expr.construct "Cons"
-            [Stag.Expr.apply (Stag.Expr.var "Ptr.make")
+            [Stag.Expr.apply (Stag.Expr.var "Box.make")
                [Stag.Expr.tuple [Stag.Expr.Construct (Stag.Path.Ref some_ref, [Stag.Expr.int 1]); Stag.Expr.construct "Nil" []]]] )
     , Nil )))
 module M = struct
@@ -610,8 +610,8 @@ let%expect_test "refs into spliced modules and includes" =
     ~run:true
     (derive
      ^ {|
-module M = .~(Cons (Ptr.make ( (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("C", Cons (Ptr.make ( (Stag.Type_expr.con "int" Nil, Nil)))), Nil)))) }, Nil))))
-include .~(Cons (Ptr.make ( (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("D", Cons (Ptr.make ( (Stag.Type_expr.con "M.t" Nil, Nil)))), Nil)))) }, Nil))))
+module M = .~(Cons (Box.make ( (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Box.make ( (("C", Cons (Box.make ( (Stag.Type_expr.con "int" Nil, Nil)))), Nil)))) }, Nil))))
+include .~(Cons (Box.make ( (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Box.make ( (("D", Cons (Box.make ( (Stag.Type_expr.con "M.t" Nil, Nil)))), Nil)))) }, Nil))))
 module N = struct
   include .~(derive (type M.t))
 end
@@ -706,7 +706,7 @@ let%expect_test "types in quotes and generated syntax" =
 type t = A
 let code = .<type t>.
 let spliced = .~(.<Stag.Type.expr (type list[t])>.)
-let gen name = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Expr.Type (Stag.Type.expr (type t))), Nil)))
+let gen name = Cons (Box.make ( (Stag.Toplevel.let_ name Nil (Stag.Expr.Type (Stag.Type.expr (type t))), Nil)))
 include .~(gen "generated")
 module M = struct
   type t = B
@@ -746,7 +746,7 @@ module M = struct
   type t['a] = A
 end
 type t = int
-include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type list[int])), Nil)), Stag.Expr.construct "Nil" Nil), Nil))))
+include .~(Cons (Box.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type list[int])), Nil)), Stag.Expr.construct "Nil" Nil), Nil))))
 |}
     );
   check
@@ -755,19 +755,19 @@ include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Ty
 module M = struct
   type t['a] = A
 end
-include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type M.t[int])), Nil)), Stag.Expr.Construct (Stag.Path.Name "M.A", Nil)), Nil))))
+include .~(Cons (Box.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type M.t[int])), Nil)), Stag.Expr.Construct (Stag.Path.Name "M.A", Nil)), Nil))))
 |}
     );
   [%expect
     {|
     File "a.stag", line 11, characters 0-178:
-    11 | include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type list[int])), Nil)), Stag.Expr.construct "Nil" Nil), Nil))))
+    11 | include .~(Cons (Box.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type list[int])), Nil)), Stag.Expr.construct "Nil" Nil), Nil))))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: The type list expects 1 argument(s), but is given 0
     Note: The generated declaration is:
       let x : .list = Nil
     File "a.stag", line 10, characters 0-195:
-    10 | include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type M.t[int])), Nil)), Stag.Expr.Construct (Stag.Path.Name "M.A", Nil)), Nil))))
+    10 | include .~(Cons (Box.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Ref (head (type M.t[int])), Nil)), Stag.Expr.Construct (Stag.Path.Name "M.A", Nil)), Nil))))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: The type A.M.t expects 1 argument(s), but is given 0
     Note: The generated declaration is:

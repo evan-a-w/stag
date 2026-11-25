@@ -11,6 +11,7 @@ type t =
   | Erase
   | Raise
   | Ptr_make
+  | Box_make
   | Assume_global
 [@@deriving sexp_of, equal, enumerate]
 
@@ -25,6 +26,7 @@ let name = function
   | Erase -> "erase"
   | Raise -> "raise"
   | Ptr_make -> "ptr_make"
+  | Box_make -> "box_make"
   | Assume_global -> "assume_global"
 ;;
 
@@ -39,6 +41,7 @@ let public_name = function
   | Erase -> "Stag.Code.erase"
   | Raise -> "raise"
   | Ptr_make -> "Ptr.make"
+  | Box_make -> "Box.make"
   | Assume_global -> "Unsafe.assume_global"
 ;;
 
@@ -69,6 +72,9 @@ let ty t ~var ~row =
   | Ptr_make ->
     let pointee = var () in
     Type.arrow pointee (Type.ptr pointee)
+  | Box_make ->
+    let contents = var () in
+    Type.arrow contents (Type.box contents)
   | Assume_global ->
     let ty = var () in
     TArrow

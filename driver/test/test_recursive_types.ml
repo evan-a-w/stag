@@ -551,7 +551,7 @@ let%expect_test "recursive aliases through records, tuples and type arguments" =
   check
     {|
 type stream['a] = {`head : 'a; `tail : unit -> ptr[stream['a]]}
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 type tree = [`Leaf of int | `Node of list[tree]]
 type pair = [`A of ptr[pair]] * int
 type id['a] = 'a
@@ -563,7 +563,7 @@ let leaf (t : tree) = match t with `Leaf n -> n | _ -> 0
   [%expect
     {|
     type stream['a] = {`head : 'a; `tail : unit -> ptr[stream['a]]}
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type tree = [`Leaf of int | `Node of list[tree]]
     type pair = [`A of ptr[pair]] * int
     type id['a] = 'a
@@ -627,7 +627,7 @@ type t[{..'r}] = {`x : t[{`y : int; ..'r}]}
 type t = t * int
 |};
   check {|
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 type t = list[t]
 |};
   check {|
@@ -651,7 +651,7 @@ type t = [`A of int] -> t
     ((Non_regular_recursive_alias a) @ t.stag:3:20-26)
     ((Non_regular_recursive_alias t) @ t.stag:2:23-42)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type t = list[t]
     ((Cyclic_type_alias t) @ t.stag:3:5-6)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
@@ -854,7 +854,7 @@ type g = f[g]
 |};
   check
     {|
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 type f['a] = list['a]
 type g = f[g]
 |};
@@ -874,7 +874,7 @@ type t = [`A of t] * id[t]
     {|
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
     ((Infinite_type_layout g) @ t.stag:3:5-6)
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type f['a] = list['a]
     type g = list[g]
     ((Infinite_type_layout g) @ t.stag:3:5-6)

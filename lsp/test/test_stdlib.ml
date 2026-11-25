@@ -61,8 +61,8 @@ let%expect_test "the prelude's sources check cleanly, as the prelude" =
     at client list "let length" ~offset:4 ~f:Client.print_hover;
     [%expect
       {|
-      12:12 12:12-12:27 ```stag raise : exn -> 'a ```
-      12:22 12:12-12:27 ```stag raise : exn -> 'a ```
+      16:12 16:12-16:27 ```stag raise : exn -> 'a ```
+      16:22 16:12-16:27 ```stag raise : exn -> 'a ```
       15:36 15:32-15:40 ```stag Core.Int.succ : int -> int ```
       15:36 -> stag/core/int.stag 14:4-14:8
       11:4 11:4-11:10 ```stag Core.List.length : list['a] -> int ```
@@ -143,12 +143,12 @@ let%expect_test "errors in the prelude's sources are located in them" =
         58:22-58:30 error: Unbound value Int.succ
         62:28-62:36 error: Unbound value Int.succ
         154:9-154:17 error: Unbound value Int.succ
-        170:62-170:70 error: Unbound value Int.succ
-        170:74-170:82 error: Unbound value Int.succ
-        181:67-181:75 error: Unbound value Int.succ
-        186:76-186:84 error: Unbound value Int.succ
-        191:67-191:75 error: Unbound value Int.succ
-        205:70-205:78 error: Unbound value Int.succ
+        170:63-170:71 error: Unbound value Int.succ
+        170:75-170:83 error: Unbound value Int.succ
+        181:68-181:76 error: Unbound value Int.succ
+        186:77-186:85 error: Unbound value Int.succ
+        191:68-191:76 error: Unbound value Int.succ
+        205:71-205:79 error: Unbound value Int.succ
       diagnostics stag/core/string.stag:
         57:23-57:31 error: Unbound value Int.succ
         72:24-72:32 error: Unbound value Int.succ
@@ -222,11 +222,11 @@ let%expect_test "programs in a checkout: prims are the prelude's, definitions \
       definitions "elsewhere/b.stag";
       [%expect
         {|
-         0:18 -> stag/core/list.stag 11:4-11:10
-         1:8 -> stag/prelude/prelude.stag 4:25-4:29
-         0:18 no definition
-         1:8 no definition
-         |}])
+        0:18 -> stag/core/list.stag 11:4-11:10
+        1:8 -> stag/prelude/prelude.stag 8:25-8:29
+        0:18 no definition
+        1:8 no definition
+        |}])
 ;;
 
 let watched_change client file =
@@ -262,9 +262,9 @@ let%expect_test "programs outside a checkout: definitions are in the server's \
       definitions client;
       [%expect
         {|
-         0:18 -> stag/core/list.stag 11:4-11:10
-         1:8 -> stag/prelude/prelude.stag 4:25-4:29
-         |}];
+        0:18 -> stag/core/list.stag 11:4-11:10
+        1:8 -> stag/prelude/prelude.stag 8:25-8:29
+        |}];
       let list = "stag/core/list.stag" in
       Client.did_open client list;
       Client.did_change client list ~version:2 ("\n" ^ contents list);
@@ -272,17 +272,17 @@ let%expect_test "programs outside a checkout: definitions are in the server's \
       definitions client;
       [%expect
         {|
-         0:18 no definition
-         1:8 -> stag/prelude/prelude.stag 4:25-4:29
-         |}];
+        0:18 no definition
+        1:8 -> stag/prelude/prelude.stag 8:25-8:29
+        |}];
       Client.did_change client list ~version:3 (contents list);
       [%expect {| |}];
       definitions client;
       [%expect
         {|
-         0:18 -> stag/core/list.stag 11:4-11:10
-         1:8 -> stag/prelude/prelude.stag 4:25-4:29
-         |}]);
+        0:18 -> stag/core/list.stag 11:4-11:10
+        1:8 -> stag/prelude/prelude.stag 8:25-8:29
+        |}]);
   Client.with_server
     ~files:
       (List.map checkout ~f:(fun (file, contents) ->
@@ -298,9 +298,9 @@ let%expect_test "programs outside a checkout: definitions are in the server's \
       definitions client;
       [%expect
         {|
-         0:18 no definition
-         1:8 -> stag/prelude/prelude.stag 4:25-4:29
-         |}])
+        0:18 no definition
+        1:8 -> stag/prelude/prelude.stag 8:25-8:29
+        |}])
 ;;
 
 let%expect_test "programs in a checkout see its sources, with unsaved edits, \
@@ -493,19 +493,19 @@ let%expect_test "definitions of the prelude's types, constructors and fields" =
           Client.print_definition client "stag/tests/a.stag" ~line ~character);
       [%expect
         {|
-         0:11 0:11-0:17 ```stag type option ```
-         0:11 -> stag/prelude/prelude.stag 4:5-4:11
-         1:30 1:8-1:31 ```stag type Core.Sexp.Parse_error.t ```
-         1:30 -> stag/core/sexp.stag 17:7-17:8
-         1:36 1:36-1:43 ```stag prelude.Core.Sexp.Parse_error.message : string ```
-         1:36 -> stag/core/sexp.stag 17:12-17:19
-         2:10 2:10-2:17 ```stag prelude.Core.Sexp.Parse_error.message : string ```
-         2:10 -> stag/core/sexp.stag 17:12-17:19
-         3:18 3:8-3:19 ```stag type Core.Sexp.t ```
-         3:18 -> stag/core/sexp.stag 3:5-3:6
-         3:32 3:22-3:36 ```stag prelude.Core.Sexp.Atom : Core.Sexp.t ```
-         3:32 -> stag/core/sexp.stag 3:9-3:13
-         |}])
+        0:11 0:11-0:17 ```stag type option ```
+        0:11 -> stag/prelude/prelude.stag 8:5-8:11
+        1:30 1:8-1:31 ```stag type Core.Sexp.Parse_error.t ```
+        1:30 -> stag/core/sexp.stag 17:7-17:8
+        1:36 1:36-1:43 ```stag prelude.Core.Sexp.Parse_error.message : string ```
+        1:36 -> stag/core/sexp.stag 17:12-17:19
+        2:10 2:10-2:17 ```stag prelude.Core.Sexp.Parse_error.message : string ```
+        2:10 -> stag/core/sexp.stag 17:12-17:19
+        3:18 3:8-3:19 ```stag type Core.Sexp.t ```
+        3:18 -> stag/core/sexp.stag 3:5-3:6
+        3:32 3:22-3:36 ```stag prelude.Core.Sexp.Atom : Core.Sexp.t ```
+        3:32 -> stag/core/sexp.stag 3:9-3:13
+        |}])
 ;;
 
 let%expect_test "semantic tokens of a source of the prelude" =

@@ -35,17 +35,17 @@ let ext (x : string) = let y @ external = x in y
 let bad u = (ext "s" @ gc)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:3:13-20), but must be at most gc, because it is annotated gc (at t.stag:3:23-25) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:3:13-20), but must be at most gc, because it is annotated gc (at t.stag:3:23-25) |}];
   show {|
 let bad = (Int.to_string 1 : string @ const)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:11-26), but must be at most const, because it is annotated const (at t.stag:2:38-43) |}];
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:11-26), but must be at most const, because it is annotated const (at t.stag:2:38-43) |}];
   show {|
 let bad = (1 : string)
 |};
   [%expect
-    {| This expression has type string but an expression was expected of type int |}]
+    {| This expression has type int but an expression was expected of type string |}]
 ;;
 
 let%expect_test "an annotation only checks" =

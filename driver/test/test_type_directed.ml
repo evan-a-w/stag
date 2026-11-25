@@ -225,7 +225,7 @@ let early v = let _ = (v : N.r) in v.x
   [%expect
     {|
     ((Unification_error
-      (Type_mismatch (TCon s ()) (TCon N.r ()) (Base_types_not_equal s N.r)))
+      (Type_mismatch (TCon N.r ()) (TCon s ()) (Base_types_not_equal N.r s)))
      @ t.stag:12:19-28)
     ((Unbound_field y) @ t.stag:13:12-13)
     module N : sig
@@ -343,7 +343,7 @@ let fst p = match p with (a, _) -> a
 let getter ty r =
   let name = Stag.Field_ref.name r in
   Stag.Toplevel.let_ (String.append "get_" name) Nil
-    (Stag.Expr.Let (Ptr.make ( ("f", Cons (Ptr.make ( (("v", Stag.Annot.ty (Stag.Type.expr ty)), Nil))), Stag.Annot.none,
+    (Stag.Expr.Let (Ptr.make ( ("f", Cons (Box.make ( (("v", Stag.Annot.ty (Stag.Type.expr ty)), Nil))), Stag.Annot.none,
        Stag.Expr.Field (Ptr.make ( (Stag.Expr.var "v", Stag.Path.Name name))),
        Stag.Expr.var "f"))))
 
@@ -389,12 +389,12 @@ let%expect_test "unqualified constructors resolve by the expected type" =
     (types
      ^ {|
 let annotated : M.v = B 1
-let in_list : list[M.v] = Cons (Ptr.make ( (A, Cons (Ptr.make ( (B 2, Nil))))))
+let in_list : list[M.v] = Cons (Box.make ( (A, Cons (Box.make ( (B 2, Nil))))))
 let returned n : M.v = B n
 let in_match b : M.v = match b with true -> A | false -> B 3
 let pattern (v : M.v) = match v with A -> 0 | B n -> n
 let nested (l : list[M.v]) = match l with Cons * (B n, _) -> n | _ -> 0
-let ran = (pattern (B 5), nested (Cons (Ptr.make ( (B 6, Nil)))), in_match false)
+let ran = (pattern (B 5), nested (Cons (Box.make ( (B 6, Nil)))), in_match false)
 |}
     );
   [%expect

@@ -2,15 +2,15 @@ open! Import
 
 let generators =
   {|
-let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let enum names =
-  Cons (Ptr.make (
+  Cons (Box.make (
     ( Stag.Toplevel.Type
         { `name = "t"
         ; `params = Nil
         ; `kind = Stag.Type_decl.Kind.Variant (Stag.map (fun name -> (name, Nil)) names) }
-    , Cons (Ptr.make (
-        ( Stag.Toplevel.let_ "to_string" (Cons (Ptr.make ( ("x", Nil))))
+    , Cons (Box.make (
+        ( Stag.Toplevel.let_ "to_string" (Cons (Box.make ( ("x", Nil))))
             (Stag.Expr.Match (Ptr.make (
                ( Stag.Expr.var "x"
                , Stag.map (fun name -> (Stag.Pattern.construct name Nil, Stag.Expr.string name)) names ))))
@@ -117,7 +117,7 @@ end%inline
 let%expect_test "expansions are compared modulo layout and comments" =
   test
     {|
-include%inline .~(enum (Cons (Ptr.make ( ("Red", Cons (Ptr.make ( ("Green", Nil))))))))
+include%inline .~(enum (Cons (Box.make ( ("Red", Cons (Box.make ( ("Green", Nil))))))))
   (* The colors. *)
   type t =
     | Red
@@ -140,7 +140,7 @@ include%inline .~(value "x" (Stag.Expr.int 2))
   let y = 2
 end%inline
 module M = struct
-  include%inline .~(enum (Cons (Ptr.make ( ("A", Cons (Ptr.make ( ("B", Nil))))))))
+  include%inline .~(enum (Cons (Box.make ( ("A", Cons (Box.make ( ("B", Nil))))))))
     type t = A
   end%inline
 end
@@ -152,7 +152,7 @@ end
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This inline expansion is out of date
     File "a.stag", line 21, characters 2-83:
-    21 |   include%inline .~(enum (Cons (Ptr.make ( ("A", Cons (Ptr.make ( ("B", Nil))))))))
+    21 |   include%inline .~(enum (Cons (Box.make ( ("A", Cons (Box.make ( ("B", Nil))))))))
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This inline expansion is out of date
     --- a.stag corrected ---
@@ -160,7 +160,7 @@ end
       let x = 2
     end%inline
     module M = struct
-      include%inline .~(enum (Cons (Ptr.make ( ("A", Cons (Ptr.make ( ("B", Nil))))))))
+      include%inline .~(enum (Cons (Box.make ( ("A", Cons (Box.make ( ("B", Nil))))))))
         type t = A | B
 
         let to_string x =
@@ -198,7 +198,7 @@ end%inline
 let%expect_test "module splices" =
   test
     {|
-module%inline Color = .~(enum (Cons (Ptr.make ( ("Red", Nil)))))
+module%inline Color = .~(enum (Cons (Box.make ( ("Red", Nil)))))
 end%inline
 module Outer = struct
   module%inline Inner = .~(value "x" (Stag.Expr.int 1))
@@ -209,7 +209,7 @@ let shown = print_endline (Color.to_string Color.Red)
   [%expect
     {|
     File "a.stag", line 16, characters 0-64:
-    16 | module%inline Color = .~(enum (Cons (Ptr.make ( ("Red", Nil)))))
+    16 | module%inline Color = .~(enum (Cons (Box.make ( ("Red", Nil)))))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This inline expansion is out of date
     File "a.stag", line 19, characters 2-55:
@@ -219,7 +219,7 @@ let shown = print_endline (Color.to_string Color.Red)
     --- output ---
     Red
     --- a.stag corrected ---
-    module%inline Color = .~(enum (Cons (Ptr.make ( ("Red", Nil)))))
+    module%inline Color = .~(enum (Cons (Box.make ( ("Red", Nil)))))
       type t = Red
 
       let to_string x = match x with Red -> "Red"
@@ -237,7 +237,7 @@ let%expect_test "long generated code is laid out within the width, at its depth"
   =
   test
     {|
-let names = Cons (Ptr.make ( ("A_long_constructor_name", Cons (Ptr.make ( ("Another_long_constructor_name", Cons (Ptr.make ( ("Yet_another_one", Nil)))))))))
+let names = Cons (Box.make ( ("A_long_constructor_name", Cons (Box.make ( ("Another_long_constructor_name", Cons (Box.make ( ("Yet_another_one", Nil)))))))))
 module A = struct
   module B = struct
     include%inline .~(enum names)
@@ -252,7 +252,7 @@ end
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This inline expansion is out of date
     --- a.stag corrected ---
-    let names = Cons (Ptr.make ( ("A_long_constructor_name", Cons (Ptr.make ( ("Another_long_constructor_name", Cons (Ptr.make ( ("Yet_another_one", Nil)))))))))
+    let names = Cons (Box.make ( ("A_long_constructor_name", Cons (Box.make ( ("Another_long_constructor_name", Cons (Box.make ( ("Yet_another_one", Nil)))))))))
     module A = struct
       module B = struct
         include%inline .~(enum names)
@@ -558,20 +558,20 @@ end
 let%expect_test "a generator emitting an expect test" =
   test
     {|
-include%inline .~(Cons (Ptr.make ( (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Ptr.make ( (Stag.Expr.int 1, Nil)))) }, Nil))))
+include%inline .~(Cons (Box.make ( (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Box.make ( (Stag.Expr.int 1, Nil)))) }, Nil))))
 end%inline
 |};
   [%expect
     {|
     File "a.stag", line 16, characters 0-183:
-    16 | include%inline .~(Cons (Ptr.make ( (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Ptr.make ( (Stag.Expr.int 1, Nil)))) }, Nil))))
+    16 | include%inline .~(Cons (Box.make ( (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Box.make ( (Stag.Expr.int 1, Nil)))) }, Nil))))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This inline expansion is out of date
     ((name (t @ a.stag:16:0-183))
      (mismatches (((loc a.stag:16:183-183) (expected ()) (actual 1)))) (error ())
      (generated))
     --- a.stag corrected ---
-    include%inline .~(Cons (Ptr.make ( (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Ptr.make ( (Stag.Expr.int 1, Nil)))) }, Nil))))
+    include%inline .~(Cons (Box.make ( (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Box.make ( (Stag.Expr.int 1, Nil)))) }, Nil))))
       let%expect_test "t" = print_int 1
     end%inline
     |}]
@@ -581,7 +581,7 @@ let%expect_test "expansions in several files" =
   test
     ~others:
       [ ( "b.stag"
-        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+        , {|let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 include%inline .~(value "y" (Stag.Expr.int 2))
 end%inline
 module%inline M = .~(value "z" (Stag.Expr.int 3))
@@ -609,7 +609,7 @@ end%inline
       let x = 1
     end%inline
     --- b.stag corrected ---
-    let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+    let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
     include%inline .~(value "y" (Stag.Expr.int 2))
       let y = 2
     end%inline
@@ -622,7 +622,7 @@ end%inline
 let%expect_test "a name written as one shadowed at the expansion is stale" =
   test
     {|
-let alias e = Cons (Ptr.make ( (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)))
+let alias e = Cons (Box.make ( (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)))
 type t = A
 let by_ref = Stag.Type.expr (type t)
 module N = struct
@@ -657,7 +657,7 @@ end
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This inline expansion is out of date
     --- a.stag corrected ---
-    let alias e = Cons (Ptr.make ( (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)))
+    let alias e = Cons (Box.make ( (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)))
     type t = A
     let by_ref = Stag.Type.expr (type t)
     module N = struct
@@ -686,13 +686,13 @@ end
 let%expect_test "an error in generated code is in the expansion, if up to date" =
   test
     {|
-include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Ptr.make ( (Stag.Expr.string "a", Nil))))))
+include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Box.make ( (Stag.Expr.string "a", Nil))))))
   let x = print_int "a"
 end%inline
 |};
   test
     {|
-include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Ptr.make ( (Stag.Expr.string "a", Nil))))))
+include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Box.make ( (Stag.Expr.string "a", Nil))))))
   let x = print_int "b"
 end%inline
 |};
@@ -703,7 +703,7 @@ end%inline
                              ^^^
     Error: This expression has type string but an expression was expected of type int
     File "a.stag", line 16, characters 0-123:
-    16 | include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Ptr.make ( (Stag.Expr.string "a", Nil))))))
+    16 | include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Box.make ( (Stag.Expr.string "a", Nil))))))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: This expression has type string but an expression was expected of type int
     Note: The generated declaration is:
@@ -721,7 +721,7 @@ let%expect_test "refs in expansions: shortest suffix at the splice, else a \
 type t = A | B
 let helper x = x
 let code = .< fun (x : t) -> match x with | A -> helper (String.length "a") | B -> Core.Int.succ 0 >.
-let gen = Cons (Ptr.make ( (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)))
+let gen = Cons (Box.make ( (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)))
 |}
         )
       ]
@@ -778,7 +778,7 @@ let%expect_test "refs in expansions are not captured by generated binders" =
       [ ( "gen.stag"
         , {|
 let code = .< fun raise -> let x = raise 1 in .raise (Failure x) >.
-let gen = Cons (Ptr.make ( (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)))
+let gen = Cons (Box.make ( (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)))
 |}
         )
       ]

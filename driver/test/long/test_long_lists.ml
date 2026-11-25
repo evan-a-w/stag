@@ -18,9 +18,9 @@ let check name l =
   let length = Core.List.length l in
   print_endline
     (Core.String.concat " "
-       (Cons (Ptr.make ( (name, Cons (Ptr.make ( (Core.Int.to_string length,
-        Cons (Ptr.make ( (Core.Sexp.to_string (sexp_of_ints (Core.List.take 3 l)),
-        Cons (Ptr.make ( (Core.Sexp.to_string (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int (Core.List.last l)),
+       (Cons (Box.make ( (name, Cons (Box.make ( (Core.Int.to_string length,
+        Cons (Box.make ( (Core.Sexp.to_string (sexp_of_ints (Core.List.take 3 l)),
+        Cons (Box.make ( (Core.Sexp.to_string (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int (Core.List.last l)),
         Nil))))))))))))))
 
 let l = Core.List.init LENGTH Core.Int.succ

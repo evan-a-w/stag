@@ -1,7 +1,7 @@
 Inline expansions show what a declaration splice generates in the source.
 
   $ cat > gen.stag <<'EOF'
-  > let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+  > let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
   > 
   > include%inline .~(value "x" (Stag.Expr.int 1))
   > end%inline
@@ -28,7 +28,7 @@ A fresh expansion is filled in, with the expect tests' corrections.
   --- gen.stag
   +++ gen.stag.corrected
   @@ -1,11 +1,13 @@
-   let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+   let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
    
    include%inline .~(value "x" (Stag.Expr.int 1))
   +  let x = 1
@@ -57,7 +57,7 @@ A fresh expansion is filled in, with the expect tests' corrections.
   --- gen.stag
   +++ gen.stag.corrected
   @@ -1,11 +1,13 @@
-   let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+   let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
    
    include%inline .~(value "x" (Stag.Expr.int 1))
   +  let x = 1
@@ -74,7 +74,7 @@ A fresh expansion is filled in, with the expect tests' corrections.
   2 inline expansion(s) out of date (promoted)
   1 of 1 test(s) failed (expectations promoted)
   $ cat gen.stag
-  let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+  let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
   
   include%inline .~(value "x" (Stag.Expr.int 1))
     let x = 1
@@ -111,7 +111,7 @@ Editing the expansion makes it stale.
   1 inline expansion(s) out of date
   [1]
   $ cat gen.stag.corrected
-  let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+  let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
   
   include%inline .~(value "x" (Stag.Expr.int 1))
     let x = 1

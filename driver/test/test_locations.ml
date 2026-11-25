@@ -46,8 +46,8 @@ let x = 3
        (Base_types_not_equal int bool)))
      @ t.stag:1:14-18)
     ((Unification_error
-      (Type_mismatch (TCon int ()) (TCon bool ())
-       (Base_types_not_equal int bool)))
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
      @ t.stag:1:8-26)
     ((Unbound_type unbound) @ t.stag:1:14-21)
     ((Duplicate_toplevel x) @ t.stag:4:4-5)

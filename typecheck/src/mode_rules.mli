@@ -332,6 +332,10 @@ val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
     pointer is allocated at run time, and its cell holds the argument. *)
 val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t * Mode_arg.t
 
+(** The argument and result modes of [Box.make]: the box is allocated at run
+    time, and holds the argument as a part. *)
+val box_make : Ctx.t -> Mode.Var.t * Mode.Var.t
+
 (** The modes of the arrows of a prim taking arguments [args], outermost first.
     A prim only reads its arguments, so takes any, and returns a new value; a
     partial application holds the arguments so far. *)

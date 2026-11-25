@@ -54,6 +54,7 @@ module To_value = struct
       let char c = Value.Char c
       let tuple vs = Value.Tuple vs
       let ptr v = Value.Ptr (ref v)
+      let box = ptr
       let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
       let ref_ kind name = Value.Ref { kind; name }
 

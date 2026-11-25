@@ -1111,6 +1111,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
        Eval_result.return (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
      | Ptr_make, value -> Eval_result.return (Value.Ptr (ref value))
+     | Box_make, value -> Eval_result.return (Value.Ptr (ref value))
      | Assume_global, value -> Eval_result.return value
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with

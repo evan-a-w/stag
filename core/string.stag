@@ -27,7 +27,7 @@ let to_list s =
   let loop i acc =
     match Int.lt i 0 with
     | true -> acc
-    | false -> loop (Int.pred i) (Cons (Ptr.make ( (get s i, acc))))
+    | false -> loop (Int.pred i) (Cons (Box.make ( (get s i, acc))))
   in
   loop (Int.pred (length s)) []
 
@@ -155,9 +155,9 @@ let split_on_char sep s =
       (match Char.equal (get s i) sep with
        | true ->
          let part = sub s start (Int.sub i start) in
-         loop (Int.succ i) (Int.succ i) (Cons (Ptr.make ( (part, acc))))
+         loop (Int.succ i) (Int.succ i) (Cons (Box.make ( (part, acc))))
        | false -> loop start (Int.succ i) acc)
-    | false -> List.rev (Cons (Ptr.make ( (sub s start (Int.sub i start), acc))))
+    | false -> List.rev (Cons (Box.make ( (sub s start (Int.sub i start), acc))))
   in
   loop 0 0 []
 
@@ -173,9 +173,9 @@ let split_on_string sep s =
       (match found i with
        | true ->
          let part = sub s start (Int.sub i start) in
-         loop (Int.add i n) (Int.add i n) (Cons (Ptr.make ( (part, acc))))
+         loop (Int.add i n) (Int.add i n) (Cons (Box.make ( (part, acc))))
        | false -> loop start (Int.succ i) acc)
-    | false -> List.rev (Cons (Ptr.make ( (drop_prefix s start, acc))))
+    | false -> List.rev (Cons (Box.make ( (drop_prefix s start, acc))))
   in
   match is_empty sep with
   | true -> [s]
@@ -193,14 +193,14 @@ let escaped s =
   let loop start i parts =
     let plain_part _ = sub s start (Int.sub i start) in
     match Int.lt i (length s) with
-    | false -> concat "" (List.rev (Cons (Ptr.make ( (plain_part (), parts)))))
+    | false -> concat "" (List.rev (Cons (Box.make ( (plain_part (), parts)))))
     | true ->
       let c = get s i in
       match plain c with
       | true -> loop start (Int.succ i) parts
       | false ->
         let escaped =
-          Cons (Ptr.make ( (Internal.escape_char c, Cons (Ptr.make ( (plain_part (), parts))))))
+          Cons (Box.make ( (Internal.escape_char c, Cons (Box.make ( (plain_part (), parts))))))
         in
         loop (Int.succ i) (Int.succ i) escaped
   in

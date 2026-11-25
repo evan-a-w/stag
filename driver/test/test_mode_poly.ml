@@ -90,7 +90,7 @@ let defaults : 'a -> 'a = fun x -> x
 let use (x @ local) = defaults x
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-32), then x is used (at t.stag:3:31-32), then it is passed to a function (at t.stag:3:22-32), but must be at most global, because its type is written without a mode (at t.stag:2:15-17), then the function types are unified |}];
+    {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-32), then x is used (at t.stag:3:31-32), then it is passed to a function (at t.stag:3:22-32), but must be at most global, because its type is written without a mode (at t.stag:2:15-17), then a function is used at a type with other modes |}];
   modes
     {|
 let poly : 'a @ 'm -> 'a @ 'n = fun x -> x
@@ -109,8 +109,8 @@ let use u = apply (fun (x @ local) -> x) 1
 |};
   [%expect
     {|
-    This expression has type int @ local -> int but an expression was expected of type int -> int
-    Their modes differ: This is local, because it is annotated local (at t.stag:3:28-33), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:2:15-18)
+    val apply : (int -> int) @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val use : 'a @ 'm0 -> int @ 'm1
     |}];
   modes
     {|
@@ -118,7 +118,7 @@ let apply (f : string -> string) x = f x
 let use (x @ local) = apply (fun y -> y) x
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-42), then x is used (at t.stag:3:41-42), then it is passed to a function (at t.stag:3:22-42), but must be at most global, because its type is written without a mode (at t.stag:2:15-21), then the function types are unified, then it is passed to a function (at t.stag:2:37-40), then x is used (at t.stag:2:39-40), then x is passed to the function (at t.stag:2:37-40), then the function types are unified |}]
+    {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-42), then x is used (at t.stag:3:41-42), then it is passed to a function (at t.stag:3:22-42), but must be at most global, because its type is written without a mode (at t.stag:2:15-21), then a function is used at a type with other modes, then it is passed to a function (at t.stag:2:37-40), then x is used (at t.stag:2:39-40), then x is passed to the function (at t.stag:2:37-40), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "parameters used in quotes can't be embedded" =
@@ -151,7 +151,7 @@ let f (x @ portable) = .<x>.
 let bad = f (Int.to_string 3)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:12-29), then it is passed to a function (at t.stag:3:10-29), but must be at most portable, because it is annotated portable (at t.stag:2:11-19), then the function types are unified |}]
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:12-29), then it is passed to a function (at t.stag:3:10-29), but must be at most portable, because it is annotated portable (at t.stag:2:11-19), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "printed constraints are simplified" =
@@ -293,7 +293,7 @@ let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let bad = capped (Int.to_string 3)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:17-34), then it is passed to a function (at t.stag:3:10-34), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then the function types are unified, then the function returns it (at t.stag:2:63-64), then x is used (at t.stag:2:63-64), then x is passed to the function (at t.stag:2:54-64), then the function types are unified |}];
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:17-34), then it is passed to a function (at t.stag:3:10-34), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then the function types are unified, then the function returns it (at t.stag:2:63-64), then x is used (at t.stag:2:63-64), then x is passed to the function (at t.stag:2:54-64), then the function types are unified, then a function is used at a type with other modes |}];
   modes
     {|
 let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
@@ -401,7 +401,7 @@ let pair x y = x
 let p @ portable = pair (make 1)
 |};
   [%expect
-    {| This is nonportable, because cell is mutable (at t.stag:2:13-60), then cell is captured by a closure (at t.stag:2:51-55), then the closure is made (at t.stag:2:33-60), then f is bound (at t.stag:2:33-60), then the function returns it (at t.stag:2:13-60), then the function types are unified, then the function returns it (at t.stag:4:24-32), then it is passed to a function (at t.stag:4:19-32), then the function types are unified, then a partial application holds it (at t.stag:3:15-16), then the function types are unified, then the function returns it (at t.stag:4:19-32), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16) |}]
+    {| This is nonportable, because cell is mutable (at t.stag:2:13-60), then cell is captured by a closure (at t.stag:2:51-55), then the closure is made (at t.stag:2:33-60), then f is bound (at t.stag:2:33-60), then the function returns it (at t.stag:2:13-60), then a function is used at a type with other modes, then the function returns it (at t.stag:4:24-32), then it is passed to a function (at t.stag:4:19-32), then a function is used at a type with other modes, then a partial application holds it (at t.stag:3:15-16), then a function is used at a type with other modes, then the function returns it (at t.stag:4:19-32), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16) |}]
 ;;
 
 let%expect_test "annotations on uses bound the variable's mode" =
@@ -427,7 +427,7 @@ let bad = cap (Int.to_string 3)
 let cap x = (x @ portable)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:14-31), then it is passed to a function (at t.stag:2:10-31), but must be at most portable, because it is annotated portable (at t.stag:3:17-25), then x is used (at t.stag:3:12-26), then x is passed to the function (at t.stag:3:12-26), then the function types are unified |}]
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:14-31), then it is passed to a function (at t.stag:2:10-31), but must be at most portable, because it is annotated portable (at t.stag:3:17-25), then x is used (at t.stag:3:12-26), then x is passed to the function (at t.stag:3:12-26), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "a let mut's mode bounds the values it holds" =
@@ -439,7 +439,7 @@ let ok u = let mut x @ portable = "a" in x <- "b"; x
 let bad u = let mut x @ const = "a" in x <- Int.to_string 3; x
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:44-59), then it is assigned to x (at t.stag:2:39-59), but must be at most const, because it is annotated const (at t.stag:2:24-29) |}];
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:44-59), then it is assigned to x (at t.stag:2:39-59), but must be at most const, because it is annotated const (at t.stag:2:24-29) |}];
   modes
     {|
 let mut counter @ const = 0
@@ -451,7 +451,7 @@ let bump u = counter <- Int.add counter 1
 let mut counter @ portable = Int.to_string 3
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:29-44), but must be at most portable, because it is annotated portable (at t.stag:2:18-26), then it initializes counter (at t.stag:2:29-44) |}]
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:29-44), but must be at most portable, because it is annotated portable (at t.stag:2:18-26), then it initializes counter (at t.stag:2:29-44) |}]
 ;;
 
 let%expect_test "use and let mut annotations survive re-inference" =

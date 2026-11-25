@@ -324,7 +324,7 @@ let cell = Ptr.make 0
 let store =
   Stag.Expr.Store
     (Ptr.make ( (Stag.Expr.Deref (Ptr.make (Stag.Expr.var "cell")), Stag.Expr.int 5)))
-include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "run_store" Nil store, Nil))))
+include .~(Cons (Box.make ( (Stag.Toplevel.let_ "run_store" Nil store, Nil))))
 let stored = cell.*
 |};
   [%expect

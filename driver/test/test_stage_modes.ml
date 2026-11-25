@@ -123,7 +123,7 @@ let through_data =
 let%expect_test "generalization is decided by const" =
   check
     {|
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 let nil = Nil
 let applied = let f x = x in f Nil
 let quoted = .<Nil>.
@@ -133,7 +133,7 @@ let computed = let x = Int.add 1 2 in Nil
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     val nil : list['a]
     val applied : list['_a]
     val quoted : <list['a]>{..'b}
@@ -320,7 +320,7 @@ let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
     val embeds : '_a -> '_a
     val quoted : <'_a -> '_a>{..'b}
     This is portable, because k was computed at compile time (at t.stag:2:33-34), then k is used (at t.stag:2:33-34), but must be at most const, because embeds is a toplevel (at t.stag:2:13-37)
-    This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:19-34), but must be at most const, because applied is a toplevel (at t.stag:4:14-37)
+    This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:4:19-34), but must be at most const, because applied is a toplevel (at t.stag:4:14-37)
     This is portable, because v was computed at compile time (at t.stag:2:71-72), then v is embedded in a quote (at t.stag:2:71-72), then the code is built (at t.stag:2:69-74), but must be at most const, because c is a toplevel (at t.stag:2:8-78)
     This is portable, because v was computed at compile time (at t.stag:3:85-86), then v is captured by a closure (at t.stag:3:85-86), then the closure is made (at t.stag:3:76-88), then w is bound (at t.stag:3:68-93), but must be at most const, because d is a toplevel (at t.stag:3:8-96)
     This is portable, because v was computed at compile time (at t.stag:4:77-78), then v is captured by a closure (at t.stag:4:77-78), then the closure is made (at t.stag:4:68-80), but must be at most const, because e is a toplevel (at t.stag:4:8-83)
@@ -332,7 +332,7 @@ let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
 let%expect_test "reading through a pointer and matching exceptions compute" =
   check
     {|
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 exception E of list[int]
 let cell = Ptr.make Nil
 let read = let x = cell.* in x
@@ -343,7 +343,7 @@ let caught_in_quote f =
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     exception E of list[int]
     val cell : ptr[list['_a]]
     val read : list['_a]
@@ -364,7 +364,7 @@ let v @ 'm = 1
   [%expect
     {|
     This is portable, because n is a parameter, which may differ between calls (at t.stag:3:10-51), then n is captured by a closure (at t.stag:3:45-46), then the closure is made (at t.stag:3:26-46), then it is bound by an annotated let (at t.stag:3:18-23), but must be at most const, because it is annotated const (at t.stag:3:18-23)
-    This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:27-42), then n is bound (at t.stag:4:19-72), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16)
+    This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:4:27-42), then n is bound (at t.stag:4:19-72), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16)
     |}]
 ;;
 
@@ -540,7 +540,7 @@ let q = .< fun a -> let h @ const = fun u -> .~(.<1>.) in h >.
 
 let%expect_test "data holding a toplevel function being checked is const" =
   let types = {|
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 |} in
   modes
     ~const_toplevels:true
@@ -556,10 +556,10 @@ let table = (f, Nil)
 |});
   [%expect
     {|
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     val table : ('_a -> '_a) * list['_b]
     val f : '_a -> '_a
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     val f : '_a -> '_a
     val table : ('_a -> '_a) * list['_b]
     |}]

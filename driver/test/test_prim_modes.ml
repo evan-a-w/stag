@@ -62,7 +62,7 @@ let stored = Ptr.make (String.append "a")
 let store (s : string @ local) = stored.* <- String.append s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:24-29), then s is passed to the function (at t.stag:3:33-60), then s is used (at t.stag:3:59-60), then it is passed to a function (at t.stag:3:45-60), then the function types are unified, then a partial application holds it, then the function types are unified, then the function returns it (at t.stag:3:45-60), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:45-60) |}]
+    {| This is regional, because it is annotated local (at t.stag:3:24-29), then s is passed to the function (at t.stag:3:33-60), then s is used (at t.stag:3:59-60), then it is passed to a function (at t.stag:3:45-60), then a function is used at a type with other modes, then a partial application holds it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:45-60), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:45-60) |}]
 ;;
 
 let%expect_test "core's functions take local arguments" =

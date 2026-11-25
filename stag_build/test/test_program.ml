@@ -210,7 +210,7 @@ let%expect_test "a library named core shadows Core for derivers too" =
     [ "derive/stag", "(library (name derive))"
     ; ( "derive/sexp.stag"
       , {|let of_int name =
-  Cons (Ptr.make ( (Stag.Toplevel.let_ name (Cons (Ptr.make ( ("x", Nil))))
+  Cons (Box.make ( (Stag.Toplevel.let_ name (Cons (Box.make ( ("x", Nil))))
     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)))|}
       )
     ; "core/stag", "(library (name core))"
@@ -268,7 +268,7 @@ let%expect_test "a deriver's relative refs survive root modules of their names" 
     ; "gen/helper.stag", {|let describe n = Core.Int.to_string n|}
     ; ( "gen/derive.stag"
       , {|let show name =
-  Cons (Ptr.make ( (Stag.Toplevel.let_ name (Cons (Ptr.make ( ("x", Nil))))
+  Cons (Box.make ( (Stag.Toplevel.let_ name (Cons (Box.make ( ("x", Nil))))
     (Stag.Code.erase .< Helper.describe x >.), Nil)))|}
       )
     ; "b/stag", "(executable (name b) (libraries gen))"
@@ -284,7 +284,7 @@ let main = print_endline (show 3)|}
     ; "gen/helper.stag", {|let describe n = n|}
     ; ( "gen/derive.stag"
       , {|let bad name =
-  Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil
+  Cons (Box.make ( (Stag.Toplevel.let_ name Nil
     (Stag.Expr.App (Ptr.make (Stag.Expr.int 0, Stag.Code.erase .< Helper.describe >.))), Nil)))|}
       )
     ; "b/stag", "(executable (name b) (libraries gen))"

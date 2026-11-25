@@ -439,7 +439,7 @@ and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
          record t { context with resolving = Set.add context.resolving id } row
      | None -> Error (Error.Unresolved_ty id))
   | TCon (name, args) ->
-    if String.equal name t.ptr_name
+    if String.equal name t.ptr_name || String.equal name Type.box_name
     then (
       let args =
         List.filter args ~f:(function

@@ -416,13 +416,13 @@ let counted =
            , Stag.Annot.none
            , Stag.Expr.Assign (Ptr.make (
                ( Stag.Path.Name "n"
-               , Stag.Expr.apply (Stag.Expr.var "Core.Int.add") (Cons (Ptr.make ( (Stag.Expr.var "n", Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))) )))
+               , Stag.Expr.apply (Stag.Expr.var "Core.Int.add") (Cons (Box.make ( (Stag.Expr.var "n", Cons (Box.make ( (Stag.Expr.int 2, Nil))))))) )))
            , Stag.Expr.var "n" ))) ))))
 include .~(.< struct
   let mut total = 0
   let add_to_total n = total <- Core.Int.add total n
 end >.)
-module Generated = .~(Cons (Ptr.make ( (Stag.Toplevel.Let_mut ("count", Stag.Annot.none, Stag.Expr.int 5), Nil))))
+module Generated = .~(Cons (Box.make ( (Stag.Toplevel.Let_mut ("count", Stag.Annot.none, Stag.Expr.int 5), Nil))))
 let main =
   add_to_total 3;
   add_to_total 4;

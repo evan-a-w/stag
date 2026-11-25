@@ -100,6 +100,7 @@ module Kind = struct
     | Duplicate_row_entry of string
     | Assign_to_immutable of string
     | Store_not_through_pointer
+    | Store_into_box
     (** A [Store] whose target is not a dereference, or a field of one. *)
     | Exclave_not_in_tail_position
     (** [exclave_ e] other than as the result of a function body. *)
@@ -533,6 +534,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
       "The mutable variable %s is captured by a closure in an [exclave_], but \
        lives in the region the [exclave_] ends"
       name
+  | Store_into_box ->
+    "A box is immutable: only a pointer ([ptr]) can be stored to"
   | Store_not_through_pointer ->
     "Only a pointer can be stored to: [p.* <- v], or a field of it, as in \
      [p.*.x <- v]. Records are values, so a field is stored through a pointer \

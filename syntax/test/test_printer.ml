@@ -67,14 +67,14 @@ type w = with_x[({`x : int}), {`y : int}, {}]
 
 let%expect_test "pointers" =
   print
-    {|type rec_list['a] = Nil | Cons of ptr['a * rec_list['a]]
+    {|type rec_list['a] = Nil | Cons of box['a * rec_list['a]]
 let alloc x = Ptr.make x
 let deref p = p.*
 let uncons l = match l with Nil -> Nil | Cons *(x, xs) -> xs
 |};
   [%expect
     {|
-    type rec_list['a] = Nil | Cons of ptr['a * rec_list['a]]
+    type rec_list['a] = Nil | Cons of box['a * rec_list['a]]
 
     let alloc x = Ptr.make x
     let deref p = p.*
@@ -995,8 +995,8 @@ let%expect_test "list literals" =
 let b = [x]
 let c = [[1]; []; [2; 3;]]
 let d = [1, "one"; 2, "two"]
-let e = Cons (Ptr.make ( (x, Cons (Ptr.make ( (y, Nil))))))
-let f = Cons (Ptr.make ( (x, [y])))
+let e = Cons (Box.make ( (x, Cons (Box.make ( (y, Nil))))))
+let f = Cons (Box.make ( (x, [y])))
 let g l = match l with [] -> [] | [x] -> [x] | [[x]; (y, z)] -> f [x] [] | Cons * (x, [_; _]) -> C [x]
 let h = [let x = 1 in x; fun x -> x; match x with A -> 1 | B -> 2; 3].x
 let long_name = [first_element; second_element; third_element; fourth_element]
@@ -1009,8 +1009,8 @@ let nested = [[first_element; second_element]; [third_element; fourth_element; f
     let b = [x]
     let c = [[1]; []; [2; 3]]
     let d = [(1, "one"); (2, "two")]
-    let e = Cons (Ptr.make (x, Cons (Ptr.make (y, Nil))))
-    let f = Cons (Ptr.make (x, [y]))
+    let e = Cons (Box.make (x, Cons (Box.make (y, Nil))))
+    let f = Cons (Box.make (x, [y]))
 
     let g l =
       match l with

@@ -125,3 +125,23 @@ let same_side (a : Side.t) (b : Side.t) =
 let same t t' =
   same_side t.arg t'.arg && same_side t.res t'.res && same_side t.curry t'.curry
 ;;
+
+let sub_reason =
+  Mode.Reason.create "a function is used at a type with other modes"
+;;
+
+let sub_side ids (lower : Side.t) (upper : Side.t) =
+  match lower, upper with
+  | Fixed const1, Fixed const2 when Mode.Const.le const1 const2 -> Ok ()
+  | _ ->
+    Mode.Var.submode
+      (side_var ids ~rank:0 lower)
+      (side_var ids ~rank:0 upper)
+      sub_reason
+;;
+
+let sub ids ~lower ~upper =
+  let%bind.Result () = sub_side ids upper.arg lower.arg in
+  let%bind.Result () = sub_side ids lower.res upper.res in
+  equate_side ids lower.curry upper.curry ~reason:curry_reason
+;;

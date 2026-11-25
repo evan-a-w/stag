@@ -10,7 +10,7 @@ let%expect_test "literals" =
   print_ints [1];
   print_ints [1; 2; 3];
   print_ints (Core.List.concat [[1]; []; [2; 3]]);
-  print_ints (Cons (Ptr.make (0, [1; 2])));
+  print_ints (Cons (Box.make (0, [1; 2])));
   [%expect {|
     ()
     (1)
@@ -55,7 +55,7 @@ let%expect_test "tuples are items" =
 module Shadowing = struct
   type list['a] = Nil | Cons of 'a
 
-  let local = Cons (Ptr.make 1)
+  let local = Cons (Box.make 1)
 
   let%expect_test "a local Cons, Nil and list do not change literals" =
     print_ints [1; 2];

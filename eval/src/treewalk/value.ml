@@ -194,6 +194,16 @@ let to_string_hum ?max_length value =
         add "Ptr.make ";
         argument !cell;
         pointers := previous)
+    | Construct ({ name; _ }, [ Ptr cell ])
+      when String.equal name (Prelude_path.canonical "Cons")
+           && not (List.exists !pointers ~f:(phys_equal cell)) ->
+      (* A list's cells are boxes, which share pointers' representation. *)
+      add "Cons (Box.make ";
+      let previous = !pointers in
+      pointers := cell :: previous;
+      argument !cell;
+      pointers := previous;
+      add ")"
     | Construct ({ name; _ }, []) -> add (Prelude_path.to_string_hum name)
     | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
       add (Prelude_path.to_string_hum name);

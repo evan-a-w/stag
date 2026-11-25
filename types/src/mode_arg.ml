@@ -87,3 +87,27 @@ let sexp_of_t t =
   | Fixed const -> [%sexp (const : Mode.Const.t)]
   | Var var -> [%sexp Var (Mode.Var.id var : int)]
 ;;
+
+let sub_reason = Mode.Reason.create "a type is used at one with another mode"
+
+let sub ids ~lower ~upper =
+  let var t =
+    match t with
+    | Var var -> Ok var
+    | Fixed const ->
+      let var = Mode.Var.create ids ~rank:0 in
+      let%map.Result () = fix var const in
+      var
+  in
+  match lower, upper with
+  | Fixed c1, Fixed c2
+    when Mode.Stage.le c1.stage c2.stage
+         && Mode.Provenance.le c1.provenance c2.provenance -> Ok ()
+  | _ ->
+    let%bind.Result lower = var lower in
+    let%bind.Result upper = var upper in
+    let%bind.Result () =
+      Mode.Var.submode_on lower upper Mode.Axis.Stage sub_reason
+    in
+    Mode.Var.submode_on lower upper Provenance sub_reason
+;;

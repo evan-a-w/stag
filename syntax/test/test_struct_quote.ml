@@ -72,10 +72,10 @@ let%expect_test "expansion" =
     let antiquote_2 : .Stag.Expr.t = e in
     let antiquote_3 : .list[.Stag.Toplevel.t] = items in
     .Cons
-      (.Ptr.make
+      (.Box.make
          (.Stag.Toplevel.Type {`name = "t"; `params = []; `kind = antiquote_0},
           .Cons
-            (.Ptr.make
+            (.Box.make
                (.Stag.Toplevel.Let
                   ("x", [], {`ty = .Some antiquote_1; `mode = .None}, antiquote_2),
                 antiquote_3))))

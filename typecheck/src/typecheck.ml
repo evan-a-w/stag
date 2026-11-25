@@ -523,6 +523,16 @@ module Scope = struct
       false
   ;;
 
+  (* Like [unifies], but what has [lower] may be used as an [upper]: the modes
+     in them are related by variance. *)
+  let subtypes ids t ~lower ~upper ~loc =
+    match Unify.sub_ty ids ~lower ~upper with
+    | Ok () -> true
+    | Error error ->
+      report t (Typecheck_error.unification_error ~loc error);
+      false
+  ;;
+
   let elaborate_resolved t annot =
     Type_env.elaborate
       t.program.type_env
@@ -1235,14 +1245,21 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     node (Var ident) ty, [ var ]
   | Lit lit -> node (Lit lit) (Syntax.Lit.ty lit), []
   | Deref inner ->
-    let held, expected =
-      match Option.bind expected ~f:Type.of_ptr with
-      | Some (pointee, held) -> held, Some pointee
-      | None -> Mode_rules.fresh_held (Scope.modes scope), None
-    in
-    let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
-    ( node (Deref inner) (Type.ptr ~held inner.ty)
-    , Pattern_var.under (Modality.of_cell held) bindings )
+    (match Option.bind expected ~f:Type.of_box with
+     | Some contents ->
+       let inner, bindings =
+         pattern_type t scope ~pattern:inner ~expected:contents
+       in
+       node (Deref inner) (Type.box inner.ty), bindings
+     | None ->
+       let held, expected =
+         match Option.bind expected ~f:Type.of_ptr with
+         | Some (pointee, held) -> held, Some pointee
+         | None -> Mode_rules.fresh_held (Scope.modes scope), None
+       in
+       let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
+       ( node (Deref inner) (Type.ptr ~held inner.ty)
+       , Pattern_var.under (Modality.of_cell held) bindings ))
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
@@ -1894,6 +1911,13 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
       ( pointee
       , Type.ptr ~held pointee
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
+  | Box_make ->
+    let contents = Scope.fresh_ty t scope in
+    let arg, res = Mode_rules.box_make (Scope.modes scope) in
+    Type.TArrow
+      ( contents
+      , Type.box contents
+      , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
   | _ ->
     Intrinsic.ty
       intrinsic
@@ -2520,7 +2544,7 @@ and expr_type
                    match Type.canonical_ty b with
                    | TVar _ -> true
                    | _ -> false) ->
-        Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
+        Scope.subtypes t scope ~lower:b ~upper:expected ~loc
       | Some _ | None -> true
     in
     let result_matches = ref true in
@@ -2552,9 +2576,10 @@ and expr_type
           check_expr t scope ~at ~expr:x ~ty:a)
     in
     (match f.desc with
-     | Var (Intrinsic Ptr_make) -> Mode_rules.Alloc.pointer at
+     | Var (Intrinsic (Ptr_make | Box_make)) -> Mode_rules.Alloc.pointer at
      | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
+       when String.equal ident.name (Prelude_path.canonical "Ptr.make")
+            || String.equal ident.name (Prelude_path.canonical "Box.make") ->
        Mode_rules.Alloc.pointer at
      | _ -> ());
     if !result_matches
@@ -3008,7 +3033,8 @@ and expr_type
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
-    (* What a pointer points to is global, as it is stored global. *)
+    (* What a pointer points to is global, as it is stored global. A box's
+       contents are a part of it, read at most at its mode. *)
     let pointee, pointer, held =
       Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
         let fresh_held = Mode_rules.fresh_held modes in
@@ -3021,19 +3047,30 @@ and expr_type
             ?expected:(Option.map expected ~f:(Type.ptr ~held:fresh_held))
             ~hint:Hint
         in
-        let held =
-          Option.value_map (Type.of_ptr pointer.ty) ~default:fresh_held ~f:snd
-        in
-        let pointee =
-          match expected with
-          | Some expected when Expectation.is_required hint -> expected
-          | Some _ | None -> Scope.fresh_ty t scope
-        in
-        (pointee, pointer, held), Modality.of_cell held)
+        match Type.of_box pointer.ty with
+        | Some contents -> (contents, pointer, None), Modality.id
+        | None ->
+          let held =
+            Option.value_map (Type.of_ptr pointer.ty) ~default:fresh_held ~f:snd
+          in
+          let pointee =
+            match expected with
+            | Some expected when Expectation.is_required hint -> expected
+            | Some _ | None -> Scope.fresh_ty t scope
+          in
+          (pointee, pointer, Some held), Modality.of_cell held)
     in
-    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(Type.ptr ~held pointee) ~loc
-    then node (Deref pointer) pointee
-    else node (Error [ pointer ]) Type.error
+    (match held with
+     | None -> node (Deref pointer) pointee
+     | Some held ->
+       if Scope.unifies
+            t
+            scope
+            ~ty1:pointer.ty
+            ~ty2:(Type.ptr ~held pointee)
+            ~loc
+       then node (Deref pointer) pointee
+       else node (Error [ pointer ]) Type.error)
   | Store (target, value) ->
     let rec under_deref (expr : Source.Expr.t) =
       match Source.Expr.view expr with
@@ -3071,6 +3108,14 @@ and expr_type
           ~loc
           ~target:(fun at ->
             let target = expr_type t scope ~at ~expr:target in
+            let rec through_box (expr : Typed.Expr.t) =
+              match expr.desc with
+              | Deref pointer -> Option.is_some (Type.of_box pointer.ty)
+              | Field (inner, _) | Poly_field (inner, _) -> through_box inner
+              | _ -> false
+            in
+            if through_box target
+            then Scope.report scope (Typecheck_error.create ~loc Store_into_box);
             target, stored target)
           ~value:(fun at ~ty -> check_expr t scope ~at ~expr:value ~ty)
       in
@@ -3440,12 +3485,12 @@ and annotate
     (match Scope.elaborate_resolved scope ty with
      | Ok (annot_ty, resolved) ->
        let annotated =
-         { var with
-           desc = Annotated (var, { annot with ty = Some resolved })
+         { Typed.Expr.desc = Annotated (var, { annot with ty = Some resolved })
+         ; ty = (if Type.is_error var.ty then var.ty else annot_ty)
          ; loc
          }
        in
-       if Scope.unifies t scope ~ty1:var.ty ~ty2:annot_ty ~loc
+       if Scope.subtypes t scope ~lower:var.ty ~upper:annot_ty ~loc
        then annotated
        else { desc = Error [ annotated ]; ty = Type.error; loc }
      | Error error ->
@@ -3634,8 +3679,8 @@ and check_expr ?expected ?hint t scope ~at ~expr ~ty =
       ~expected:(Option.value expected ~default:ty)
       ?hint
   in
-  if Scope.unifies t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc
-  then expr
+  if Scope.subtypes t scope ~lower:expr.ty ~upper:ty ~loc:expr.loc
+  then if Type.is_error expr.ty then expr else { expr with ty }
   else { desc = Error [ expr ]; ty = Type.error; loc = expr.loc }
 
 (* Returns the binder each entry that may be captured is captured by: entries

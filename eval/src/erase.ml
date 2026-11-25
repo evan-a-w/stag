@@ -150,6 +150,7 @@ let expr (expr : Typed.Expr.t) =
     | Free name -> Ok (Path (Syntax.Path.of_string name))
     | Prim prim -> Ok (resolved (Prim.canonical_name prim))
     | Intrinsic Ptr_make -> Ok (resolved (Prelude_path.canonical "Ptr.make"))
+    | Intrinsic Box_make -> Ok (resolved (Prelude_path.canonical "Box.make"))
     | Intrinsic Assume_global ->
       Ok (resolved (Prelude_path.canonical "Unsafe.assume_global"))
     | Intrinsic intrinsic ->

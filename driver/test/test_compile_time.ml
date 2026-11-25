@@ -8,8 +8,8 @@ let%expect_test "a generator used by a toplevel splice" =
   run
     {|
 type nat = Z | S of ptr[nat]
-type list['a] = Nil | Cons of ptr['a * list['a]]
-let power n c = match n with Z -> .<Nil>. | S * m -> .<Cons (Ptr.make ((.~c, .~(power m c))))>.
+type list['a] = Nil | Cons of box['a * list['a]]
+let power n c = match n with Z -> .<Nil>. | S * m -> .<Cons (Box.make ((.~c, .~(power m c))))>.
 let three = S (Ptr.make (S (Ptr.make (S (Ptr.make Z)))))
 let cube x = .~(power three .<x>.)
 let used = cube 7
@@ -17,7 +17,7 @@ let used = cube 7
   [%expect
     {|
     type nat = Z | S of ptr[nat]
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
     val three : nat
     val cube : 'a -> list['a]

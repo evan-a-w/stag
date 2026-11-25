@@ -3,7 +3,7 @@ open Syntax
 
 let cons = Decl_path.Resolved (Prelude_path.canonical "Cons")
 let nil = Decl_path.Resolved (Prelude_path.canonical "Nil")
-let ptr_make = Decl_path.Resolved (Prelude_path.canonical "Ptr.make")
+let box_make = Decl_path.Resolved (Prelude_path.canonical "Box.make")
 
 module Node = struct
   type 'a t =
@@ -21,7 +21,7 @@ module Node = struct
           | _ -> None)
     ; pair =
         (fun loc x xs ->
-          let make = Located.create ~loc (Expr.Var (ptr_make, Annot.none)) in
+          let make = Located.create ~loc (Expr.Var (box_make, Annot.none)) in
           Located.create
             ~loc
             (Expr.App (make, Located.create ~loc (Expr.Tuple [ x; xs ]))))
@@ -32,7 +32,7 @@ module Node = struct
                   ({ txt = Var (name, annot); _ }, { txt = Tuple [ x; xs ]; _ })
             ; _
             }
-            when Decl_path.equal name ptr_make && Annot.is_none annot ->
+            when Decl_path.equal name box_make && Annot.is_none annot ->
             Some (x, xs)
           | _ -> None)
     }

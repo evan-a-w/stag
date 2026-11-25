@@ -432,13 +432,13 @@ let%expect_test "learn_stag.md" =
       val words : string
       val sexp : string
     end
-    Doc.xs = Cons (Ptr.make (1, Cons (Ptr.make (2, Cons (Ptr.make (3, Nil))))))
+    Doc.xs = Cons (Box.make (1, Cons (Box.make (2, Cons (Box.make (3, Nil))))))
     Doc.rec_len = <fun>
     Doc.first = <fun>
     Doc.hd = Some 1
-    Doc.doubled = Cons (Ptr.make (2, Cons (Ptr.make (4, Cons (Ptr.make (6, Nil))))))
+    Doc.doubled = Cons (Box.make (2, Cons (Box.make (4, Cons (Box.make (6, Nil))))))
     Doc.total = 6
-    Doc.evens = Cons (Ptr.make (2, Cons (Ptr.make (4, Nil))))
+    Doc.evens = Cons (Box.make (2, Cons (Box.make (4, Nil))))
     Doc.found = None
     Doc.default = 0
     Doc.parsed = Some 12
@@ -655,7 +655,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 523, characters 22-42:
     523 | let use (x @ local) = apply (fun y -> 0) x
                                 ^^^^^^^^^^^^^^^^^^^^
-    Error: This is regional, because it is annotated local (at doc.stag:523:13-18), then x is passed to the function (at doc.stag:523:22-42), then x is used (at doc.stag:523:41-42), then it is passed to a function (at doc.stag:523:22-42), but must be at most global, because its type is written without a mode (at doc.stag:522:15-21), then the function types are unified, then it is passed to a function (at doc.stag:522:34-37), then x is used (at doc.stag:522:36-37), then x is passed to the function (at doc.stag:522:34-37), then the function types are unified
+    Error: This is regional, because it is annotated local (at doc.stag:523:13-18), then x is passed to the function (at doc.stag:523:22-42), then x is used (at doc.stag:523:41-42), then it is passed to a function (at doc.stag:523:22-42), but must be at most global, because its type is written without a mode (at doc.stag:522:15-21), then a function is used at a type with other modes, then it is passed to a function (at doc.stag:522:34-37), then x is used (at doc.stag:522:36-37), then x is passed to the function (at doc.stag:522:34-37), then a function is used at a type with other modes
     === learn_stag.md:527
     module Doc : sig
       val apply : (string -> int) -> string -> int
@@ -667,7 +667,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 534, characters 10-34:
     534 | let bad = capped (Int.to_string 3)
                     ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at doc.stag:534:17-34), then it is passed to a function (at doc.stag:534:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:533:37-51), then the function types are unified, then the function returns it (at doc.stag:533:63-64), then x is used (at doc.stag:533:63-64), then x is passed to the function (at doc.stag:533:54-64), then the function types are unified
+    Error: This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at doc.stag:534:17-34), then it is passed to a function (at doc.stag:534:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:533:37-51), then the function types are unified, then the function returns it (at doc.stag:533:63-64), then x is used (at doc.stag:533:63-64), then x is passed to the function (at doc.stag:533:54-64), then the function types are unified, then a function is used at a type with other modes
     === learn_stag.md:538
     File "doc.stag", line 545, characters 20-25:
     545 | let bad = cell.* <- exact

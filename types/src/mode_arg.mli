@@ -36,3 +36,11 @@ val same : t -> t -> bool
 val known : t -> Mode.Const.t option
 
 val sexp_of_t : t -> Sexp.t
+
+(** [lower <= upper], on stage and provenance: for a parameter that is
+    covariant. *)
+val sub
+  :  Mode.Id_source.t
+  -> lower:t
+  -> upper:t
+  -> (unit, Mode.Error.t) Result.t

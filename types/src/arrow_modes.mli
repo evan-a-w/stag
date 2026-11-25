@@ -50,3 +50,12 @@ val side_var : Mode.Id_source.t -> rank:int -> Side.t -> Mode.Var.t
 
 (** Whether the modes are the same: equal fixed modes, or the same variables. *)
 val same : t -> t -> bool
+
+(** Constrains the arrow of modes [lower] to be usable as one of modes [upper]:
+    its argument takes at least what [upper]'s does, its result is at most
+    [upper]'s. [curry] is equated. *)
+val sub
+  :  Mode.Id_source.t
+  -> lower:t
+  -> upper:t
+  -> (unit, Mode.Error.t) Result.t

@@ -578,7 +578,7 @@ let%expect_test "declarations" =
     let f x y = e
     let g : int = 1
     type nat = Z | S of nat
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type pair = P of ('a * 'b)
     type with_x[{..'r}] = {`x : int; ..'r}
     type point = {x : int; y : int}
@@ -605,7 +605,7 @@ let%expect_test "declarations" =
        (kind
         (Variant
          ((Nil ())
-          (Cons ((Con ptr ((Ty (Tuple ((Var a) (Con list ((Ty (Var a))))))))))))))))
+          (Cons ((Con box ((Ty (Tuple ((Var a) (Con list ((Ty (Var a))))))))))))))))
      (Type
       ((name pair) (params ())
        (kind (Variant ((P ((Tuple ((Var a) (Var b))))))))))
@@ -746,18 +746,18 @@ let%expect_test "locations" =
   show_locs
     Program.sexp_of_t
     Parser.program
-    "type list['a] = Nil | Cons of ptr['a * list['a]]\n\
+    "type list['a] = Nil | Cons of box['a * list['a]]\n\
      type t[{..'r}] = {x : int}\n\
      module M = struct let x = 1 end";
   [%expect
     {|
-    Type "type list['a] = Nil | Cons of ptr['a * list['a]]"
+    Type "type list['a] = Nil | Cons of box['a * list['a]]"
       list "list"
       Ty "'a"
       Nil "Nil"
       Cons "Cons"
-      Con "ptr['a * list['a]]"
-        ptr "ptr"
+      Con "box['a * list['a]]"
+        box "box"
         Tuple "'a * list['a]"
           Var "'a"
           Con "list['a]"
@@ -1279,11 +1279,11 @@ let%expect_test "mutable variables" =
      ((Any (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))))
     (Fun ((u ())) (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))
     (Construct <Cons>
-     ((App (Var <Ptr.make> ())
+     ((App (Var <Box.make> ())
        (Tuple
         ((Assign x (Lit (Int 2)))
          (Construct <Cons>
-          ((App (Var <Ptr.make> ())
+          ((App (Var <Box.make> ())
             (Tuple
              ((Assign y (Tuple ((Lit (Int 3)) (Lit (Int 4)))))
               (Construct <Nil> ())))))))))))
