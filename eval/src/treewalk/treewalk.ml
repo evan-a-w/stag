@@ -175,6 +175,9 @@ let captures t ~ident ~args ~body =
       def ident;
       go ~depth body;
       go ~depth in_
+    | Seq (first, second) ->
+      go ~depth first;
+      go ~depth second
     | Fun { args; annots = _; body } ->
       List.iter args ~f:def;
       go ~depth body
@@ -300,6 +303,10 @@ let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
       let%bindl_fun body = same let_.body in
       let%mapl_fun in_ = same let_.in_ in
       Typed.Expr.Desc.Let_mut { let_ with body; in_ }
+    | Seq (first, second) ->
+      let%bindl_fun first = same first in
+      let%mapl_fun second = same second in
+      Typed.Expr.Desc.Seq (first, second)
     | Assign (var_ref, value) ->
       let%mapl_fun value = same value in
       Typed.Expr.Desc.Assign (var_ref, value)
@@ -843,6 +850,11 @@ and step t ~env ~level (expr : Typed.Expr.t) : Next.t =
     (match bind_let t ~env ~level ~ident ~args ~body with
      | Error { global = error } -> exclave_ Failed error
      | Ok { global = () } -> exclave_ Eval { env; level; expr = in_ })
+  | Seq (first, second) ->
+    (match eval t ~env ~level first with
+     | Error { global = error } -> exclave_ Failed error
+     | Ok { global = (_ : Value.t) } ->
+       exclave_ Eval { env; level; expr = second })
   | Let_mut { ident; body; in_; annot = _ } ->
     (match eval t ~env ~level body with
      | Error { global = error } -> exclave_ Failed error
@@ -904,6 +916,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
          [%message "Assigned a non-variable" (var_ref : Typed.Var_ref.t)])
   | App _
   | Let _
+  | Seq _
   | Let_mut _
   | Annotated _
   | Marked _

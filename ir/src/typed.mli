@@ -186,6 +186,7 @@ module Expr : sig
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
           }
+      | Seq of 'e * 'e (** [a; b]: [a]'s value, of any type, is dropped. *)
       | Let_mut of
           { ident : Ident.t
           ; annot : Syntax.Type_expr.t option

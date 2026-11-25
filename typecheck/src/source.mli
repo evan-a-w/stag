@@ -111,6 +111,7 @@ module Expr : sig
           ; body : t
           ; in_ : t
           }
+      | Seq of t * t
       | Let_mut of
           { binder : Binder.t
           ; annot : Syntax.Type_expr.t option

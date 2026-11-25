@@ -275,7 +275,7 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
       (Store
        (Deref
         (App
-         (Var (Persistent (Toplevel prelude.Ptr.make/16)) : "int -> ptr[int]")
+         (Var (Persistent (Toplevel prelude.Ptr.make/15)) : "int -> ptr[int]")
          (Lit (Int 1) : int) : ptr[int])
         : int)
        (Lit (Int 2) : int) : unit)))
@@ -285,7 +285,7 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
       (Store
        (Deref
         (App
-         (Var (Persistent (Toplevel prelude.Ptr.make/16)) : "int -> ptr[int]")
+         (Var (Persistent (Toplevel prelude.Ptr.make/15)) : "int -> ptr[int]")
          (Lit (Int 1) : int) : ptr[int])
         : int)
        (Lit (Int 2) : int) : unit)))

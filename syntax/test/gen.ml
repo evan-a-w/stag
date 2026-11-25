@@ -35,6 +35,9 @@ let uident t = pick t [ "A"; "B"; "Some_constructor"; "A'"; "B_" ]
 let label t = loc (pick t [ "a"; "b"; "long_label"; "A"; "Some_tag"; "_x'" ])
 let name t = loc (lident t)
 
+(* [_] too, so that [let _ = a in b] is checked to stay apart from [a; b]. *)
+let binder t = if int t 4 = 0 then loc "_" else name t
+
 let path t ~last =
   Path.of_list_exn
     (List.init (int t 3 / 2) ~f:(fun _ -> pick t [ "M"; "N" ]) @ [ last t ])
@@ -254,7 +257,7 @@ and pattern t : Pattern.t =
          ; (fun t -> Exception (pattern t))
          ])
 
-and binding t : Binding.t = name t, annot t
+and binding t : Binding.t = binder t, annot t
 
 and expr t : Expr.t =
   loc
@@ -279,8 +282,9 @@ and expr t : Expr.t =
          [ (fun t -> App (expr t, expr t))
          ; (fun t -> App (expr t, expr t))
          ; (fun t ->
-             Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t, expr t))
-         ; (fun t -> Let (loc "_", [], Annot.none, expr t, expr t))
+             Let
+               (binder t, list t ~min:0 ~max:2 binding, annot t, expr t, expr t))
+         ; (fun t -> Seq (expr t, expr t))
          ; (fun t -> Let_mut (name t, annot t, expr t, expr t))
          ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
          ; (fun t -> Store (loc (Expr.Deref (expr t)), expr t))

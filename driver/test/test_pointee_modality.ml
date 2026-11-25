@@ -343,9 +343,9 @@ let use_poly = .~poly (Ptr.make "a") "b"
     (code
      (Code
       (App
-       (Fun (args (p/20))
+       (Fun (args (p/19))
         (annots
-         ((p/20
+         ((p/19
            ((ty
              ((Con (<ptr> @ t.stag:4:24-27)
                ((Ty
@@ -355,10 +355,10 @@ let use_poly = .~poly (Ptr.make "a") "b"
                   @ t.stag:4:28-46))))
               @ t.stag:4:24-47))))))
         (body
-         (Deref (Var (Bound (Local p/20)) : "ptr[string @@ external]") : string))
+         (Deref (Var (Bound (Local p/19)) : "ptr[string @@ external]") : string))
         : "ptr[string @@ external] -> string @ external")
        (App
-        (Var (Persistent (Toplevel prelude.Ptr.make/21)) :
+        (Var (Persistent (Toplevel prelude.Ptr.make/20)) :
          "string @ external -> ptr[string @@ external]")
         (App (Var (Persistent (Toplevel ext/4)) : "string -> string @ external")
          (Lit (String a) : string) : string)
@@ -366,9 +366,9 @@ let use_poly = .~poly (Ptr.make "a") "b"
        : string)))
     (poly
      (Code
-      (Fun (args (p/23 v/24))
+      (Fun (args (p/22 v/23))
        (annots
-        ((p/23
+        ((p/22
           ((ty
             ((Con (<ptr> @ t.stag:6:23-26)
               ((Ty
@@ -377,23 +377,21 @@ let use_poly = .~poly (Ptr.make "a") "b"
                   ((Var m) @ t.stag:6:37-39))
                  @ t.stag:6:27-39))))
              @ t.stag:6:23-40))))
-         (v/24 ((ty ((Con (<string> @ t.stag:6:47-53) ()) @ t.stag:6:47-53))))))
+         (v/23 ((ty ((Con (<string> @ t.stag:6:47-53) ()) @ t.stag:6:47-53))))))
        (body
-        (Let (ident _/25) (args ()) (generalized false)
-         (body
-          (Store (Deref (Var (Bound (Local p/23)) : ptr[string]) : string)
-           (Var (Bound (Local v/24)) : string) : unit))
-         (in_ (Deref (Var (Bound (Local p/23)) : ptr[string]) : string)) :
-         string))
+        (Seq
+         (Store (Deref (Var (Bound (Local p/22)) : ptr[string]) : string)
+          (Var (Bound (Local v/23)) : string) : unit)
+         (Deref (Var (Bound (Local p/22)) : ptr[string]) : string) : string))
        : "ptr[string] -> string -> string")))
     -- evaluated
     (ext <fun>)
     (code
      (Code
       (App
-       (Fun (args (p/20))
+       (Fun (args (p/19))
         (annots
-         ((p/20
+         ((p/19
            ((ty
              ((Con (<ptr> @ t.stag:4:24-27)
                ((Ty
@@ -403,10 +401,10 @@ let use_poly = .~poly (Ptr.make "a") "b"
                   @ t.stag:4:28-46))))
               @ t.stag:4:24-47))))))
         (body
-         (Deref (Var (Bound (Local p/20)) : "ptr[string @@ external]") : string))
+         (Deref (Var (Bound (Local p/19)) : "ptr[string @@ external]") : string))
         : "ptr[string @@ external] -> string @ external")
        (App
-        (Var (Persistent (Toplevel prelude.Ptr.make/21)) :
+        (Var (Persistent (Toplevel prelude.Ptr.make/20)) :
          "string @ external -> ptr[string @@ external]")
         (App (Var (Persistent (Toplevel ext/4)) : "string -> string @ external")
          (Lit (String a) : string) : string)
@@ -415,9 +413,9 @@ let use_poly = .~poly (Ptr.make "a") "b"
     (spliced (String a))
     (poly
      (Code
-      (Fun (args (p/23 v/24))
+      (Fun (args (p/22 v/23))
        (annots
-        ((p/23
+        ((p/22
           ((ty
             ((Con (<ptr> @ t.stag:6:23-26)
               ((Ty
@@ -426,14 +424,12 @@ let use_poly = .~poly (Ptr.make "a") "b"
                   ((Var m) @ t.stag:6:37-39))
                  @ t.stag:6:27-39))))
              @ t.stag:6:23-40))))
-         (v/24 ((ty ((Con (<string> @ t.stag:6:47-53) ()) @ t.stag:6:47-53))))))
+         (v/23 ((ty ((Con (<string> @ t.stag:6:47-53) ()) @ t.stag:6:47-53))))))
        (body
-        (Let (ident _/25) (args ()) (generalized false)
-         (body
-          (Store (Deref (Var (Bound (Local p/23)) : ptr[string]) : string)
-           (Var (Bound (Local v/24)) : string) : unit))
-         (in_ (Deref (Var (Bound (Local p/23)) : ptr[string]) : string)) :
-         string))
+        (Seq
+         (Store (Deref (Var (Bound (Local p/22)) : ptr[string]) : string)
+          (Var (Bound (Local v/23)) : string) : unit)
+         (Deref (Var (Bound (Local p/22)) : ptr[string]) : string) : string))
        : "ptr[string] -> string -> string")))
     (use_poly (String b))
     |}]

@@ -1149,3 +1149,44 @@ let%expect_test "values" =
       [%expect {| 6 |}]
     |xxx}]
 ;;
+
+let%expect_test "erased sequences stay sequences, and erased [let _] stays a \
+                 let"
+  =
+  test
+    {|
+let p = print_endline
+include%inline .~(value "z" (Stag.Code.erase .< p "e"; p "f" >.))
+end%inline
+include%inline .~(value "w" (Stag.Code.erase .< let _ = p "g" in p "h" >.))
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 17, characters 0-65:
+    17 | include%inline .~(value "z" (Stag.Code.erase .< p "e"; p "f" >.))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 19, characters 0-75:
+    19 | include%inline .~(value "w" (Stag.Code.erase .< let _ = p "g" in p "h" >.))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- output ---
+    e
+    f
+    g
+    h
+    --- a.stag corrected ---
+    let p = print_endline
+    include%inline .~(value "z" (Stag.Code.erase .< p "e"; p "f" >.))
+      let z =
+        p "e";
+        p "f"
+    end%inline
+    include%inline .~(value "w" (Stag.Code.erase .< let _ = p "g" in p "h" >.))
+      let w =
+        let _ = p "g" in
+        p "h"
+    end%inline
+    |}]
+;;

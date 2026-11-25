@@ -656,6 +656,7 @@ module Of_value = struct
              ( arg 0 (fun value -> (decl_path Lower value ~loc).txt)
              , arg 1 (annot ~loc) )
          | "App", 2 -> App (arg 0 (expr ~loc), arg 1 (expr ~loc))
+         | "Seq", 2 -> Seq (arg 0 (expr ~loc), arg 1 (expr ~loc))
          | "Let", 5 ->
            Let
              ( arg 0 (name Binder ~loc)

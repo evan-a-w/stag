@@ -116,11 +116,11 @@ let hygienic = hygiene 1
         (Quote (Lit (Int 1) : int) : "<int>{x?'_a : immut int; ..'_b}") :
         "<int -> int>{}"))
       (expansion
-       (Fun (args (x/22))
+       (Fun (args (x/21))
         (body
          (App
           (App (Var (Prim Int.add) : "int -> int -> int")
-           (Var (Bound (Local x/22)) : int) : "int -> int")
+           (Var (Bound (Local x/21)) : int) : "int -> int")
           (Lit (Int 1) : int) : int))
         : "int -> int"))
       : "int -> int" (where "..'_b <= {}")))

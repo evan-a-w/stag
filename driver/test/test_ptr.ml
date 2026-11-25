@@ -29,7 +29,7 @@ let quoted_value = .~quoted
     (quoted
      (Code
       (Deref
-       (App (Var (Persistent (Toplevel prelude.Ptr.make/21)) : "int -> ptr[int]")
+       (App (Var (Persistent (Toplevel prelude.Ptr.make/20)) : "int -> ptr[int]")
         (Lit (Int 3) : int) : ptr[int])
        : int)))
     -- evaluated
@@ -42,7 +42,7 @@ let quoted_value = .~quoted
     (quoted
      (Code
       (Deref
-       (App (Var (Persistent (Toplevel prelude.Ptr.make/21)) : "int -> ptr[int]")
+       (App (Var (Persistent (Toplevel prelude.Ptr.make/20)) : "int -> ptr[int]")
         (Lit (Int 3) : int) : ptr[int])
        : int)))
     (quoted_value 3)
@@ -93,7 +93,7 @@ let bad : int -> int = Ptr.make
     {|
     ((Unification_error
       (Type_mismatch (TCon int ())
-       (TCon ptr ((ATy (TVar (Link (TCon int ())))) (AMode (Var 74))))
+       (TCon ptr ((ATy (TVar (Link (TCon int ())))) (AMode (Var 72))))
        (Base_types_not_equal int ptr)))
      @ t.stag:2:23-31)
     |}]
@@ -198,7 +198,7 @@ let pointee : ptr[string] = Ptr.make (add 1 true)
     {|
     ((Unification_error
       (Type_mismatch (TCon string ())
-       (TCon ptr ((ATy (TVar (Link (TCon int ())))) (AMode (Var 75))))
+       (TCon ptr ((ATy (TVar (Link (TCon int ())))) (AMode (Var 73))))
        (Base_types_not_equal string ptr)))
      @ t.stag:2:21-42)
     ((Unification_error

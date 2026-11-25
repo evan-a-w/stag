@@ -105,6 +105,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           , Annot.map t ~f:type_expr
           , expr' (bind locals (n.txt :: binding_names bs)) value
           , expr' (bind locals [ n.txt ]) body )
+      | Seq (a, b) -> Seq (expr a, expr b)
       | Let_mut (n, t, value, body) ->
         Let_mut
           ( n

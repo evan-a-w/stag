@@ -258,6 +258,7 @@ module Stag = struct
       | Var of Path.t[Value_ref.t] * Annot.t
       | App of ptr[t * t]
       | Let of ptr[string * list[Binding.t] * Annot.t * t * t]
+      | Seq of ptr[t * t]
       | Let_mut of ptr[string * Annot.t * t * t]
       | Assign of ptr[Path.t[Value_ref.t] * t]
       | Store of ptr[t * t]

@@ -211,7 +211,7 @@ let%expect_test "a constructor's arguments, or its one tuple argument" =
     (Construct C ((App (Tuple ((Var a ()) (Var b ()))) (Var x ()))))
     (Construct C ((Let x () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ()))))))
     (Construct C ((Let x () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ()))))))
-    (Construct C ((Let _ () () (Var a ()) (Tuple ((Var b ()) (Var c ()))))))
+    (Construct C ((Seq (Var a ()) (Tuple ((Var b ()) (Var c ()))))))
     (Construct C ((Construct D ((Var a ()) (Var b ())))))
     (Construct C ((Construct D ((Var a ()) (Var b ())))))
     (Construct C ((Construct D ((Tuple ((Var a ()) (Var b ())))))))
@@ -249,22 +249,21 @@ let%expect_test "tuples, sequences, let and match" =
     (Tuple
      ((App (Var f ()) (Var a ())) (Construct C ((Var b ())))
       (Poly_variant A ((Var c ())))))
-    (Let _ () () (Var a ()) (Let _ () () (Var b ()) (Var c ())))
-    (Let _ () () (Tuple ((Var a ()) (Var b ()))) (Var c ()))
+    (Seq (Var a ()) (Seq (Var b ()) (Var c ())))
+    (Seq (Tuple ((Var a ()) (Var b ()))) (Var c ()))
     (Let x () () (Lit (Int 1)) (Var x ()))
     (Let f ((x ()) (y ((ty (Con int ())))) (_ ()) (_ ((ty (Con bool ())))))
      ((ty (Con t ()))) (Var e ()) (Var f ()))
     (Let _ () () (Var a ()) (Var b ()))
-    (Let x () () (Lit (Int 1)) (Let _ () () (Var a ()) (Var b ())))
-    (Let _ () () (Var a ())
-     (Let x () () (Lit (Int 1)) (Let _ () () (Var b ()) (Var c ()))))
+    (Let x () () (Lit (Int 1)) (Seq (Var a ()) (Var b ())))
+    (Seq (Var a ()) (Let x () () (Lit (Int 1)) (Seq (Var b ()) (Var c ()))))
     (Let x () () (Let y () () (Lit (Int 1)) (Var y ())) (Var x ()))
     (Tuple
      ((Var a ()) (Let x () () (Lit (Int 1)) (Tuple ((Var x ()) (Var y ()))))))
     (Match (Var x ())
      (((Construct A ()) (Lit (Int 1))) ((Construct B ((Var y))) (Lit (Int 2)))))
     (Match (Var x ())
-     (((Construct A ()) (Let _ () () (Var a ()) (Var b ())))
+     (((Construct A ()) (Seq (Var a ()) (Var b ())))
       ((Construct B ()) (Var c ()))))
     (Match (Var x ())
      (((Construct A ()) (Match (Var y ()) (((Construct B ()) (Lit (Int 1))))))
@@ -303,7 +302,7 @@ let%expect_test "anonymous functions" =
     (Fun ((x ())) (Var x ()))
     (Fun ((x ()) (y ((ty (Con int ())))) (_ ()) (_ ((ty (Con bool ())))))
      (App (App (Var f ()) (Var x ())) (Var y ())))
-    (Fun ((x ())) (Let _ () () (Var a ()) (Var b ())))
+    (Fun ((x ())) (Seq (Var a ()) (Var b ())))
     (Fun ((x ())) (Fun ((y ())) (Tuple ((Var x ()) (Var y ())))))
     (App (App (Var f ()) (Fun ((x ())) (Var x ()))) (Var y ()))
     (Tuple ((Var a ()) (Fun ((x ())) (Tuple ((Var x ()) (Var y ()))))))
@@ -642,8 +641,7 @@ let%expect_test "locations" =
         Field "x.M.a"
           Var "x"
           M.a "M.a"
-      Let "(a, b); C (c, d)"
-        _ ";"
+      Seq "(a, b); C (c, d)"
         Tuple "(a, b)"
           Var "a"
           Var "b"
@@ -891,8 +889,8 @@ let%expect_test {|q|} = ()
     {|
     ((Expect_test (name add)
       (body
-       (Let _ () () (App (Var print_int ()) (Lit (Int 1)))
-        (Let _ () () (Expect " 1 ") (Let _ () () (Expect "") (Expect s))))))
+       (Seq (App (Var print_int ()) (Lit (Int 1)))
+        (Seq (Expect " 1 ") (Seq (Expect "") (Expect s))))))
      (Expect_test (name q) (body (Lit Unit))))
     t.stag:1:16-20: expected the name of the test, a string, found `name`
     t.stag:1:20-21: expected `=`, found `(`
@@ -962,15 +960,14 @@ let%expect_test "let and match in braces end at `;`" =
          ((Construct B ()) (Let b () () (Lit (Int 2)) (Var b ()))))))
       (y (Lit (Int 2)))))
     (Record
-     ((x (Let a () () (Lit (Int 1)) (Let _ () () (Var a ()) (Var b ()))))
+     ((x (Let a () () (Lit (Int 1)) (Seq (Var a ()) (Var b ()))))
       (y (Lit (Int 2)))))
     (Record
      ((x (Let a () () (Lit (Int 1)) (Let b () () (Var a ()) (Var b ()))))
       (y (Lit (Int 2)))))
-    (Let a () () (Record ((x (Lit (Int 1)))))
-     (Let _ () () (Var a ()) (Var b ())))
+    (Let a () () (Record ((x (Lit (Int 1))))) (Seq (Var a ()) (Var b ())))
     (Match (Var a ())
-     (((Construct A ()) (Let _ () () (Record ((x (Lit (Int 1))))) (Var b ())))
+     (((Construct A ()) (Seq (Record ((x (Lit (Int 1))))) (Var b ())))
       ((Construct B ()) (Var c ()))))
     |}]
 ;;
@@ -1072,7 +1069,7 @@ let%expect_test "types as values" =
     t.stag:1:2-6: expected end of file, found `type`
     (Construct C ((Type (Con t ()))))
     (Tuple ((Type (Con t ())) (Type (Con u ()))))
-    (Let _ () () (Type (Con t ())) (Var x ()))
+    (Seq (Type (Con t ())) (Var x ()))
     t.stag:1:9-11: expected end of file, found `->`
     t.stag:1:4-4: expected a type, found end of file
     t.stag:1:10-13: type arguments are written after the name, in brackets: `list[int]`
@@ -1261,15 +1258,14 @@ let%expect_test "mutable variables" =
   [%expect
     {|
     (Let_mut x () (Lit (Int 1))
-     (Let _ () () (Assign x (App (App (Var add ()) (Var x ())) (Lit (Int 1))))
+     (Seq (Assign x (App (App (Var add ()) (Var x ())) (Lit (Int 1))))
       (Var x ())))
     (Let_mut x ((ty (Con int ()))) (Lit (Int 1)) (Var x ()))
     (Assign M.x (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
     (Assign x (Assign y (Lit (Int 1))))
     (App (Var f ()) (Assign x (Lit (Int 1))))
-    (Match (Var x ())
-     ((Any (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))))
-    (Fun ((u ())) (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))
+    (Match (Var x ()) ((Any (Seq (Assign x (Lit (Int 1))) (Lit (Int 2))))))
+    (Fun ((u ())) (Seq (Assign x (Lit (Int 1))) (Lit (Int 2))))
     (Construct <Cons>
      ((App (Var <Ptr.make> ())
        (Tuple

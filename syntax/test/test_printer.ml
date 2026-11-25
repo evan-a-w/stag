@@ -277,7 +277,7 @@ let%expect_test "minimal parentheses" =
     (-1, -2)
     Some (-1)
     f [%expect] [%expect {|a|}]
-    a;
+    let _ = a in
     b
     let _ x = a in
     b

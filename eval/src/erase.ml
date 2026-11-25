@@ -189,6 +189,10 @@ let expr (expr : Typed.Expr.t) =
       let%bind target = go names target in
       let%bind value = go names value in
       node (Store (target, value))
+    | Seq (first, second) ->
+      let%bind first = go names first in
+      let%bind second = go names second in
+      node (Seq (first, second))
     | Let_mut { ident; annot; mode; body; in_ } ->
       let%bind body = go names body in
       let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in

@@ -84,6 +84,9 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let a = annot a in
         let body = sub body in
         Let (n, bs, a, body, sub in_)
+      | Seq (a, b) ->
+        let a = sub a in
+        Seq (a, sub b)
       | Let_mut (n, a, body, in_) ->
         let a = annot a in
         let body = sub body in

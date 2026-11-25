@@ -1520,6 +1520,8 @@ let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f : Typed.Ident.Set.t =
       else Typed.Ident.Set.empty
     in
     Set.remove (Set.union called body) ident
+  | Seq (first, second) ->
+    Set.union (go first ~depth ~built:true) (go second ~depth ~built)
   | Let_mut { body; in_; _ } ->
     Set.union (go body ~depth ~built:false) (go in_ ~depth ~built)
   | Match { scrutinee; cases; exception_cases } ->
@@ -2542,6 +2544,21 @@ and expr_type
          ; generalized
          })
       in_.ty
+  | Seq (first, second) ->
+    let first, (_ : Mode.Var.t) =
+      Mode_rules.evaluate modes at ~loc ~why:"it is sequenced" (fun first_at ->
+        check_expr t scope ~at:first_at ~expr:first ~ty:(Scope.fresh_ty t scope))
+    in
+    let second =
+      expr_type
+        t
+        scope
+        ~at:(Mode_rules.Expected.whole at)
+        ~expr:second
+        ?expected
+        ~hint
+    in
+    node (Seq (first, second)) second.ty
   | Let_mut { binder; annot; mode = held_annot; body; in_ } ->
     let ty, annot =
       match annot with

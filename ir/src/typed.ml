@@ -246,6 +246,7 @@ module Expr = struct
           ; body : 'e
           ; in_ : 'e
           }
+      | Seq of 'e * 'e
       | Let_mut of
           { ident : Ident.t
           ; annot : Syntax.Type_expr.t option [@sexp.option]
@@ -319,6 +320,7 @@ module Expr = struct
     | App (a, b)
     | Let { body = a; in_ = b; _ }
     | Let_mut { body = a; in_ = b; _ }
+    | Seq (a, b)
     | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]

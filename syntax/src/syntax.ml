@@ -206,6 +206,7 @@ module Defs = struct
     | Var of Decl_path.t * annot
     | App of expr * expr
     | Let of Name.t * binding list * annot * expr * expr
+    | Seq of expr * expr (** [e1; e2] *)
     | Let_mut of Name.t * annot * expr * expr
     (** [let mut x = e in body]: not recursive. *)
     | Assign of Decl_path.t Located.t * expr (** [x <- e] *)
@@ -435,6 +436,7 @@ module Expr = struct
     | Var of Decl_path.t * Annot.t
     | App of t * t
     | Let of Name.t * Binding.t list * Annot.t * t * t
+    | Seq of t * t
     | Let_mut of Name.t * Annot.t * t * t
     | Assign of Decl_path.t Located.t * t
     | Store of t * t

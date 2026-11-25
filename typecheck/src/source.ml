@@ -171,6 +171,7 @@ module Expr = struct
           ; body : t
           ; in_ : t
           }
+      | Seq of t * t
       | Let_mut of
           { binder : Binder.t
           ; annot : Syntax.Type_expr.t option
@@ -231,6 +232,7 @@ module Expr = struct
         ; body = sub equal
         ; in_ = sub in_
         }
+    | Seq (first, second) -> Seq (sub first, sub second)
     | Let_mut (name, annot, equal, in_) ->
       Let_mut
         { binder = Name name
@@ -323,6 +325,7 @@ module Expr = struct
     | Let_mut { ident; annot; mode; body; in_ } ->
       Let_mut
         { binder = Ident ident; annot; mode; body = sub body; in_ = sub in_ }
+    | Seq (first, second) -> Seq (sub first, sub second)
     | Assign (var_ref, value) -> Assign (Ref var_ref, sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun { args; annots; body } ->

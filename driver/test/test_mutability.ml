@@ -185,32 +185,30 @@ let at_compile_time =
     -- evaluated at compile time
     (in_code
      (Code
-      (Let_mut (ident x/16) (body (Lit (Int 1) : int))
+      (Let_mut (ident x/15) (body (Lit (Int 1) : int))
        (in_
-        (Let (ident _/17) (args ()) (generalized false)
-         (body
-          (Assign (Bound (Local x/16))
-           (App
-            (App (Var (Prim Int.add) : "int -> int -> int")
-             (Var (Bound (Local x/16)) : int) : "int -> int")
-            (Lit (Int 1) : int) : int)
-           : unit))
-         (in_ (Var (Bound (Local x/16)) : int)) : int))
+        (Seq
+         (Assign (Bound (Local x/15))
+          (App
+           (App (Var (Prim Int.add) : "int -> int -> int")
+            (Var (Bound (Local x/15)) : int) : "int -> int")
+           (Lit (Int 1) : int) : int)
+          : unit)
+         (Var (Bound (Local x/15)) : int) : int))
        : int)))
     -- evaluated
     (in_code
      (Code
-      (Let_mut (ident x/16) (body (Lit (Int 1) : int))
+      (Let_mut (ident x/15) (body (Lit (Int 1) : int))
        (in_
-        (Let (ident _/17) (args ()) (generalized false)
-         (body
-          (Assign (Bound (Local x/16))
-           (App
-            (App (Var (Prim Int.add) : "int -> int -> int")
-             (Var (Bound (Local x/16)) : int) : "int -> int")
-            (Lit (Int 1) : int) : int)
-           : unit))
-         (in_ (Var (Bound (Local x/16)) : int)) : int))
+        (Seq
+         (Assign (Bound (Local x/15))
+          (App
+           (App (Var (Prim Int.add) : "int -> int -> int")
+            (Var (Bound (Local x/15)) : int) : "int -> int")
+           (Lit (Int 1) : int) : int)
+          : unit)
+         (Var (Bound (Local x/15)) : int) : int))
        : int)))
     (ran 2)
     (at_compile_time true)
@@ -295,14 +293,14 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
     (ok_code <fun>)
     (not_mentioned
      (Code
+      (App (Var (Persistent (Local g/34)) : "unit -> int") (Lit Unit : unit) :
+       int)
+      ((g/34 <fun>))))
+    (only_data
+     (Code
       (App (Var (Persistent (Local g/35)) : "unit -> int") (Lit Unit : unit) :
        int)
       ((g/35 <fun>))))
-    (only_data
-     (Code
-      (App (Var (Persistent (Local g/36)) : "unit -> int") (Lit Unit : unit) :
-       int)
-      ((g/36 <fun>))))
     (at_runtime 0)
     |}]
 ;;
@@ -598,20 +596,18 @@ let ran_assigned = .~assigned
     -- evaluated at compile time
     (read
      (Code
-      (Let_mut (ident x/16) (body (Lit (Int 3) : int))
+      (Let_mut (ident x/15) (body (Lit (Int 3) : int))
        (in_
-        (Let (ident _/17) (args ()) (generalized false)
-         (body (Assign (Bound (Local x/16)) (Lit (Int 4) : int) : unit))
-         (in_ (Var (Bound (Local x/16)) : int)) : int))
+        (Seq (Assign (Bound (Local x/15)) (Lit (Int 4) : int) : unit)
+         (Var (Bound (Local x/15)) : int) : int))
        : int)))
     -- evaluated
     (read
      (Code
-      (Let_mut (ident x/16) (body (Lit (Int 3) : int))
+      (Let_mut (ident x/15) (body (Lit (Int 3) : int))
        (in_
-        (Let (ident _/17) (args ()) (generalized false)
-         (body (Assign (Bound (Local x/16)) (Lit (Int 4) : int) : unit))
-         (in_ (Var (Bound (Local x/16)) : int)) : int))
+        (Seq (Assign (Bound (Local x/15)) (Lit (Int 4) : int) : unit)
+         (Var (Bound (Local x/15)) : int) : int))
        : int)))
     (ran 4)
     (at_runtime 2)
@@ -620,20 +616,18 @@ let ran_assigned = .~assigned
     -- evaluated at compile time
     (assigned
      (Code
-      (Let_mut (ident x/15) (body (Lit (Int 0) : int))
+      (Let_mut (ident x/14) (body (Lit (Int 0) : int))
        (in_
-        (Let (ident _/16) (args ()) (generalized false)
-         (body (Assign (Bound (Local x/15)) (Lit (Int 2) : int) : unit))
-         (in_ (Var (Bound (Local x/15)) : int)) : int))
+        (Seq (Assign (Bound (Local x/14)) (Lit (Int 2) : int) : unit)
+         (Var (Bound (Local x/14)) : int) : int))
        : int)))
     -- evaluated
     (assigned
      (Code
-      (Let_mut (ident x/15) (body (Lit (Int 0) : int))
+      (Let_mut (ident x/14) (body (Lit (Int 0) : int))
        (in_
-        (Let (ident _/16) (args ()) (generalized false)
-         (body (Assign (Bound (Local x/15)) (Lit (Int 2) : int) : unit))
-         (in_ (Var (Bound (Local x/15)) : int)) : int))
+        (Seq (Assign (Bound (Local x/14)) (Lit (Int 2) : int) : unit)
+         (Var (Bound (Local x/14)) : int) : int))
        : int)))
     (ran_assigned 2)
     |}]
@@ -863,7 +857,7 @@ let applied = unknown_mut assigns
     val g : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     val reads : <'a>{x : 'a; ..'b}
     val assigns : <unit>{x : mut int; ..'a}
-    val shared : <'a>{_?'b : immut 'a; ..'c} -> <'d>{x : mut?'e 'd; ..'f} where ..'c <= {x : mut?'e 'd; ..'f}
+    val shared : <'a>{..'b} -> <'c>{x : mut?'d 'c; ..'e} where ..'b <= {x : mut?'d 'c; ..'e}
     val unmarked_reads : <int>{x : int}
     val unmarked_assigns : <unit>{x : mut int}
     val marked : <unit>{x : mut int}
@@ -1006,7 +1000,7 @@ let value_once =
          "int -> int")
         (Lit (Int 1) : int) : int)
        : unit)))
-    (read (Code (Fun (args (u/25)) (body (Var (Free x) : 'a)) : "'b -> 'a")))
+    (read (Code (Fun (args (u/24)) (body (Var (Free x) : 'a)) : "'b -> 'a")))
     (pair (Code (Tuple ((Var (Free a) : 'a) (Var (Free b) : 'b)) : "'a * 'b")))
     -- evaluated
     (incr
@@ -1017,7 +1011,7 @@ let value_once =
          "int -> int")
         (Lit (Int 1) : int) : int)
        : unit)))
-    (read (Code (Fun (args (u/25)) (body (Var (Free x) : 'a)) : "'b -> 'a")))
+    (read (Code (Fun (args (u/24)) (body (Var (Free x) : 'a)) : "'b -> 'a")))
     (pair (Code (Tuple ((Var (Free a) : 'a) (Var (Free b) : 'b)) : "'a * 'b")))
     (g 11)
     (renamed 2)

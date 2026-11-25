@@ -86,7 +86,7 @@ arguments, `C of (int * int)` one, a tuple. Weak variables
 let f x (y : int) : t = e in body   (* lets are always recursive: no `rec` *)
 let mut x = e in body   let mut x : t = e in body  (* mutable variable, see below *)
 x <- e   M.x <- e                   (* assignment, of type unit *)
-e1; e2                              (* sugar for let _ = e1 in e2 *)
+e1; e2                              (* Stag.Expr.Seq: runs as let _ = e1 in e2 *)
 fun x (y : int) _ -> e              (* anonymous function, of let's params *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)

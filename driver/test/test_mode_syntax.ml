@@ -71,20 +71,20 @@ let spliced = match .~code 1 with (a, b) -> Int.add a (b.*)
     -- evaluated at compile time
     (code
      (Code
-      (Fun (args (x/16))
-       (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
+      (Fun (args (x/15))
+       (annots ((x/15 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
         (Marked Exclave
          (Marked Stack
           (Tuple
-           ((Var (Bound (Local x/16)) : int)
+           ((Var (Bound (Local x/15)) : int)
             (App
-             (Var (Persistent (Toplevel prelude.Ptr.make/17)) :
+             (Var (Persistent (Toplevel prelude.Ptr.make/16)) :
               "int -> ptr[int]")
              (Marked Nontail
               (App
                (App (Var (Prim Int.add) : "int -> int -> int")
-                (Var (Bound (Local x/16)) : int) : "int -> int")
+                (Var (Bound (Local x/15)) : int) : "int -> int")
                (Lit (Int 1) : int) : int)
               : int)
              : ptr[int]))
@@ -95,20 +95,20 @@ let spliced = match .~code 1 with (a, b) -> Int.add a (b.*)
     -- evaluated
     (code
      (Code
-      (Fun (args (x/16))
-       (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
+      (Fun (args (x/15))
+       (annots ((x/15 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
         (Marked Exclave
          (Marked Stack
           (Tuple
-           ((Var (Bound (Local x/16)) : int)
+           ((Var (Bound (Local x/15)) : int)
             (App
-             (Var (Persistent (Toplevel prelude.Ptr.make/17)) :
+             (Var (Persistent (Toplevel prelude.Ptr.make/16)) :
               "int -> ptr[int]")
              (Marked Nontail
               (App
                (App (Var (Prim Int.add) : "int -> int -> int")
-                (Var (Bound (Local x/16)) : int) : "int -> int")
+                (Var (Bound (Local x/15)) : int) : "int -> int")
                (Lit (Int 1) : int) : int)
               : int)
              : ptr[int]))

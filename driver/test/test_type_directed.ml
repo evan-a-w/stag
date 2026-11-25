@@ -739,7 +739,7 @@ let ran = .~(upd spliced)
     -- evaluated at compile time
     (spliced
      (Code
-      (Let (ident v/18) (args ())
+      (Let (ident v/17) (args ())
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
        (generalized false)
        (body
@@ -747,13 +747,13 @@ let ran = .~(upd spliced)
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
           (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool)))
          : N.r))
-       (in_ (Var (Bound (Local v/18)) : N.r)) : N.r)))
+       (in_ (Var (Bound (Local v/17)) : N.r)) : N.r)))
     (upd <fun>)
     -- evaluated
     (M.t (M.t (a 1) (b (N.r (x 2) (y true)))))
     (spliced
      (Code
-      (Let (ident v/18) (args ())
+      (Let (ident v/17) (args ())
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
        (generalized false)
        (body
@@ -761,7 +761,7 @@ let ran = .~(upd spliced)
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
           (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool)))
          : N.r))
-       (in_ (Var (Bound (Local v/18)) : N.r)) : N.r)))
+       (in_ (Var (Bound (Local v/17)) : N.r)) : N.r)))
     (upd <fun>)
     (updated
      (Code

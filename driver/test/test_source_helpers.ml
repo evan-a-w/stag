@@ -118,28 +118,28 @@ let f x =
   [%expect
     {|
     ((members
-      (((ident f/4) (args (x/14)) (scheme "'a -> int * int")
+      (((ident f/4) (args (x/13)) (scheme "'a -> int * int")
         (body
-         (Let (ident x/15) (args ()) (generalized true)
+         (Let (ident x/14) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
           (in_
            (Match
             (scrutinee
              (Tuple
-              ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
+              ((Var (Bound (Local x/14)) : int) (Var (Bound (Local x/14)) : int))
               : "int * int"))
             (cases
-             (((Var x/16 : "int * int")
-               (Let (ident g/18) (args (y/17)) (generalized true)
-                (body (Var (Bound (Local y/17)) : 'b))
+             (((Var x/15 : "int * int")
+               (Let (ident g/17) (args (y/16)) (generalized true)
+                (body (Var (Bound (Local y/16)) : 'b))
                 (in_
-                 (App (Var (Bound (Local g/18)) : "int * int -> int * int")
-                  (Var (Bound (Local x/16)) : "int * int") : "int * int"))
+                 (App (Var (Bound (Local g/17)) : "int * int -> int * int")
+                  (Var (Bound (Local x/15)) : "int * int") : "int * int"))
                 : "int * int"))))
             : "int * int"))
           : "int * int"))))))
-    ((f/4 ("'a -> int * int" 0)) (g/18 ("'a -> 'a" 0)) (x/14 ('a 0))
-     (x/15 (int 0)) (x/16 ("int * int" 0)) (y/17 ('a 0)))
+    ((f/4 ("'a -> int * int" 0)) (g/17 ("'a -> 'a" 0)) (x/13 ('a 0))
+     (x/14 (int 0)) (x/15 ("int * int" 0)) (y/16 ('a 0)))
     |}]
 ;;
 
@@ -188,7 +188,7 @@ let add x = x
       val add : 'a -> 'a
     end
     val id2 : int
-    (M.add/4 (Var (Bound (Local x/15)) : 'a))
+    (M.add/4 (Var (Bound (Local x/14)) : 'a))
     -- evaluated at compile time
     -- evaluated
     (M.add <fun>)

@@ -250,6 +250,10 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
     let* e = expr e e' in
     let+ in_ = expr in_ in_' in
     Expr.Let (n, bs, t, e, in_)
+  | Seq (a, b), Seq (a', b') ->
+    let* a = expr a a' in
+    let+ b = expr b b' in
+    Expr.Seq (a, b)
   | Let_mut (n, t, e, in_), Let_mut (n', t', e', in_') ->
     let* n = name n n' in
     let* t = annot t t' in
@@ -346,6 +350,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | App _
       | Let _
       | Let_mut _
+      | Seq _
       | Assign _
       | Store _
       | Fun _

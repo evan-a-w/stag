@@ -238,13 +238,12 @@ let main9 = print_int (Int.add x 1)
     {|
     ((Splice_evaluation_failed
       (code
-       (Let (ident _/1) (args ()) (generalized false)
-        (body
-         (App
-          (App (Var (Prim Int.div) : "int -> int -> int") (Lit (Int 1) : int) :
-           "int -> int")
-          (Lit (Int 0) : int) : int))
-        (in_ (Quote (Lit (Int 0) : int) : <int>{})) : <int>{}))
+       (Seq
+        (App
+         (App (Var (Prim Int.div) : "int -> int -> int") (Lit (Int 1) : int) :
+          "int -> int")
+         (Lit (Int 0) : int) : int)
+        (Quote (Lit (Int 0) : int) : <int>{}) : <int>{}))
       (error ("Uncaught exception Division_by_zero" @ t.stag:1:12-23)))
      @ t.stag:1:9-31)
     |}]
