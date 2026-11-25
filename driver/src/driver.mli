@@ -53,10 +53,12 @@ module Module_group : sig
         themselves as the files of [check_files] are. *)
 end
 
-(** As [check_files], for modules already parsed. *)
+(** As [check_files], for modules already parsed. With [record_references], as
+    [Typecheck.create]. *)
 val check_modules
   :  ?interpreter:(module Interpreter_intf.S)
   -> ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?record_references:bool
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
@@ -67,6 +69,7 @@ val check_modules
     [Typecheck.check_prelude] does. Its toplevels are not evaluated. *)
 val check_prelude
   :  ?interpreter:(module Interpreter_intf.S)
+  -> ?record_references:bool
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> Syntax.Toplevel.t list

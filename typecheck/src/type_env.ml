@@ -94,10 +94,14 @@ type t =
   ; field_types : string String.Table.t
   (** The type declaring each constructor and field, whose entry in
       [constructors] or [fields] is added once it is checked. *)
+  ; declared_types : Loc.t String.Table.t
+  ; declared_members : Loc.t String.Table.t
+  (** Constructors and fields, whose names differ by case. *)
+  ; references : Name_reference.t Loc.Table.t option
   ; report : Typecheck_error.t -> unit
   }
 
-let create_tables fresh ~report =
+let create_tables fresh ~record_references ~report =
   { fresh
   ; evaluate_splice =
       (fun _ _ ~loc:_ ->
@@ -110,6 +114,9 @@ let create_tables fresh ~report =
   ; fields = String.Table.create ()
   ; constructor_types = String.Table.create ()
   ; field_types = String.Table.create ()
+  ; declared_types = String.Table.create ()
+  ; declared_members = String.Table.create ()
+  ; references = Option.some_if record_references (Loc.Table.create ())
   }
 ;;
 
@@ -211,10 +218,34 @@ let evaluate_splice t module_ (expr : Expr.t) ~loc =
        result)
 ;;
 
+let record_reference t ~declared name ~loc =
+  Option.iter t.references ~f:(fun references ->
+    Option.iter (Hashtbl.find declared name) ~f:(fun declaration ->
+      Hashtbl.set references ~key:loc ~data:{ Name_reference.name; declaration }))
+;;
+
+let record_type_reference t name ~loc =
+  record_reference t ~declared:t.declared_types name ~loc
+;;
+
+let record_member_reference t name ~loc =
+  record_reference t ~declared:t.declared_members name ~loc
+;;
+
+let references t =
+  Option.map t.references ~f:(fun references ->
+    Hashtbl.to_alist references
+    |> List.sort ~compare:(Comparable.lift Loc.compare ~f:fst))
+;;
+
 let find_type t module_ path ~loc =
   let%bind.Result name = resolve_type module_ path ~loc in
   match Hashtbl.find t.types name with
-  | Some decl -> Ok decl
+  | Some decl ->
+    (match path with
+     | Path _ | Root _ -> record_type_reference t name ~loc
+     | Resolved _ -> ());
+    Ok decl
   | None ->
     Error
       (Typecheck_error.create ~loc (Unbound_type (Path (Path.of_string name))))
@@ -968,10 +999,9 @@ let elaborate_declared t module_ expr =
 let declare_members t module_ (decl : Type_decl.t) ~name =
   let declares names table =
     List.iter names ~f:(fun ((member : Name.t), _) ->
-      Hashtbl.add_exn
-        table
-        ~key:(Module_scope.canonical_name module_ member.txt)
-        ~data:name)
+      let key = Module_scope.canonical_name module_ member.txt in
+      Hashtbl.add_exn table ~key ~data:name;
+      Hashtbl.set t.declared_members ~key ~data:member.loc)
   in
   let rec declare_members : Type_decl.Kind.t -> unit = function
     | Alias _ | Abstract | Splice _ -> ()
@@ -999,6 +1029,8 @@ let declare
          | Mode _ -> AMode (Var (Mode.Var.create_generic (Fresh.modes t.fresh)))))
   in
   if not lazily then ignore (force params : Type.arg list);
+  Hashtbl.set t.declared_types ~key:name ~data:decl.name.loc;
+  record_type_reference t name ~loc:decl.name.loc;
   Hashtbl.add_exn
     t.types
     ~key:name
@@ -1046,9 +1078,11 @@ let declare_exception
   args
   ~malformed
   =
+  let key = Module_scope.canonical_name module_ name.txt in
+  Hashtbl.set t.declared_members ~key ~data:name.loc;
   Hashtbl.add_exn
     t.exceptions
-    ~key:(Module_scope.canonical_name module_ name.txt)
+    ~key
     ~data:
       { Exception_decl.args; malformed; module_; wrap_error; checked = None }
 ;;
@@ -1257,8 +1291,8 @@ let value_parameters t (root : Decl.t) =
   visit root
 ;;
 
-let create fresh ~report =
-  let t = create_tables fresh ~report in
+let create ?(record_references = false) fresh ~report =
+  let t = create_tables fresh ~record_references ~report in
   Fresh.set_value_parameters fresh (fun name ->
     Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
       match value_parameters t decl with
@@ -1434,28 +1468,36 @@ let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
   match path with
   | Resolved name -> constructor t name ~loc
   | Path _ | Root _ ->
-    find_resolved
-      t
-      module_
-      Constructor
-      path
-      ~loc
-      ~unbound:(fun path -> Unbound_constructor path)
-      ~find:constructor
+    let%map.Result constructor =
+      find_resolved
+        t
+        module_
+        Constructor
+        path
+        ~loc
+        ~unbound:(fun path -> Unbound_constructor path)
+        ~find:constructor
+    in
+    record_member_reference t constructor.name ~loc;
+    constructor
 ;;
 
 let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
   match path with
   | Resolved name -> field t name ~loc
   | Path _ | Root _ ->
-    find_resolved
-      t
-      module_
-      Field
-      path
-      ~loc
-      ~unbound:(fun path -> Unbound_field path)
-      ~find:field
+    let%map.Result field =
+      find_resolved
+        t
+        module_
+        Field
+        path
+        ~loc
+        ~unbound:(fun path -> Unbound_field path)
+        ~find:field
+    in
+    record_member_reference t (Field.name field) ~loc;
+    field
 ;;
 
 let reflect t name =

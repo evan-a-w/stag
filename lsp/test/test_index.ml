@@ -133,10 +133,10 @@ let%expect_test "semantic tokens of a large typechecked file take linear time" =
         [%sexp (Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 5) : bool)];
       [%expect
         {|
-         0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
-         140000 tokens
-         true
-         |}])
+        0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+        140000 tokens
+        true
+        |}])
 ;;
 
 let%expect_test "inline expansions" =
@@ -313,23 +313,23 @@ let g = f 2
         [ 2, 4; 2, 15; 2, 23; 2, 31; 3, 5; 3, 12; 4, 8; 5, 8 ];
       [%expect
         {|
-         2:4 2:4-2:5 ```stag A.f : int -> int ```
-         2:4 -> a.stag 2:4-2:5
-         2:15 2:13-2:19 ```stag A.int_ty : Stag.Type_expr.t ```
-         2:15 -> a.stag 0:4-0:10
-         2:23 2:23-2:30 ```stag Int.add : int -> int -> int ```
-         2:23 no definition
-         2:31 2:31-2:32 ```stag n : int ```
-         2:31 -> a.stag 2:7-2:8
-         3:5 3:5-3:6 ```stag type A.t ```
-         3:5 -> a.stag 3:5-3:6
-         3:12 3:11-3:15 ```stag A.kind : Stag.Type_decl.Kind.t ```
-         3:12 -> a.stag 1:4-1:8
-         4:8 4:8-4:9 ```stag A.A : A.t ```
-         4:8 no definition
-         5:8 5:8-5:9 ```stag A.f : int -> int ```
-         5:8 -> a.stag 2:4-2:5
-         |}])
+        2:4 2:4-2:5 ```stag A.f : int -> int ```
+        2:4 -> a.stag 2:4-2:5
+        2:15 2:13-2:19 ```stag A.int_ty : Stag.Type_expr.t ```
+        2:15 -> a.stag 0:4-0:10
+        2:23 2:23-2:30 ```stag Int.add : int -> int -> int ```
+        2:23 no definition
+        2:31 2:31-2:32 ```stag n : int ```
+        2:31 -> a.stag 2:7-2:8
+        3:5 3:5-3:6 ```stag type A.t ```
+        3:5 -> a.stag 3:5-3:6
+        3:12 3:11-3:15 ```stag A.kind : Stag.Type_decl.Kind.t ```
+        3:12 -> a.stag 1:4-1:8
+        4:8 4:8-4:9 ```stag A.A : A.t ```
+        4:8 -> a.stag 3:9-3:15
+        5:8 5:8-5:9 ```stag A.f : int -> int ```
+        5:8 -> a.stag 2:4-2:5
+        |}])
 ;;
 
 let%expect_test "free names in a struct quote are not references" =
@@ -354,4 +354,48 @@ module M = .~q
          2:41 2:41-2:42 ```stag type t ```
          2:41 no definition
          |}])
+;;
+
+let%expect_test "types, constructors and fields are as the typechecker \
+                 resolved them"
+  =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|type t = { f : int }
+module M = struct
+  type t = A | B
+  let g (x : t) = x
+end
+let h (x : M.t) (y : t) = (x, y.f, M.A)
+module N = .~(.< struct type u = C end >.)
+let k (x : N.u) = x
+let l (x : int) = x
+|}
+        )
+      ]
+    (fun client ->
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at
+        client
+        "a.stag"
+        [ 3, 13; 5, 13; 5, 22; 5, 32; 5, 37; 7, 12; 8, 11 ];
+      [%expect
+        {|
+        3:13 3:13-3:14 ```stag type A.M.t ```
+        3:13 -> a.stag 2:7-2:8
+        5:13 5:11-5:14 ```stag type A.M.t ```
+        5:13 -> a.stag 2:7-2:8
+        5:22 5:21-5:22 ```stag type A.t ```
+        5:22 -> a.stag 0:5-0:6
+        5:32 5:32-5:33 ```stag A.f : int ```
+        5:32 -> a.stag 0:11-0:12
+        5:37 5:35-5:38 ```stag A.M.A : A.M.t ```
+        5:37 -> a.stag 2:11-2:12
+        7:12 7:11-7:14 ```stag type A.N.u ```
+        7:12 -> a.stag 6:0-6:42
+        8:11 8:11-8:14 ```stag type int ```
+        8:11 no definition
+        |}])
 ;;

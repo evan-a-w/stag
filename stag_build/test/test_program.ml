@@ -7,7 +7,12 @@ let check ?(eval = true) files ~target =
     | Error diagnostics -> Helpers.print_diagnostics ~root diagnostics
     | Ok project ->
       let target = Option.value_exn (Project.find project target) in
-      (match Program.check project target with
+      (match
+         Program.check ~limits:Limits.unlimited project target
+         |> Result.map_error ~f:List.return
+         |> Result.bind ~f:(fun (_, checked) ->
+           Pipeline.Checked.to_result checked)
+       with
        | Error diagnostics -> Helpers.print_diagnostics ~root diagnostics
        | Ok driver ->
          print_string

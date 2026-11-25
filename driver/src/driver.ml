@@ -24,6 +24,7 @@ let toplevels items = List.concat_map items ~f:Typed.Program.Item.toplevels
 let create_typecheck
   ?(interpreter = Stag_treewalk.interpreter)
   ?compile_time_c_calls
+  ?record_references
   ~limits
   ~output
   ?prelude
@@ -33,7 +34,13 @@ let create_typecheck
   let interpreter = Interpreter.create interpreter ~stamps in
   Option.iter output ~f:(Interpreter.set_output interpreter);
   Interpreter.set_limits interpreter limits;
-  ( Typecheck.create ~stamps ~interpreter ?compile_time_c_calls ?prelude ()
+  ( Typecheck.create
+      ~stamps
+      ~interpreter
+      ?compile_time_c_calls
+      ?record_references
+      ?prelude
+      ()
   , interpreter )
 ;;
 
@@ -149,6 +156,7 @@ let rec group_order
 let check_modules
   ?interpreter
   ?compile_time_c_calls
+  ?record_references
   ?(limits = Limits.unlimited)
   ?output
   ?prelude
@@ -158,6 +166,7 @@ let check_modules
     create_typecheck
       ?interpreter
       ?compile_time_c_calls
+      ?record_references
       ~limits
       ~output
       ?prelude
@@ -218,9 +227,15 @@ let check_files
             ~f:Error.loc))
 ;;
 
-let check_prelude ?interpreter ?(limits = Limits.unlimited) ?output prelude =
+let check_prelude
+  ?interpreter
+  ?record_references
+  ?(limits = Limits.unlimited)
+  ?output
+  prelude
+  =
   let typecheck, interpreter =
-    create_typecheck ?interpreter ~limits ~output ~prelude ()
+    create_typecheck ?interpreter ?record_references ~limits ~output ~prelude ()
   in
   let%map.Result checked = Typecheck.check_prelude typecheck in
   { checked; interpreter; eval_order = toplevels checked.program.items }

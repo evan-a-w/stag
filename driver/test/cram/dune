@@ -2,7 +2,13 @@
  (deps %{bin:stag}))
 
 (cram
- (applies_to build build_bench build_inline build_errors)
+ (applies_to
+  build
+  build_bench
+  build_checkout
+  build_inline
+  build_errors
+  build_limits)
  (deps
   %{bin:stag-build}
   %{bin:stag}

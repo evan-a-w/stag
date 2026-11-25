@@ -8,10 +8,10 @@ let to_error diagnostics =
           ~f:(Diagnostic.to_string_hum ?contents:None ?warning:None)))
 ;;
 
-let benches ?(prefix = "") parse =
+let benches ?(prefix = "") ?compile_time_c_calls ~prelude parse =
   let parse () = parse () |> Result.map_error ~f:to_error in
   let check groups =
-    Driver.check_modules ~output:ignore groups
+    Driver.check_modules ?compile_time_c_calls ?prelude ~output:ignore groups
     |> Result.map_error
          ~f:(fun ({ errors; partial = _ } : Typecheck.Failed.t) ->
            to_error (List.map errors ~f:Diagnostic.of_typecheck_error))

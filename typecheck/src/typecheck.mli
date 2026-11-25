@@ -14,12 +14,14 @@ type t
     see [prelude], by default [Prelude.toplevels]. With [const_toplevels]
     (default false, as for the interpreter), every toplevel must be [const].
     Externals may be called at compile time as [compile_time_c_calls] says, by
-    default only the prelude's. *)
+    default only the prelude's. With [record_references] (default false),
+    [Checked.references] are recorded. *)
 val create
   :  stamps:Stamp_counter.t
   -> interpreter:Interpreter.t
   -> ?const_toplevels:bool
   -> ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?record_references:bool
   -> ?prelude:Syntax.Toplevel.t list
   -> unit
   -> t
@@ -32,6 +34,9 @@ module Checked : sig
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
     (** Of each [include%inline] and [module%inline], in source order. *)
+    ; references : (Loc.t * Name_reference.t) list option
+    (** The names of types, constructors and fields in the source, by location,
+        and what they resolved to, if [create]d to record them. *)
     }
 end
 

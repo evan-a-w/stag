@@ -28,10 +28,27 @@ val parse
   -> Project.Target.t
   -> (Driver.Module_group.t list, Diagnostic.t list) Result.t
 
-(** [parse_recovering], then [Driver.check_modules] if a program parsed, failing
-    with all the errors of both, by location. [output] is as for [Driver.check]. *)
+(** The absolute paths of the files of [target]'s program. *)
+val paths : Project.t -> Project.Target.t -> string list
+
+(** The prelude [target]'s program sees, as
+    [Pipeline_config.Prelude_choice.of_paths] of its [paths]. *)
+val prelude_choice
+  :  Project.t
+  -> Project.Target.t
+  -> Pipeline_config.Prelude_choice.t
+
+(** [Pipeline.check] of [parse_recovering], with the [compile_time_c_calls] and
+    [prelude_choice] of [target] and [limits]. *)
 val check
-  :  ?output:(string -> unit)
+  :  ?load_prelude:
+       (Pipeline_config.Prelude_choice.t
+        -> (Pipeline_config.Loaded_prelude.t, Diagnostic.t) Result.t)
+  -> ?record_references:bool
+  -> ?output:(string -> unit)
+  -> limits:Limits.t
   -> Project.t
   -> Project.Target.t
-  -> (Driver.t, Diagnostic.t list) Result.t
+  -> ( Pipeline_config.Loaded_prelude.t * Pipeline.Checked.t
+       , Diagnostic.t )
+       Result.t

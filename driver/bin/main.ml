@@ -1,13 +1,9 @@
 open! Import
 
-let canonical path =
-  Option.value
-    (Option.try_with (fun () -> Filename_unix.realpath path))
-    ~default:path
-;;
-
 let dedup paths =
-  List.stable_dedup paths ~compare:(Comparable.lift String.compare ~f:canonical)
+  List.stable_dedup
+    paths
+    ~compare:(Comparable.lift String.compare ~f:Fs.canonical)
 ;;
 
 let read_files paths =
@@ -58,41 +54,26 @@ let report_all files diagnostics =
        (List.map diagnostics ~f:(Diagnostic.relocate ~f:relative_loc)))
 ;;
 
-let report_stale ?warning files expansions =
-  List.iter expansions ~f:(fun expansion ->
-    report ?warning files (Inline_expansion.diagnostic expansion))
+let warn_stale files driver =
+  List.iter (Inline_expansion.stale driver) ~f:(fun expansion ->
+    report ~warning:true files (Inline_expansion.diagnostic expansion))
 ;;
 
-(* The prelude a program sees: of the sources of the checkout its files are all
-   in, if any (see [Stdlib_checkout.prelude]), else the embedded one. *)
-let program_prelude paths =
-  let checkouts =
-    List.map paths ~f:(fun path ->
-      Stdlib_checkout.find (Filename.dirname (canonical path)))
-  in
-  match checkouts with
-  | Some checkout :: rest
-    when List.for_all rest ~f:(function
-           | Some other ->
-             String.equal
-               (Stdlib_checkout.root other)
-               (Stdlib_checkout.root checkout)
-           | None -> false) ->
-    (match Stdlib_checkout.prelude checkout with
-     | Ok prelude -> Some prelude
-     | Error diagnostic ->
-       report [] diagnostic;
-       exit 1)
-  | _ -> None
-;;
-
-let check ?output ?prelude ~limits files =
-  match Driver.check_files ?output ?prelude ~limits files with
-  | Ok driver -> driver
-  | Error errors ->
-    report_all files (List.map errors ~f:Diagnostic.of_driver_error);
+(* The driver of the program, and the prelude it sees. *)
+let check_with_prelude ?output config files =
+  match Pipeline.check ?output config (Pipeline.parse_files files) with
+  | Error diagnostic ->
+    report [] diagnostic;
     exit 1
+  | Ok (prelude, checked) ->
+    (match Pipeline.Checked.to_result checked with
+     | Ok driver -> driver, prelude
+     | Error diagnostics ->
+       report_all files diagnostics;
+       exit 1)
 ;;
+
+let check ?output config files = fst (check_with_prelude ?output config files)
 
 let eval ~limits files driver =
   match Driver.eval ~limits driver with
@@ -104,56 +85,6 @@ let eval ~limits files driver =
 
 let files_param =
   Command.Param.(anon (non_empty_sequence_as_list ("FILE" %: string)))
-;;
-
-let limits_param ?(default = Limits.unlimited) () =
-  let limit name ~arg ~doc ~of_string ~to_string default =
-    let%map_open.Command value =
-      flag
-        name
-        (optional
-           (Command.Arg_type.create (function
-             | "none" -> None
-             | string -> Some (of_string string))))
-        ~doc:
-          (sprintf
-             "%s|none %s (default: %s)"
-             arg
-             doc
-             (Option.value_map default ~default:"none" ~f:to_string))
-    in
-    Option.value value ~default
-  in
-  let%map_open.Command fuel =
-    limit
-      "fuel"
-      ~arg:"N"
-      ~doc:"evaluation steps allowed in each phase"
-      ~of_string:Int.of_string
-      ~to_string:Int.to_string
-      default.fuel
-  and max_depth =
-    limit
-      "max-depth"
-      ~arg:"N"
-      ~doc:"nesting of evaluation allowed"
-      ~of_string:Int.of_string
-      ~to_string:Int.to_string
-      default.max_depth
-  and time_limit =
-    limit
-      "time-limit"
-      ~arg:"SPAN"
-      ~doc:"time allowed for each phase, eg. 10s"
-      ~of_string:Time_ns.Span.of_string
-      ~to_string:Time_ns.Span.to_string
-      default.time_limit
-  in
-  { Limits.fuel; max_depth; time_limit }
-;;
-
-let limits_readme ~phases =
-  sprintf "Limits apply to each phase of evaluation on its own: %s." phases
 ;;
 
 (* The sources of the prelude among [paths] are checked as the prelude of their
@@ -173,16 +104,26 @@ let check_with_prelude_sources ~limits ~sources ~program =
         (fst (List.hd_exn sources))
         path;
       exit 1));
-  match Stdlib_checkout.check ~limits checkout with
+  let prelude =
+    match Stdlib_checkout.prelude checkout with
+    | Ok prelude -> prelude
+    | Error diagnostic ->
+      report [] diagnostic;
+      exit 1
+  in
+  match Pipeline.Checked.to_result (Pipeline.check_prelude ~limits prelude) with
   | Error diagnostics ->
     report_all [] diagnostics;
     exit 1
-  | Ok { prelude; driver } ->
-    report_stale ~warning:true [] (Inline_expansion.stale driver);
+  | Ok driver ->
+    warn_stale [] driver;
     let signature = (Driver.checked driver).signature in
     List.iter sources ~f:(fun (path, _) ->
       match
-        Stdlib_checkout.signature_of_source checkout signature (canonical path)
+        Stdlib_checkout.signature_of_source
+          checkout
+          signature
+          (Fs.canonical path)
       with
       | Ok signature ->
         print_string (Signature.to_string_hum ~of_prelude:true signature)
@@ -192,8 +133,20 @@ let check_with_prelude_sources ~limits ~sources ~program =
     if not (List.is_empty program)
     then (
       let files = read_files program in
-      let driver = check ~prelude ~limits files in
-      report_stale ~warning:true files (Inline_expansion.stale driver);
+      let driver =
+        match
+          Pipeline.check_sources
+            ~prelude:(Parsed prelude)
+            ~limits
+            (Pipeline.parse_files files)
+          |> Pipeline.Checked.to_result
+        with
+        | Ok driver -> driver
+        | Error diagnostics ->
+          report_all files diagnostics;
+          exit 1
+      in
+      warn_stale files driver;
       print_string (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
 
@@ -201,7 +154,7 @@ let check_command =
   Command.basic
     ~summary:"Typecheck the program of the files and print its signature"
     ~readme:(fun () ->
-      limits_readme ~phases:"compile time and evaluation"
+      Pipeline_config.limits_readme ~phases:"compile time and evaluation"
       ^ sprintf
           "\n\n\
            Files of the prelude in a stag checkout (a directory with a %s \
@@ -213,21 +166,20 @@ let check_command =
           Stdlib_checkout.prelude_file
           Stdlib_checkout.core_dir)
     (let%map_open.Command paths = files_param
-     and limits = limits_param () in
+     and limits = Pipeline_config.limits_param () in
      fun () ->
        let sources, program =
          List.partition_map (dedup paths) ~f:(fun path ->
-           match Stdlib_checkout.of_source (canonical path) with
+           match Stdlib_checkout.of_source (Fs.canonical path) with
            | Some checkout -> First (path, checkout)
            | None -> Second path)
        in
        match sources with
        | _ :: _ -> check_with_prelude_sources ~limits ~sources ~program
        | [] ->
-         let prelude = program_prelude paths in
          let files = read_files paths in
-         let driver = check ?prelude ~limits files in
-         report_stale ~warning:true files (Inline_expansion.stale driver);
+         let driver = check (Pipeline_config.create ~limits paths) files in
+         warn_stale files driver;
          print_string
            (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
@@ -235,14 +187,14 @@ let check_command =
 let run_command =
   Command.basic
     ~summary:"Typecheck and evaluate the program of the files"
-    ~readme:(fun () -> limits_readme ~phases:"compile time and evaluation")
+    ~readme:(fun () ->
+      Pipeline_config.limits_readme ~phases:"compile time and evaluation")
     (let%map_open.Command paths = files_param
-     and limits = limits_param () in
+     and limits = Pipeline_config.limits_param () in
      fun () ->
-       let prelude = program_prelude paths in
        let files = read_files paths in
-       let driver = check ?prelude ~limits files in
-       report_stale ~warning:true files (Inline_expansion.stale driver);
+       let driver = check (Pipeline_config.create ~limits paths) files in
+       warn_stale files driver;
        eval ~limits files driver)
 ;;
 
@@ -256,9 +208,10 @@ let test_command =
        without writing any file, eg. for a dune rule diffing it with FILE. "
       ^ "Stale inline expansions ([include%inline] and [module%inline]) are \
          corrected likewise. "
-      ^ limits_readme ~phases:"compile time, evaluation and each test")
+      ^ Pipeline_config.limits_readme
+          ~phases:"compile time, evaluation and each test")
     (let%map_open.Command paths = files_param
-     and limits = limits_param ()
+     and limits = Pipeline_config.limits_param ()
      and mode =
        choose_one
          ~if_nothing_chosen:(Default_to `Write_corrected)
@@ -280,93 +233,52 @@ let test_command =
           eprintf "Error: -print-corrected takes one FILE\n%!";
           exit 2
         | _ -> ());
-       let driver = check ?prelude:(program_prelude paths) ~limits files in
-       let expansions = Inline_expansion.stale driver in
-       report_stale files expansions;
-       let evaluated =
-         match Driver.eval ~limits driver with
-         | Ok () -> true
-         | Error error ->
-           report files (Diagnostic.of_runtime_error error);
-           false
+       let driver = check (Pipeline_config.create ~limits paths) files in
+       let outcome =
+         Test_and_correct.run
+           ~limits
+           ~report:(report files)
+           ~write:(fun { path; contents } ~corrected ->
+             let corrected_path = path ^ ".corrected" in
+             Fs.try_ ~path (fun () ->
+               let remove_corrected () =
+                 if Sys_unix.file_exists_exn corrected_path
+                 then Sys_unix.remove corrected_path
+               in
+               match mode, corrected with
+               | `Print_corrected, _ ->
+                 print_string (Option.value corrected ~default:contents)
+               | (`Promote | `Write_corrected), None -> remove_corrected ()
+               | ((`Promote | `Write_corrected) as mode), Some corrected ->
+                 Option.iter
+                   (Text_diff.unified
+                      ~old_name:path
+                      ~new_name:corrected_path
+                      ~old:contents
+                      ~new_:corrected)
+                   ~f:print_string;
+                 (match mode with
+                  | `Promote ->
+                    Out_channel.write_all path ~data:corrected;
+                    remove_corrected ()
+                  | `Write_corrected ->
+                    Out_channel.write_all corrected_path ~data:corrected)))
+           ~files
+           driver
        in
-       let results =
-         if evaluated then Expect_test_runner.run ~limits driver else []
-       in
-       List.iter results ~f:(fun result ->
-         List.iter (Diagnostic.of_test_result result) ~f:(report files));
-       let mismatched =
-         List.filter_map files ~f:(fun { path; contents } ->
-           let corrected_path = path ^ ".corrected" in
-           let remove_corrected () =
-             if Sys_unix.file_exists_exn corrected_path
-             then Sys_unix.remove corrected_path
-           in
-           let corrected =
-             Corrected_file.create ~path ~contents ~tests:results ~expansions
-           in
-           match mode with
-           | `Print_corrected ->
-             print_string (Option.value corrected ~default:contents);
-             Option.map corrected ~f:(fun _ -> path)
-           | (`Promote | `Write_corrected) as mode ->
-             (match corrected with
-              | None ->
-                remove_corrected ();
-                None
-              | Some corrected ->
-                Option.iter
-                  (Text_diff.unified
-                     ~old_name:path
-                     ~new_name:corrected_path
-                     ~old:contents
-                     ~new_:corrected)
-                  ~f:print_string;
-                (match mode with
-                 | `Promote ->
-                   Out_channel.write_all path ~data:corrected;
-                   remove_corrected ()
-                 | `Write_corrected ->
-                   Out_channel.write_all corrected_path ~data:corrected);
-                Some path))
-       in
-       let errors =
-         List.count results ~f:(fun result ->
-           Option.is_some result.error
-           || not (List.is_empty result.different_outputs))
-       in
-       let total = List.length results in
-       let failed =
-         List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
-       in
-       let stale = List.length expansions in
-       Out_channel.flush stdout;
-       if stale > 0
-       then
-         eprintf
-           "%d inline expansion(s) out of date%s\n%!"
-           stale
+       Test_and_correct.Outcome.print_summary
+         ~promoted:
            (match mode with
-            | `Promote -> " (promoted)"
-            | `Print_corrected | `Write_corrected -> "");
-       if failed > 0
-       then
-         eprintf
-           "%d of %d test(s) failed%s\n%!"
-           failed
-           total
-           (match mode with
-            | `Promote when not (List.is_empty mismatched) ->
-              " (expectations promoted)"
-            | `Promote | `Print_corrected | `Write_corrected -> "");
-       let failed_on_mismatch =
-         match mode with
-         | `Write_corrected -> true
-         | `Promote | `Print_corrected -> false
-       in
-       if (not evaluated)
-          || errors > 0
-          || (failed_on_mismatch && (failed > 0 || stale > 0))
+            | `Promote -> true
+            | `Print_corrected | `Write_corrected -> false)
+         outcome;
+       if not
+            (Test_and_correct.Outcome.passed
+               ~mismatches_fail:
+                 (match mode with
+                  | `Write_corrected -> true
+                  | `Promote | `Print_corrected -> false)
+               outcome)
        then exit 1)
 ;;
 
@@ -380,7 +292,7 @@ let bench_command ~fake_clock =
        discarded. Baselines are saved in -baseline-dir. Benchmarks are \
        unlimited; limits apply to compile time and evaluation.")
     (let%map_open.Command paths = files_param
-     and limits = limits_param ()
+     and limits = Pipeline_config.limits_param ()
      and options = Bench_command.Options.param ~fake_clock
      and filters =
        flag
@@ -397,12 +309,19 @@ let bench_command ~fake_clock =
      in
      fun () ->
        let files = read_files paths in
-       let driver =
-         check ~output:ignore ?prelude:(program_prelude paths) ~limits files
+       let driver, prelude =
+         check_with_prelude
+           ~output:ignore
+           (Pipeline_config.create ~limits paths)
+           files
        in
+       warn_stale files driver;
        let benches =
          if phases
-         then Phase_bench.benches (Phase_bench.parse_files files)
+         then
+           Phase_bench.benches
+             ~prelude:(Pipeline_config.Loaded_prelude.toplevels prelude)
+             (Phase_bench.parse_files files)
          else (
            eval ~limits files driver;
            match Bench_runner.benches driver with
@@ -494,7 +413,7 @@ let lsp_command =
        and 5s; `none` lifts a limit), so a compile-time splice cannot hang the \
        editor.")
     (let%map_open.Command limits =
-       limits_param ~default:Stag_lsp.Server.default_limits ()
+       Pipeline_config.limits_param ~default:Stag_lsp.Server.default_limits ()
      in
      fun () ->
        Stag_lsp.Server.run ~limits (Stag_lsp.Transport.of_stdio ()) |> exit)

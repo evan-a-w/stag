@@ -31,44 +31,23 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   |> Map.map ~f:List.rev
 ;;
 
-(* [checked] is the program's modules, if they parsed, and the program checked,
-   which with errors is what checked. *)
+(* [program] is the program's modules, if they parsed, and what checked of them. *)
 let of_checked
   ?prelude
   ?(of_prelude = false)
   ~path
   ~absolute
   ~files
-  ~errors
-  checked
+  ~diagnostics
+  program
   =
-  let diagnostics = diagnostics_by_file ~path ~absolute ~files in
-  match checked with
-  | None ->
-    { Result.diagnostics = diagnostics errors; index = None; depends_on = [] }
-  | Some (groups, (checked : Typecheck.Checked.t), type_errors) ->
-    let index =
-      Index.create
-        ?prelude
-        ~of_prelude
-        ~groups
-        ~program:checked.program
-        ~expansions:checked.expansions
-        ()
-      |> Index.relocate ~f:absolute
-    in
-    { diagnostics =
-        diagnostics
-          (Diagnostic.sort
-             (errors @ List.map type_errors ~f:Diagnostic.of_typecheck_error))
-    ; index = Some index
-    ; depends_on = []
-    }
-;;
-
-let of_driver = function
-  | Ok driver -> Driver.checked driver, []
-  | Error { Typecheck.Failed.errors; partial } -> partial, errors
+  { Result.diagnostics = diagnostics_by_file ~path ~absolute ~files diagnostics
+  ; index =
+      Option.map program ~f:(fun (groups, (checked : Typecheck.Checked.t)) ->
+        Index.create ?prelude ~of_prelude ~groups ~checked ()
+        |> Index.relocate ~f:absolute)
+  ; depends_on = []
+  }
 ;;
 
 (* The toplevels of [toplevels] located in files that [relocate] moves. *)
@@ -98,93 +77,65 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
         toplevel)
 ;;
 
-module Prelude_source = struct
-  (* The prelude a program is checked with: the embedded one, whose definitions
-     are found in [stdlib]'s sources that are the same, or the sources of the
-     checkout the program is in. *)
-  type t =
-    | Embedded of { stdlib : Stdlib_checkout.t option }
-    | Checkout of Stdlib_checkout.t
-
-  let create ~stdlib ~path =
-    match Stdlib_checkout.find (Filename.dirname path) with
-    | Some checkout -> Checkout checkout
-    | None -> Embedded { stdlib }
-  ;;
-end
-
 let source_paths checkout =
   Stdlib_checkout.source_paths checkout
   |> Core.Result.ok
   |> Option.value ~default:[]
 ;;
 
-let check_groups
-  ?compile_time_c_calls
-  ~limits
-  ~(prelude : Prelude_source.t)
+(* A program sees [prelude_choice], loaded into [checked]; the embedded one's
+   definitions are found in [stdlib]'s sources that are the same. *)
+let of_program
+  ?stdlib
   ~contents
   ~path
   ~absolute
   ~files
-  groups
+  ~depends_on
+  ~(prelude_choice : Pipeline_config.Prelude_choice.t)
+  checked
   =
-  let groups, errors = groups in
-  let checked ?prelude groups =
-    Option.map groups ~f:(fun groups ->
-      let checked, type_errors =
-        of_driver
-          (Driver.check_modules
-             ?compile_time_c_calls
-             ~limits
-             ~output:ignore
-             ?prelude
-             groups)
-      in
-      groups, checked, type_errors)
+  let result =
+    match checked with
+    | Error diagnostic ->
+      (* The prelude's error is reported in its source, and the program left
+         unchecked, which is said in it. *)
+      of_checked
+        ~path
+        ~absolute
+        ~files
+        ~diagnostics:
+          [ diagnostic
+          ; Diagnostic.create
+              ~loc:(Loc.start_of_file (Loc.File.of_string path))
+              "This file is not checked: its checkout's prelude has errors"
+          ]
+        None
+    | Ok
+        ( (prelude : Pipeline_config.Loaded_prelude.t)
+        , { Pipeline.Checked.groups; checked; diagnostics; driver = _ } ) ->
+      let program = Option.both groups checked in
+      (match prelude, stdlib with
+       | Parsed prelude, _ ->
+         of_checked ~prelude ~path ~absolute ~files ~diagnostics program
+       | Embedded, None ->
+         of_checked ~path ~absolute ~files ~diagnostics program
+       | Embedded, Some checkout ->
+         let embedded = Stdlib_checkout.relocate_embedded ~contents checkout in
+         of_checked
+           ~prelude:(relocated ~relocate:embedded (force Prelude.toplevels))
+           ~path
+           ~absolute:(Fn.compose absolute embedded)
+           ~files
+           ~diagnostics
+           program)
   in
-  match prelude with
-  | Embedded { stdlib = None } ->
-    of_checked ~path ~absolute ~files ~errors (checked groups)
-  | Embedded { stdlib = Some checkout } ->
-    let embedded = Stdlib_checkout.relocate_embedded ~contents checkout in
-    { (of_checked
-         ~prelude:(relocated ~relocate:embedded (force Prelude.toplevels))
-         ~path
-         ~absolute:(Fn.compose absolute embedded)
-         ~files
-         ~errors
-         (checked groups))
-      with
-      depends_on = source_paths checkout
-    }
-  | Checkout checkout ->
-    let result =
-      match Stdlib_checkout.prelude ~contents checkout with
-      | Error diagnostic ->
-        (* The prelude's error is reported in its source, and the program left
-           unchecked, which is said in it. *)
-        of_checked
-          ~path
-          ~absolute
-          ~files
-          ~errors:
-            [ diagnostic
-            ; Diagnostic.create
-                ~loc:(Loc.start_of_file (Loc.File.of_string path))
-                "This file is not checked: its checkout's prelude has errors"
-            ]
-          None
-      | Ok prelude ->
-        of_checked
-          ~prelude
-          ~path
-          ~absolute
-          ~files
-          ~errors
-          (checked ~prelude groups)
-    in
-    { result with depends_on = source_paths checkout }
+  let prelude_sources =
+    match prelude_choice, stdlib with
+    | Checkout checkout, _ | Embedded, Some checkout -> source_paths checkout
+    | Embedded, None -> []
+  in
+  { result with depends_on = depends_on @ prelude_sources }
 ;;
 
 let in_stdlib ~limits ~contents checkout path =
@@ -200,41 +151,42 @@ let in_stdlib ~limits ~contents checkout path =
       ~path
       ~absolute:Fn.id
       ~files
-      ~errors:[ error ]
+      ~diagnostics:[ error ]
       None
   | Ok prelude ->
-    let checked, type_errors =
-      of_driver (Driver.check_prelude ~limits ~output:ignore prelude)
+    let { Pipeline.Checked.groups; checked; diagnostics; driver = _ } =
+      Pipeline.check_prelude
+        ~record_references:true
+        ~limits
+        ~output:ignore
+        prelude
     in
     of_checked
       ~of_prelude:true
       ~path
       ~absolute:Fn.id
       ~files
-      ~errors:[]
-      (Some
-         ( [ Driver.Module_group.Group
-               ( Located.create ~loc:Loc.none Prelude_path.root
-               , List.map prelude ~f:(fun toplevel ->
-                   Driver.Module_group.File toplevel) )
-           ]
-         , checked
-         , type_errors ))
+      ~diagnostics
+      (Option.both groups checked)
 ;;
 
-let standalone ~limits ~prelude ~contents path =
-  let file = { Source_file.path; contents = read ~contents path } in
-  check_groups
-    ~limits
-    ~prelude
+let standalone ?stdlib ~limits ~contents ~depends_on path =
+  let config = Pipeline_config.create ~limits [ path ] in
+  of_program
+    ?stdlib
     ~contents
     ~path
     ~absolute:Fn.id
     ~files:[ path ]
-    (let toplevel, errors = Source_file.parse_recovering file in
-     ( Option.map toplevel ~f:(fun toplevel ->
-         [ Driver.Module_group.File toplevel ])
-     , List.map errors ~f:Diagnostic.of_source_file_error ))
+    ~depends_on
+    ~prelude_choice:config.prelude
+    (Pipeline.check
+       ~load_prelude:(Pipeline_config.Loaded_prelude.load ~contents)
+       ~record_references:true
+       ~output:ignore
+       config
+       (Pipeline.parse_files
+          [ { Source_file.path; contents = read ~contents path } ]))
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =
@@ -249,7 +201,9 @@ let relative ~root path =
   | None -> path
 ;;
 
-let in_project ~limits ~prelude ~contents ~root path =
+(* Checked within its target, or, if in none, the project's files that would
+   change that. *)
+let in_project ?stdlib ~limits ~contents ~root path =
   let absolute = absolute_loc ~root in
   match
     Project.load
@@ -258,47 +212,51 @@ let in_project ~limits ~prelude ~contents ~root path =
       ()
   with
   | Error errors ->
-    Some
+    First
       { Result.diagnostics =
           diagnostics_by_file ~path ~absolute ~files:[ path ] errors
       ; index = None
-      ; depends_on = []
+      ; depends_on = [ root ^/ Project.project_file ]
       }
   | Ok project ->
+    let depends_on =
+      List.map (Project.input_files project) ~f:(fun file -> root ^/ file)
+    in
     let file = relative ~root path in
-    let%map.Option target =
-      List.find (Project.targets project) ~f:(fun target ->
-        List.exists target.files ~f:(fun source ->
-          String.equal source.path file))
-    in
-    let files =
-      List.concat_map
-        (Project.closure project target @ [ target ])
-        ~f:(fun target ->
-          List.map target.files ~f:(fun source -> root ^/ source.path))
-    in
-    check_groups
-      ~compile_time_c_calls:(Program.compile_time_c_calls project target)
-      ~limits
-      ~prelude
-      ~contents
-      ~path
-      ~absolute
-      ~files
-      (Program.parse_recovering project target)
+    (match
+       List.find (Project.targets project) ~f:(fun target ->
+         List.exists target.files ~f:(fun source ->
+           String.equal source.path file))
+     with
+     | None -> Second depends_on
+     | Some target ->
+       First
+         (of_program
+            ?stdlib
+            ~contents
+            ~path
+            ~absolute
+            ~files:(Program.paths project target)
+            ~depends_on
+            ~prelude_choice:(Program.prelude_choice project target)
+            (Program.check
+               ~load_prelude:(Pipeline_config.Loaded_prelude.load ~contents)
+               ~record_references:true
+               ~output:ignore
+               ~limits
+               project
+               target)))
 ;;
 
 let check ?stdlib ~limits ~contents path =
   match Stdlib_checkout.of_source path with
   | Some checkout -> in_stdlib ~limits ~contents checkout path
   | None ->
-    let prelude = Prelude_source.create ~stdlib ~path in
-    let project =
-      match Project.find_root (Filename.dirname path) with
-      | Error _ -> None
-      | Ok root -> in_project ~limits ~prelude ~contents ~root path
-    in
-    (match project with
-     | Some result -> result
-     | None -> standalone ~limits ~prelude ~contents path)
+    (match Project.find_root (Filename.dirname path) with
+     | Error _ -> standalone ?stdlib ~limits ~contents ~depends_on:[] path
+     | Ok root ->
+       (match in_project ?stdlib ~limits ~contents ~root path with
+        | First result -> result
+        | Second depends_on ->
+          standalone ?stdlib ~limits ~contents ~depends_on path))
 ;;

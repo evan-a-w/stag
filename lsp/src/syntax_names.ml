@@ -21,60 +21,36 @@ module Occurrence = struct
     ; kind : Kind.t
     ; path : string list
     ; declaration : bool
-    ; module_path : string list
     ; quoted : bool
     }
   [@@deriving sexp_of]
 end
 
-type add =
-  ?declaration:bool
-  -> ?root:bool
-  -> kind:Kind.t
-  -> loc:Loc.t
-  -> string list
-  -> unit
+type add = ?declaration:bool -> kind:Kind.t -> loc:Loc.t -> string list -> unit
 
 let decl_path ~(add : add) ~kind ~loc : Syntax.Decl_path.t -> unit = function
-  | Path path -> add ~kind ~loc (path :> string list)
-  | Root path -> add ~root:true ~kind ~loc (path :> string list)
+  | Path path | Root path -> add ~kind ~loc (path :> string list)
   | Resolved _ -> ()
 ;;
 
-let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
+let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
   let occurrences = Queue.create () in
-  let add
-    ?(declaration = false)
-    ?(root = false)
-    ~module_path
-    ~quoted
-    ~kind
-    ~loc
-    path
-    =
+  let add ?(declaration = false) ~quoted ~kind ~loc path =
     if not (Loc.is_none loc)
     then
       Queue.enqueue
         occurrences
-        { Occurrence.loc
-        ; kind
-        ; path
-        ; declaration
-        ; module_path = (if root then [] else module_path)
-        ; quoted
-        }
+        { Occurrence.loc; kind; path; declaration; quoted }
   in
-  let rec walk_toplevels ?(quoted = false) ~module_path toplevels =
-    List.iter toplevels ~f:(walk_toplevel ~quoted ~module_path)
-  and walk_toplevel ~quoted ~module_path (toplevel : Syntax.Toplevel.t) =
-    let add = add ~module_path ~quoted in
+  let rec walk_toplevels ?(quoted = false) toplevels =
+    List.iter toplevels ~f:(walk_toplevel ~quoted)
+  and walk_toplevel ~quoted (toplevel : Syntax.Toplevel.t) =
+    let add = add ~quoted in
     let name ?declaration kind (name : Syntax.Name.t) =
       add ?declaration ~kind ~loc:name.loc [ name.txt ]
     in
     (* Declarations in a struct quote are not of the module. *)
-    let toplevels =
-      walk_toplevels ~quoted:true ~module_path:(module_path @ [ "%struct" ])
-    in
+    let toplevels = walk_toplevels ~quoted:true in
     let rec type_expr ty = walk_type_expr ~add ~expr ty
     and expr e = walk_expr ~add ~type_expr ~toplevels e in
     match toplevel.txt with
@@ -113,28 +89,23 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       type_expr ty
     | Module (module_name, toplevels) ->
       name ~declaration:true Module module_name;
-      walk_toplevels
-        ~quoted
-        ~module_path:(module_path @ [ module_name.txt ])
-        toplevels
+      walk_toplevels ~quoted toplevels
     | Module_splice (module_name, body, expansion) ->
       name ~declaration:true Module module_name;
       expr body;
-      expansion_toplevels
-        ~module_path:(module_path @ [ module_name.txt ])
-        expansion
+      expansion_toplevels expansion
     | Include (body, expansion) ->
       expr body;
-      expansion_toplevels ~module_path expansion
+      expansion_toplevels expansion
     | Expect_test { name = _; body } -> expr body
     | Bench { name = _; param; body } ->
       Option.iter param ~f:(fun { name = param; args } ->
         name ~declaration:true Kind.Parameter param;
         List.iter args ~f:expr);
       expr body
-  and expansion_toplevels ~module_path = function
+  and expansion_toplevels = function
     | Some (expansion : Syntax.Toplevel.t list Located.t)
-      when walk_expansion expansion -> walk_toplevels ~module_path expansion.txt
+      when walk_expansion expansion -> walk_toplevels expansion.txt
     | Some _ | None -> ()
   and let_ ~(add : add) ~type_expr (binder : Syntax.Name.t) bindings annot body =
     let is_function =
@@ -296,6 +267,6 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Struct_quote quoted -> toplevels quoted
     | Stack expr | Exclave expr | Nontail expr -> recurse expr
   in
-  walk_toplevels ~module_path toplevels;
+  walk_toplevels toplevels;
   Queue.to_list occurrences
 ;;

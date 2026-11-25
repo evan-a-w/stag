@@ -244,3 +244,9 @@ let load ?(contents = fun _ -> None) ~root () =
   then Ok { root; targets; by_name }
   else Error (Queue.to_list errors)
 ;;
+
+let input_files t =
+  project_file
+  :: List.map t.targets ~f:(fun (target : Target.t) ->
+    Fs.relative ~dir:target.dir "stag")
+;;

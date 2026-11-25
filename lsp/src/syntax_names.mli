@@ -25,9 +25,6 @@ module Occurrence : sig
     ; kind : Kind.t
     ; path : string list
     ; declaration : bool
-    ; module_path : string list
-    (** Of the module it is in, eg. [["Foo"; "A"]] in [a.stag] of library [foo],
-        to resolve [path] lexically: [[]] for a root path. *)
     ; quoted : bool
     (** In a struct quote, so resolved where the declarations are spliced, not
         here. *)
@@ -35,11 +32,9 @@ module Occurrence : sig
   [@@deriving sexp_of]
 end
 
-(** The occurrences in [toplevels], within the module [module_path], in no
-    particular order, and in the inline expansions [walk_expansion] accepts (by
-    default, all). *)
+(** The occurrences in [toplevels], in no particular order, and in the inline
+    expansions [walk_expansion] accepts (by default, all). *)
 val of_toplevels
   :  ?walk_expansion:(Syntax.Toplevel.t list Located.t -> bool)
-  -> module_path:string list
   -> Syntax.Toplevel.t list
   -> Occurrence.t list

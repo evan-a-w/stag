@@ -1,13 +1,6 @@
 open! Import
 
-let files (target : Project.Target.t) =
-  let parsed = List.map target.files ~f:Source_file.parse_recovering in
-  ( List.map parsed ~f:(fun (file, _) ->
-      Option.map file ~f:(fun file -> Driver.Module_group.File file))
-    |> Option.all
-  , List.concat_map parsed ~f:(fun (_, errors) ->
-      List.map errors ~f:Diagnostic.of_source_file_error) )
-;;
+let files (target : Project.Target.t) = Pipeline.parse_files target.files
 
 let wrapped (library : Project.Target.t) =
   let files, errors = files library in
@@ -58,22 +51,24 @@ let parse project target =
   | _, errors -> Error errors
 ;;
 
-let check ?output project target =
-  let groups, errors = parse_recovering project target in
-  match groups with
-  | None -> Error (Diagnostic.sort errors)
-  | Some groups ->
-    (match
-       ( Driver.check_modules
-           ~compile_time_c_calls:(compile_time_c_calls project target)
-           ?output
-           groups
-       , errors )
-     with
-     | Ok driver, [] -> Ok driver
-     | Ok _, errors -> Error (Diagnostic.sort errors)
-     | Error { errors = type_errors; partial = _ }, errors ->
-       Error
-         (Diagnostic.sort
-            (errors @ List.map type_errors ~f:Diagnostic.of_typecheck_error)))
+let paths project target =
+  List.concat_map
+    (Project.closure project target @ [ target ])
+    ~f:(fun (target : Project.Target.t) ->
+      List.map target.files ~f:(fun source ->
+        Project.root project ^/ source.path))
+;;
+
+let prelude_choice project target =
+  Pipeline_config.Prelude_choice.of_paths (paths project target)
+;;
+
+let check ?load_prelude ?record_references ?output ~limits project target =
+  Pipeline.check
+    ~compile_time_c_calls:(compile_time_c_calls project target)
+    ?load_prelude
+    ?record_references
+    ?output
+    { prelude = prelude_choice project target; limits }
+    (parse_recovering project target)
 ;;

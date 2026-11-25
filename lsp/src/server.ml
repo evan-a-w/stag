@@ -320,7 +320,7 @@ let semantic_tokens t (document : Document.t) =
   let index = current_index t document in
   let occurrences =
     match parse document with
-    | Some toplevel -> Syntax_names.of_toplevels ~module_path:[] [ toplevel ]
+    | Some toplevel -> Syntax_names.of_toplevels [ toplevel ]
     | None -> []
   in
   let tokens =

@@ -18,3 +18,7 @@ module Inline_expansion = Stag_driver.Inline_expansion
 module Corrected_file = Stag_driver.Corrected_file
 module Prelude = Stag_eval.Prelude
 module Stdlib_checkout = Stag_build.Stdlib_checkout
+module Pipeline = Stag_build.Pipeline
+module Pipeline_config = Stag_build.Pipeline_config
+module Test_and_correct = Stag_build.Test_and_correct
+module Fs = Stag_build.Fs

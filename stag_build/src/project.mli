@@ -44,3 +44,7 @@ val find : t -> string -> Target.t option
 (** The libraries [target] depends on, directly or not, each after those it
     depends on. *)
 val closure : t -> Target.t -> Target.t list
+
+(** The files read for [t] other than sources, relative to [root]: its
+    [project_file] and the [stag] files of its targets. *)
+val input_files : t -> string list
