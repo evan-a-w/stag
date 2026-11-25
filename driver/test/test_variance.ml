@@ -430,3 +430,140 @@ let f2 b x = match b with | true -> x | false -> (fun (s @ local) -> String.leng
     val f2 : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
     |}]
 ;;
+
+(* Every order of the same arms gives the same signature. *)
+let permutations l =
+  let rec go = function
+    | [] -> [ [] ]
+    | l ->
+      List.concat_mapi l ~f:(fun i x ->
+        let rest = List.filteri l ~f:(fun j _ -> j <> i) in
+        List.map (go rest) ~f:(fun p -> x :: p))
+  in
+  go l
+;;
+
+let same_in_every_order ~prefix ~arms ~make =
+  let signatures =
+    List.map (permutations arms) ~f:(fun arms ->
+      match signature (prefix ^ make arms) with
+      | Ok signature -> signature
+      | Error errors -> String.concat ~sep:"\n" errors)
+    |> List.dedup_and_sort ~compare:String.compare
+  in
+  match signatures with
+  | [ signature ] -> print_string signature
+  | signatures ->
+    print_endline "differs by order:";
+    List.iter signatures ~f:print_endline
+;;
+
+let local_arm = "(fun (s @ local) -> String.length s)"
+let global_arm = "(fun (s : string) -> let g @ global = s in String.length g)"
+
+let%expect_test "arms join in every order, known or not" =
+  let match_of arms =
+    sprintf
+      "let f (n : int) x y = match n with %s\n"
+      (String.concat
+         ~sep:" "
+         (List.mapi arms ~f:(fun i arm ->
+            if i = List.length arms - 1
+            then sprintf "| _ -> %s" arm
+            else sprintf "| %d -> %s" i arm)))
+  in
+  same_in_every_order ~prefix:"" ~arms:[ local_arm; "x"; "y" ] ~make:match_of;
+  [%expect
+    {| val f : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> ((string @ 'm7 -> int @ 'm8) @ 'm6 -> (string @ 'm10 -> int @ 'm11) @ 'm9) @ 'm5) @ 'm1 with 'm0 <= 'm5 and 'm0 <= 'm1 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= 'm5 and 'm4 <= 'm11 and 'm6 <= 'm9 and release(locality('m6)) <= locality('m9) and 'm8 <= 'm11 and 'm10 <= 'm3 and 'm10 <= 'm7 and gc <= 'm5 and gc <= 'm1 |}];
+  same_in_every_order
+    ~prefix:""
+    ~arms:[ local_arm; global_arm; "x" ]
+    ~make:(fun arms ->
+      match_of arms ^ "let g = f 0 (fun (s : string) -> 1) ()\n");
+  [%expect
+    {|
+    val f : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> ('a @ _ -> (string @ 'm7 -> int @ 'm8) @ 'm6) @ 'm5) @ 'm1 with 'm0 <= 'm5 and 'm0 <= 'm1 and 'm2 <= 'm6 and release(locality('m2)) <= locality('m6) and 'm2 <= 'm5 and 'm4 <= 'm8 and 'm7 <= 'm3 and 'm7 <= global and gc <= 'm5 and gc <= 'm1
+    val g : string @ '_m0 -> int @ '_m1 with '_m0 <= global
+    |}];
+  same_in_every_order
+    ~prefix:""
+    ~arms:[ local_arm; global_arm; "x" ]
+    ~make:(fun arms ->
+      sprintf "let l x = [ %s ]\n" (String.concat ~sep:"; " arms));
+  [%expect
+    {| val l : (string @ 'm1 -> int @ 'm2) @ 'm0 -> list[string @ 'm4 -> int @ 'm5] @ 'm3 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm2 <= 'm5 and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3 |}]
+;;
+
+let%expect_test "a join's type known before, after, or inside a let" =
+  (* [x]'s type is only known once it is applied to a string: before the match,
+     after it, or inside a let in an arm. Each accepts a local string. *)
+  check
+    {|
+let before (n : int) x = let _ = x "a" in match n with | 0 -> x | _ -> (fun (s @ local) -> String.length s)
+let after (n : int) x = let r = match n with | 0 -> x | _ -> (fun (s @ local) -> String.length s) in let _ = x "a" in r
+let inside (n : int) x = match n with | 0 -> (let _ = x "a" in x) | _ -> (fun (s @ local) -> String.length s)
+let use_before (s @ local) = before 0 (fun (t @ local) -> 1) s
+let use_after (s @ local) = after 0 (fun (t @ local) -> 1) s
+let use_inside (s @ local) = inside 0 (fun (t @ local) -> 1) s
+|};
+  [%expect
+    {|
+    val before : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and stage('m4) <= stage('m5) and 'm6 <= 'm3 and gc <= 'm1
+    val after : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
+    val inside : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and stage('m4) <= stage('m5) and 'm6 <= 'm3 and gc <= 'm1
+    val use_before : string @ 'm0 -> int @ _ with local <= 'm0
+    val use_after : string @ 'm0 -> int @ _ with local <= 'm0
+    val use_inside : string @ 'm0 -> int @ _ with local <= 'm0
+    |}];
+  (* But a join with a global-only arm is global-only, in each. *)
+  check
+    {|
+let after (n : int) x = let r = match n with | 0 -> x | _ -> (fun (s @ local) -> String.length s) in let _ = x "a" in r
+let use_after (s @ local) = after 0 (fun (t : string) -> let g @ global = t in 1) s
+|};
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:3:19-24), then s is passed to the function (at t.stag:3:28-83), then s is used (at t.stag:3:82-83), then it is passed to a function (at t.stag:3:28-83), but must be at most global, because it is annotated global (at t.stag:3:65-71), then it is bound by an annotated let (at t.stag:3:65-71), then t is used (at t.stag:3:74-75), then t is passed to the function (at t.stag:3:36-81), then a function is used at a type with other modes |}]
+;;
+
+let%expect_test "joins by variance: contravariant and invariant parts" =
+  (* An argument joins contravariantly, so its own argument covariantly: arms
+     calling [k] with a local string and with a global one join to a function
+     whose [k] must take local strings. A [ptr]'s contents are invariant: its
+     arms must agree. *)
+  check
+    {|
+let higher (n : int) = match n with | 0 -> (fun (k : string @ local -> int) -> k "a") | _ -> (fun (k : string -> int) -> k "a")
+let same_cells (n : int) (p : ptr[string]) (q : ptr[string]) = match n with | 0 -> p | _ -> q
+|};
+  [%expect
+    {|
+    val higher : int @ _ -> ((string @ 'm0 -> int @ 'm1) @ _ -> int @ _) @ _ with nonportable gc local <= 'm0 and 'm1 <= gc global
+    val same_cells : int @ 'm0 -> (ptr[string] @ 'm2 -> (ptr[string] @ 'm4 -> ptr[string] @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm3 and gc <= 'm1
+    |}];
+  check
+    {|
+let cells (n : int) (p : ptr[string @@ external]) (q : ptr[string]) = match n with | 0 -> p | _ -> q
+|};
+  [%expect
+    {|
+    This expression has type ptr[string] but an expression was expected of type ptr[string @@ external]
+    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    |}]
+;;
+
+let%expect_test "an unresolved join is generalized as one type variable" =
+  (* Nothing told [x] and [y] apart, so the scheme has one variable for them and
+     the result, as in ML; an instance is still a join of its uses. *)
+  check
+    {|
+let pick (n : int) x y = match n with | 0 -> x | _ -> y
+let used = pick 0 (fun (s @ local) -> String.length s) (fun (s : string) -> let g @ global = s in String.length g)
+let weak = pick 0 (Ptr.make []) (Ptr.make [])
+|};
+  [%expect
+    {|
+    val pick : int @ 'm0 -> ('a @ 'm2 -> ('a @ 'm4 -> 'a @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm3 and gc <= 'm1
+    val used : string @ '_m0 -> int @ '_m1 with '_m0 <= global
+    val weak : ptr[list['_a]]
+    |}]
+;;
