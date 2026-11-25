@@ -109,6 +109,7 @@ module Variance_fuzz = struct
       | Ptr of t
       | Co
       | Contra
+      | Cyclic of [ `Co | `Contra | `Inv ]
   end
 
   (* Locality and provenance: annotations fix both, and neither has floors in
@@ -122,7 +123,13 @@ module Variance_fuzz = struct
     | 1 | 2 -> Arrow (shape random (depth - 1), shape random (depth - 1))
     | 3 -> Box (shape random (depth - 1))
     | 4 -> Ptr (shape random (depth - 1))
-    | _ -> if Random.State.bool random then Co else Contra
+    | _ ->
+      (match Random.State.int random 5 with
+       | 0 -> Co
+       | 1 -> Contra
+       | 2 -> Cyclic `Co
+       | 3 -> Cyclic `Contra
+       | _ -> Cyclic `Inv)
   ;;
 
   (* The atoms of each mode in [shape], outermost first, as indices. *)
@@ -131,7 +138,7 @@ module Variance_fuzz = struct
     | String -> 0
     | Arrow (arg, res) -> 4 + slots arg + slots res
     | Box inner | Ptr inner -> slots inner
-    | Co | Contra -> 1
+    | Co | Contra | Cyclic _ -> 1
   ;;
 
   let render (shape : Shape.t) atoms =
@@ -161,6 +168,14 @@ module Variance_fuzz = struct
       | Ptr inner -> sprintf "ptr[%s]" (go inner)
       | Co -> sprintf "co[%s]" provenances.(take ())
       | Contra -> sprintf "contra[%s]" provenances.(take ())
+      | Cyclic variance ->
+        let name =
+          match variance with
+          | `Co -> "rco"
+          | `Contra -> "rcontra"
+          | `Inv -> "rinv"
+        in
+        sprintf "%s[%s]" name provenances.(take ())
     in
     go shape
   ;;
@@ -205,6 +220,9 @@ module Variance_fuzz = struct
       | Ptr inner -> go `Inv inner
       | Co -> related variance
       | Contra -> related (flip variance)
+      | Cyclic `Co -> related variance
+      | Cyclic `Contra -> related (flip variance)
+      | Cyclic `Inv -> related `Inv
     in
     go `Co shape
   ;;
@@ -219,6 +237,12 @@ module Variance_fuzz = struct
     ( sprintf
         "type co['p : mode] = { v : string @@ 'p }\n\
          type contra['p : mode] = { f : co['p] -> unit }\n\
+         type aco['p : mode] = co['p] * box[aco['p]]\n\
+         type rco['p : mode] = { a : aco['p] }\n\
+         type acontra['p : mode] = contra['p] * box[acontra['p]]\n\
+         type rcontra['p : mode] = { b : acontra['p] }\n\
+         type ainv['p : mode] = box[ainv['p]] -> co['p]\n\
+         type rinv['p : mode] = { c : ainv['p] }\n\
          let diverge (u : unit) = diverge u\n\
          let f : %s = diverge ()\n\
          let g : %s = f"
@@ -244,5 +268,5 @@ let%expect_test "random uses at other modes are accepted as variance says" =
   print_s
     [%message
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
-  [%expect {| ((!accepted 212) (!rejected 188) (wrong 0)) |}]
+  [%expect {| ((!accepted 206) (!rejected 194) (wrong 0)) |}]
 ;;

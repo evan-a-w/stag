@@ -647,13 +647,13 @@ and unify_if_present' state ~presence ~ty1 ~ty2 =
    are unified exactly. *)
 module Sub_state = struct
   type t =
-    { links : Int.Hash_set.t
+    { links : Int.Hash_set.t Int.Table.t
     ; left : Type.ty Type.Link_pairs.t
     ; right : Type.ty Type.Link_pairs.t
     }
 
   let create () =
-    { links = Int.Hash_set.create ()
+    { links = Int.Table.create ()
     ; left = Type.Link_pairs.create ()
     ; right = Type.Link_pairs.create ()
     }
@@ -661,10 +661,10 @@ module Sub_state = struct
 
   (* Ordered, as [a <= b] and [b <= a] differ. *)
   let assume t id1 id2 =
-    let key = (id1 lsl 31) lor id2 in
-    Hash_set.mem t.links key
+    let uppers = Hashtbl.find_or_add t.links id1 ~default:Int.Hash_set.create in
+    Hash_set.mem uppers id2
     ||
-    (Hash_set.add t.links key;
+    (Hash_set.add uppers id2;
      false)
   ;;
 

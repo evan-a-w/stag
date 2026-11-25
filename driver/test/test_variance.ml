@@ -294,3 +294,49 @@ let compose f g x = f (g x)
     val compose : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and meet(locality('m8), regional) <= locality('m5) and gc <= 'm7 and gc <= 'm3
     |}]
 ;;
+
+let%expect_test "a cyclic alias's parameter is invariant when reached both ways" =
+  (* [f['a]] reaches its own expansion contravariantly (in [box[f['a]] ->]) and
+     ['a] covariantly, so ['a] is invariant in [r], and a local-accepting
+     function in [r1] can't be passed off as a global-accepting one. *)
+  check
+    {|
+type f['a] = box[f['a]] -> 'a
+type r['a] = { x : f['a] }
+let cell : ptr[ptr[int]] = Ptr.make (Ptr.make 0)
+let pf : f[ptr[int] @ local -> unit] =
+  fun (b : box[f[ptr[int] @ local -> unit]]) ->
+    let k = b.* b in
+    let u = k (stack_ (Ptr.make 1)) in
+    k
+let r1 : r[ptr[int] @ local -> unit] = { x = pf }
+let r2 : r[ptr[int] -> unit] = r1
+|};
+  [%expect {|
+    This expression has type ptr[int] @ local -> unit but an expression was expected of type ptr[int] -> unit
+    Their modes differ: This is local, because it is annotated local (at t.stag:10:22-27), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:11:11-19)
+    |}];
+  check
+    {|
+type co['p : mode] = { v : string @@ 'p }
+type f['p : mode] = box[f['p]] -> co['p]
+type r['p : mode] = { x : f['p] }
+let widen (r : r[gc]) : r[external] = r
+|};
+  [%expect {|
+    This expression has type r[gc] but an expression was expected of type r[external]
+    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    |}];
+  check
+    {|
+type co['p : mode] = { v : string @@ 'p }
+type f['p : mode] = box[f['p]] -> co['p]
+type r['p : mode] = { x : f['p] }
+let narrow (r : r[external]) : r[gc] = r
+|};
+  [%expect {|
+    This expression has type r[external] but an expression was expected of type r[gc]
+    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    |}]
+;;
+
