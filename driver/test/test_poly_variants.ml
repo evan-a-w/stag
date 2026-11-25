@@ -131,7 +131,7 @@ let%expect_test "residuals of a catch-all" =
     val open_ended : [`A of 'a | `B of 'a; ..'b] -> ([..'b] -> 'a) -> 'a
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 119 1)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 120 1)))
       (Missing_label C)))
     |}]
 ;;
@@ -474,7 +474,7 @@ let two = T (`Cons (1, Ptr.make (T `Nil)))
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 32 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 25 1))))) @
      t.stag:2:27-33)
     ((Unification_error
       (Row_mismatch

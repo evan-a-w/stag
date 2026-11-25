@@ -843,6 +843,19 @@ let fresh_modes_copy fresh ~rank ty =
   if Type.is_error ty then None else copy ty
 ;;
 
+(* What settling or fixing a join gives: what is related has the same structure,
+   so only modes can differ. *)
+let only_modes result =
+  Result.map_error result ~f:(fun (error : Unification_error.t) ->
+    match error with
+    | Type_mismatch (_, _, Modes error) | Bound_var error -> error
+    | error ->
+      raise_s
+        [%message
+          "Unify: settling a join failed other than by modes"
+            (error : Unification_error.t)])
+;;
+
 (* Relates by variance even while a side is unknown if [join], or either side is
    a join variable ([join_var]): then within it too. *)
 let rec sub_ty' state sub ~join ~flip ~lower ~upper
@@ -957,25 +970,13 @@ and add_edge fresh ~lower ~upper vars =
     edges := edge :: List.filter !edges ~f:(fun edge -> not edge.settled))
 
 (* [var]'s edges, given the watcher keeping them if it has none yet, which makes
-   it a join variable. Once [var] is generalized while still unbound, all that
-   is to have its structure is made equal to it: as no use has told them apart,
-   its scheme has one type variable for them, as [unify_ty] would have made it. *)
+   it a join variable. Once [var] is generalized while still unbound, it is
+   [fixed]. *)
 and join_edges fresh (var : (Type.ty, Nothing.t) Type.Var.t) =
   match Watcher.find var.watchers Sub_edge.key with
   | Some edges -> edges
   | None ->
     let edges = ref [] in
-    let only_modes result =
-      Result.map_error result ~f:(fun (error : Unification_error.t) ->
-        match error with
-        | Type_mismatch (_, _, Modes error) | Bound_var error -> error
-        | error ->
-          (* What is related has the same structure, so only modes differ. *)
-          raise_s
-            [%message
-              "Unify: settling a variable's use failed other than by modes"
-                (error : Unification_error.t)])
-    in
     var.watchers
     <- Watcher.create
          Sub_edge.key
@@ -995,18 +996,45 @@ and join_edges fresh (var : (Type.ty, Nothing.t) Type.Var.t) =
                  ~upper:edge.upper))
            |> only_modes)
          ~instantiate:(fun (_ : Sub_edge.t list ref) -> None)
-         ~generalize:(fun (_ : Sub_edge.t list ref) ->
-           List.fold_result (Sub_edge.related var) ~init:() ~f:(fun () other ->
-             unify_ty' (State.create fresh) ~ty1:(TVar other) ~ty2:(TVar var))
-           |> only_modes)
+         ~generalize:(fun (_ : Sub_edge.t list ref) -> fix fresh var)
        :: var.watchers;
     edges
+
+(* All that is to have [var]'s structure is made equal to it: as no use has told
+   them apart, one type variable stands for them, as [unify_ty] would have made
+   it. *)
+and fix fresh var =
+  List.fold_result (Sub_edge.related var) ~init:() ~f:(fun () other ->
+    unify_ty' (State.create fresh) ~ty1:(TVar other) ~ty2:(TVar var))
+  |> only_modes
 ;;
 
 let join_var fresh ~rank =
   let var = Fresh.var fresh ~rank in
   ignore (join_edges fresh var : Sub_edge.t list ref);
   var
+;;
+
+let fix_joins fresh tys =
+  let errors = Queue.create () in
+  let iter : Nothing.t Type.Iter.t =
+    { ty =
+        (fun ~guarded:_ var ->
+          (match var.state with
+           | Unbound _ when Sub_edge.is_join var ->
+             Result.iter_error (fix fresh var) ~f:(Queue.enqueue errors)
+           | Unbound _ | Generic | Link _ -> ());
+          Ok ())
+    ; row = (fun ~guarded:_ _ -> Ok ())
+    ; presence = (fun ~guarded:_ _ -> Ok ())
+    ; mode = (fun _ -> Ok ())
+    }
+  in
+  List.iter tys ~f:(fun ty ->
+    match Type.iter_ty iter ty with
+    | Ok () -> ()
+    | Error _ -> .);
+  Queue.to_list errors
 ;;
 
 let sub_ty fresh ~lower ~upper =

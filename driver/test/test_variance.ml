@@ -426,7 +426,7 @@ let f2 b x = match b with | true -> x | false -> (fun (s @ local) -> String.leng
 |};
   [%expect
     {|
-    val f : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm3 -> int @ 'm4) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and gc <= 'm1
-    val f2 : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm3 -> int @ 'm4) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and gc <= 'm1
+    val f : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
+    val f2 : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
     |}]
 ;;

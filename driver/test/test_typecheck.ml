@@ -619,10 +619,10 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
          (Match (scrutinee (Lit (Int 1) : int))
           (cases
            (((Lit (Int 2) : int)
-             (App (Var (Bound (Local opaque/14)) : "int -> <'_c>{}")
-              (Lit (Int 1) : int) : <'_c>{}))))
-          : <'_c>{}))
-        : <'_c>{}))
+             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+              (Lit (Int 1) : int) : <'_d>{}))))
+          : <'_e>{}))
+        : <'_e>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))
      @ t.stag:3:2-59)
     ((Unification_error
@@ -1023,9 +1023,9 @@ let%expect_test "instances of a scheme bounded by an outer presence" =
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link (RVar (Unbound 70 1)))))
+        (RVar (Link (RVar (Unbound 74 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 81 1)))
+        (RVar (Unbound 85 1)))
        (Presence_mismatch x)))
      @ t.stag:2:78-89)
     val closeit : <int>{} -> unit
@@ -1085,7 +1085,7 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch
-       (RExtend y (PVar (Link Present)) (TVar (Link (TVar (Unbound 113 1))))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 125 1))
         (RVar (Unbound 128 1)))
        (RVar (Link REmpty)) (Missing_label y)))
      @ t.stag:4:21-28)
@@ -1258,16 +1258,16 @@ let%expect_test "instances of a scheme bounded by an outer row" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 140 1)))
+        (RVar (Unbound 142 1)))
        (Missing_label y)))
      @ t.stag:4:77-78)
     used after, k closed
     ((Unification_error
-      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 128 1)))
+      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 132 1)))
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 130 1))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 134 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]

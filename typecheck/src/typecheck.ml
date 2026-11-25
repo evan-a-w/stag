@@ -2310,18 +2310,23 @@ let finish_scc
         raise_s
           [%message "finish_scc: member not checked" (member : Toplevel.t)])
   in
-  if generalize
-  then (
-    List.iter2_exn members tys ~f:(fun member ty ->
-      List.iter (Scheme.generalize_watchers ~rank:0 [ ty ]) ~f:(fun error ->
-        Program_env.report
-          program
-          (Module_scope.within
-             member.module_
-             (Typecheck_error.create ~loc:member.expr.loc (Mode_error error)))));
-    List.iter others ~f:(fun (use : Quoted_use.t) ->
-      List.iter (Scheme.generalize_watchers ~rank:0 [ use.ty ]) ~f:(fun error ->
-        Program_env.report_use program use (Bound_var error))));
+  (* What generalizing does to the join variables, or, if [tys] are not
+     generalized, so fixed, its equivalent. *)
+  let settle_joins ty =
+    if generalize
+    then Scheme.generalize_watchers ~rank:0 [ ty ]
+    else Unify.fix_joins t [ ty ]
+  in
+  List.iter2_exn members tys ~f:(fun member ty ->
+    List.iter (settle_joins ty) ~f:(fun error ->
+      Program_env.report
+        program
+        (Module_scope.within
+           member.module_
+           (Typecheck_error.create ~loc:member.expr.loc (Mode_error error)))));
+  List.iter others ~f:(fun (use : Quoted_use.t) ->
+    List.iter (settle_joins use.ty) ~f:(fun error ->
+      Program_env.report_use program use (Bound_var error)));
   let awaiting =
     if generalize
     then (

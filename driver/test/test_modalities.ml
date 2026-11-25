@@ -507,7 +507,7 @@ let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
     |}];
   check
     {|
@@ -520,10 +520,10 @@ let use (x @ local) = let r @ global = f x gb in r
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
     val gb : box[gc]
-    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and provenance('m0) <= provenance('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
-    val use : string @ 'm0 -> string @ 'm1 with local <= 'm0 and provenance('m0) <= provenance('m1) and nonportable gc <= 'm1
+    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
+    val use : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
     |}]
 ;;
 
