@@ -72,6 +72,10 @@ module Layout : sig
     -> Reason.t
     -> (unit, Mode_error.t) Result.t
 
+  (** A new layout, which has pointers once both [a] and [b] do: once either is
+      pointer-free, so is it. *)
+  val both : Id_source.t -> t -> t -> t
+
   (** [t] has pointers if [lower] does. *)
   val add_below : lower:t -> t -> (unit, Mode_error.t) Result.t
 

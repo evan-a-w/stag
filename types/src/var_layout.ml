@@ -58,6 +58,8 @@ let decide t layout ty =
       Mode.Layout.add_below ~lower layout)
 ;;
 
+let present = Mode.Reason.create "a field of the row turned out to be present"
+
 let generalize layout =
   match Mode.Layout.bound layout with
   | Some _ -> Ok ()
@@ -114,7 +116,7 @@ let of_row t var =
 let rec of_presence t var =
   find_or_add t var ~bind:(fun layout (presence : Type.presence) ->
     match Type.canonical_presence presence with
-    | Present -> Mode.Layout.raise layout ~because:[]
+    | Present -> Mode.Layout.raise layout ~because:[ present ]
     | Absent ->
       Mode.Layout.pointer_free layout;
       Ok ()
@@ -126,6 +128,15 @@ let above t lowers =
   List.iter lowers ~f:(fun lower ->
     Mode.Error.ok_exn (Mode.Layout.add_below ~lower layout));
   layout
+;;
+
+let both t layout lowers =
+  Mode.Layout.both
+    t.ids
+    layout
+    (match lowers with
+     | [ lower ] -> lower
+     | lowers -> above t lowers)
 ;;
 
 let within t ~first_id f =

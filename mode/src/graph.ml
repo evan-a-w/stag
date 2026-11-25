@@ -79,6 +79,8 @@ and layout =
   (** It has pointers if any of these do: the layouts of the variables of the
       type its own variable was bound to. *)
   ; mutable waiting : dormant list
+  ; mutable conjuncts : (layout * layout) list
+  (** [(other, both)]: [both] has pointers once it and [other] do. *)
   }
 
 and layout_state =
@@ -276,8 +278,16 @@ let kind_nodes = function
   | Upper (t, _) | Lower (t, _) -> [ t ]
 ;;
 
-(* The dormant constraints that failed to be added, in the innermost [attempt]. *)
-let failed = ref []
+(* In the innermost [attempt]: the dormant constraints that failed to be added,
+   and the layouts raised. *)
+module Attempted = struct
+  type t =
+    { mutable failed : dormant list
+    ; mutable raised : layout list
+    }
+end
+
+let attempted : Attempted.t option ref = ref None
 
 let fire dormant ~because =
   if dormant.fired
@@ -286,7 +296,10 @@ let fire dormant ~because =
     log (fun () -> dormant.fired <- false);
     dormant.fired <- true;
     let result = add_kind dormant.kind (dormant.dormant_reasons @ because) in
-    if Result.is_error result then failed := dormant :: !failed;
+    if Result.is_error result
+    then
+      Option.iter !attempted ~f:(fun attempted ->
+        attempted.failed <- dormant :: attempted.failed);
     result)
 ;;
 
@@ -300,6 +313,7 @@ module Layout_ = struct
     ; layout_above = []
     ; layout_below = []
     ; waiting = []
+    ; conjuncts = []
     }
   ;;
 
@@ -333,25 +347,44 @@ module Layout_ = struct
        | Some bound -> Error (Mode_error.Has_pointers { because; bound })
        | None ->
          set_state t (Has_pointers because);
-         let result =
-           let%bind.Result () =
-             List.fold_result
-               (List.rev t.waiting)
-               ~init:()
-               ~f:(fun () dormant -> fire dormant ~because)
-           in
+         Option.iter !attempted ~f:(fun attempted ->
+           attempted.raised <- t :: attempted.raised);
+         let%bind.Result () =
+           List.fold_result (List.rev t.waiting) ~init:() ~f:(fun () dormant ->
+             fire dormant ~because)
+         in
+         let%bind.Result () =
            List.fold_result t.layout_above ~init:() ~f:(fun () above ->
              raise above ~because)
          in
-         (* What it guards all follows from the one binding that failed. *)
-         if Result.is_error result then failed := t.waiting @ !failed;
-         result)
+         List.fold_result t.conjuncts ~init:() ~f:(fun () (other, both) ->
+           match other.layout_state with
+           | Has_pointers because' -> raise both ~because:(because @ because')
+           | Unknown | Pointer_free -> Ok ()))
   ;;
 
-  let pointer_free t =
+  let rec pointer_free t =
     match t.layout_state with
-    | Unknown -> set_state t Pointer_free
+    | Unknown ->
+      set_state t Pointer_free;
+      List.iter t.conjuncts ~f:(fun (_, both) -> pointer_free both)
     | Pointer_free | Has_pointers _ -> ()
+  ;;
+
+  let both ids a b =
+    let both = create ids in
+    (match a.layout_state, b.layout_state with
+     | Pointer_free, _ | _, Pointer_free -> pointer_free both
+     | Has_pointers because, Has_pointers because' ->
+       set_state both (Has_pointers (because @ because'))
+     | _ ->
+       List.iter
+         [ a, b; b, a ]
+         ~f:(fun (layout, other) ->
+           let conjuncts = layout.conjuncts in
+           log (fun () -> layout.conjuncts <- conjuncts);
+           layout.conjuncts <- (other, both) :: conjuncts));
+    both
   ;;
 
   let rec bound_by t bound =
@@ -449,17 +482,27 @@ module Layout = struct
   let add_below ~lower t = atomically (fun () -> add_below ~lower t)
 
   let attempt f =
-    let outer = !failed in
-    failed := [];
-    let result, dropped =
+    let outer = !attempted in
+    let mine = { Attempted.failed = []; raised = [] } in
+    attempted := Some mine;
+    let result =
       Exn.protect
-        ~f:(fun () ->
-          let result = atomically f in
-          result, !failed)
-        ~finally:(fun () -> failed := outer)
+        ~f:(fun () -> atomically f)
+        ~finally:(fun () -> attempted := outer)
     in
-    if Result.is_error result
-    then
+    match result with
+    | Ok _ ->
+      Option.iter outer ~f:(fun outer ->
+        outer.failed <- mine.failed @ outer.failed;
+        outer.raised <- mine.raised @ outer.raised);
+      result
+    | Error _ ->
+      (* Undone, what the layouts raised guard would fire again: it all follows
+         from the one binding that failed. *)
+      let dropped =
+        mine.failed
+        @ List.concat_map mine.raised ~f:(fun layout -> layout.waiting)
+      in
       atomically (fun () ->
         List.iter dropped ~f:(fun dormant ->
           if not dormant.fired
@@ -468,7 +511,7 @@ module Layout = struct
             dormant.fired <- true));
         Ok ())
       |> Mode_error.ok_exn;
-    result
+      result
   ;;
 
   let pointer_free t =
@@ -476,6 +519,15 @@ module Layout = struct
       pointer_free t;
       Ok ())
     |> Mode_error.ok_exn
+  ;;
+
+  let both ids a b =
+    let result = ref None in
+    atomically (fun () ->
+      result := Some (both ids a b);
+      Ok ())
+    |> Mode_error.ok_exn;
+    Option.value_exn !result
   ;;
 
   let guard_edge lo morphism hi ~guards reason =

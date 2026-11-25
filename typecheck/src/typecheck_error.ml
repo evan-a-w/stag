@@ -301,6 +301,11 @@ let mode_reasons ?(said = String.Hash_set.create ()) because =
   |> String.concat ~sep:", then "
 ;;
 
+let because_clause = function
+  | "" -> ""
+  | reasons -> ", because " ^ reasons
+;;
+
 let mode_message : Mode.Error.t -> string =
   let point (type a) (axis : a Mode.Axis.t) (point : a) =
     let module C = (val Mode.Axis.chain axis) in
@@ -309,17 +314,17 @@ let mode_message : Mode.Error.t -> string =
   function
   | Has_pointers { because; bound } ->
     sprintf
-      "This type has pointers, because %s, but must be pointer-free, because %s"
-      (mode_reasons because)
+      "This type has pointers%s, but must be pointer-free, because %s"
+      (because_clause (mode_reasons because))
       (mode_reasons [ bound.reason ])
   | Mismatch { var = _; axis; lower; upper; lower_because; upper_because } ->
     let said = String.Hash_set.create () in
     let lower_because = mode_reasons ~said lower_because in
     let upper_because = mode_reasons ~said upper_because in
     sprintf
-      "This is %s, because %s, but must be at most %s, because %s"
+      "This is %s%s, but must be at most %s, because %s"
       (point axis lower)
-      lower_because
+      (because_clause lower_because)
       (point axis upper)
       upper_because
   | Unequal { axis; first; second; because } ->

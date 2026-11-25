@@ -148,3 +148,25 @@ A splice's code using a variable bound at another level is explained.
   module Level : sig
     val w : int
   end
+
+With -modes, the signature's modes are printed in full: what a weak
+variable's layout decides is printed with what it waits on.
+
+  $ cat > weak.stag <<'EOF'
+  > let loop u = loop u
+  > let cell = Ptr.make (loop ())
+  > let g (x @ local) = cell.* <- x
+  > EOF
+
+  $ stag check weak.stag
+  module Weak : sig
+    val loop : 'a -> 'b
+    val cell : ptr['_a]
+    val g : '_a @ local -> unit
+  end
+  $ stag check -modes weak.stag
+  module Weak : sig
+    val loop : 'a @ 'm0 -> 'b @ _ with portable <= 'm0
+    val cell : ptr['_a]
+    val g : '_a @ 'm0 -> unit @ _ with local <= 'm0 and 'm0 <= global unless pointer_free('_a)
+  end

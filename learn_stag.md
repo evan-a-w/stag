@@ -9,6 +9,7 @@ OCaml, and today runs in an interpreter (a compiler to LLVM is planned, see
 
 ```sh
 stag check FILE.stag     # typecheck, print the signature
+stag check -modes FILE.stag  # ... with every mode and mode constraint
 stag run FILE.stag       # typecheck and evaluate
 stag test FILE.stag      # run let%expect_test tests (-promote to accept)
 stag fmt -inplace FILE.stag
@@ -499,8 +500,8 @@ let leak x = stack_ (Ptr.make x)
 ```
 
 While a weak variable's type isn't known, a constraint crossing would spare
-waits on it, and `stag check` (which shows modes in full) prints it with what
-it waits on: after `let cell = Ptr.make (loop ())`, a function storing a local
+waits on it, and `stag check -modes` (which prints modes in full) prints it
+with what it waits on: after `let cell = Ptr.make (loop ())`, a function storing a local
 argument into `cell` is `'_a @ 'm0 -> unit with local <= 'm0 and 'm0 <= global
 unless pointer_free('_a)`. This form is only printed, never written.
 

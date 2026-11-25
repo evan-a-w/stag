@@ -293,7 +293,7 @@ let absent c = let r = loop () in let q = .<let y = "s" in .~(c : <int>{..'r})>.
 |};
   [%expect
     {|
-    This is local, because it is annotated local (at t.stag:3:111-116), then l is used (at t.stag:3:135-136), but must be at most global, because it is annotated global (at t.stag:3:93-99), then it is bound by an annotated let (at t.stag:3:93-99)
+    This is local, because it is annotated local (at t.stag:3:111-116), then l is used (at t.stag:3:135-136), then a field of the row turned out to be present, but must be at most global, because it is annotated global (at t.stag:3:93-99), then it is bound by an annotated let (at t.stag:3:93-99)
     This is local, because it is annotated local (at t.stag:4:146-151), then l is used (at t.stag:4:170-171), then it is bound by an annotated let (at t.stag:4:128-134), but must be at most global, because it is annotated global (at t.stag:4:128-134)
     val loop : 'a @ 'm0 -> 'b @ _ with portable <= 'm0
     val pointer_free : <int>{y : immut int} @ _ -> int @ _
@@ -455,6 +455,107 @@ let f c = let r = loop () in let s @ global = (let l @ local = (r : {..'r}) in l
   [%expect
     {|
     t.stag:1:27-33: This is local, because it is annotated local (at t.stag:1:45-50), then l is used (at t.stag:1:60-61), then it is bound by an annotated let (at t.stag:1:27-33), but must be at most global, because it is annotated global (at t.stag:1:27-33)
-    t.stag:2:109-110: This is local, because it is annotated local (at t.stag:2:55-60), then l is used (at t.stag:2:79-80), but must be at most global, because it is annotated global (at t.stag:2:37-43), then it is bound by an annotated let (at t.stag:2:37-43)
+    t.stag:2:109-110: This is local, because it is annotated local (at t.stag:2:55-60), then l is used (at t.stag:2:79-80), then a field of the row turned out to be present, but must be at most global, because it is annotated global (at t.stag:2:37-43), then it is bound by an annotated let (at t.stag:2:37-43)
+    |}]
+;;
+
+(* A field has pointers only once it is present and its entry has: neither being
+   known first decides it. *)
+let%expect_test "a row entry crosses whichever of its presence and type is \
+                 known first"
+  =
+  let program ~entry_first ~absent =
+    let entry = {|let z : string = v in |} in
+    let presence =
+      if absent
+      then {|let k : {} = r in |}
+      else {|let k : {`a : string} = r in |}
+    in
+    [%string
+      {|let loop u = loop u
+let f c (v @ portable) = let r = loop () in let q = .<let y = v in .~(c : <int>{..'r})>. in let s @ global = (let l @ local = (r : {..'r}) in l) in %{if entry_first then entry ^ presence else presence ^ entry}0|}]
+  in
+  List.iter [ true; false ] ~f:(fun absent ->
+    List.iter [ true; false ] ~f:(fun entry_first ->
+      printf "absent=%b entry_first=%b: " absent entry_first;
+      located (program ~entry_first ~absent)));
+  [%expect
+    {|
+    absent=true entry_first=true: ok
+    absent=true entry_first=false: ok
+    absent=false entry_first=true: t.stag:2:194-195: This is local, because it is annotated local (at t.stag:2:118-123), then l is used (at t.stag:2:142-143), then a field of the row turned out to be present, but must be at most global, because it is annotated global (at t.stag:2:100-106), then it is bound by an annotated let (at t.stag:2:100-106)
+    absent=false entry_first=false: t.stag:2:172-173: This is local, because it is annotated local (at t.stag:2:118-123), then l is used (at t.stag:2:142-143), then a field of the row turned out to be present, but must be at most global, because it is annotated global (at t.stag:2:100-106), then it is bound by an annotated let (at t.stag:2:100-106)
+    |}]
+;;
+
+let%expect_test "a field turning out present gives its reason" =
+  located
+    {|let f : {..'r} @ 'm -> {..'r} @ global with ..'r : pointer_free = fun x -> x
+let loop u = loop u
+let r = loop ()
+let a = f r
+let b = (r : {`a : string})|};
+  [%expect
+    {| t.stag:4:8-9: This type has pointers, because a field of the row turned out to be present (at t.stag:5:8-27), but must be pointer-free, because it is annotated ..'r : pointer_free (at t.stag:1:8-63) |}]
+;;
+
+(* A type a splice computes is known once the splice has run, whether it is used
+   before or after its declaration. *)
+let%expect_test "a type computed by a splice crosses as what it computes" =
+  let kind =
+    {|let kind = Stag.Type_decl.Kind.Alias (Stag.Type_expr.con "int" Nil)
+|}
+  in
+  let decl = "type t = .~kind\n" in
+  let local = "let f (x : t @ local) = let r @ global = x in r\n" in
+  let weak =
+    {|let loop u = loop u
+let cell = Ptr.make (loop ())
+let g (x @ local) = cell.* <- x
+let set = cell.* <- (1 : t)
+|}
+  in
+  List.iter
+    [ "used after", kind ^ decl ^ local ^ weak
+    ; "used before", kind ^ local ^ weak ^ decl
+    ]
+    ~f:(fun (name, source) ->
+      printf "%s: " name;
+      located source);
+  [%expect {|
+    used after: ok
+    used before: ok
+    |}]
+;;
+
+(* Checking [b] runs the include, to look for [w], and its code uses [c], still
+   being checked: abandoned, it is checked again once [c] is ([b] doesn't see
+   [w]). What the abandoned check waited on is dropped with it: storing a string
+   into [cell] is one error, of the check that finished. *)
+let%expect_test "a splice's abandoned check leaves no layout checks behind" =
+  let source ~store =
+    [%string
+      {|let loop u = loop u
+let cell = Ptr.make (loop ())
+let value name = Cons (Box.make ((Stag.Toplevel.let_ name Nil (Stag.Expr.int 1), Nil)))
+let c = b
+include .~(let g (x @ local) = cell.* <- x in let _ = c in value "w")
+let b = w
+%{store}|}]
+  in
+  List.iter
+    [ "let set = cell.* <- \"s\"\n"; "let set = cell.* <- 1\n"; "" ]
+    ~f:(fun store ->
+      print_endline (String.strip store);
+      located (source ~store));
+  [%expect
+    {|
+    let set = cell.* <- "s"
+    t.stag:6:8-9: Unbound value w
+    t.stag:7:20-23: This is regional, because it is annotated local (at t.stag:5:22-27), then x is passed to the function (at t.stag:5:10-69), then x is used (at t.stag:5:41-42), then its type turned out to be string, which has pointers, but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:5:41-42)
+    let set = cell.* <- 1
+    t.stag:6:8-9: Unbound value w
+
+    t.stag:6:8-9: Unbound value w
     |}]
 ;;

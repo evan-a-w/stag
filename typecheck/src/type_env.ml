@@ -1712,7 +1712,28 @@ let field_modality t name ~record =
 
 let layouts t = Set_once.get_exn t.layouts
 
-let pointer_free' t ty ~unknown =
+(* Whether [ty] is pointer-free, taking the layouts not known yet, which it
+   collects when [~layouts], to be pointer-free. *)
+let pointer_free' t ty ~layouts:collect =
+  let collected = ref [] in
+  let unknown layout =
+    collect
+    &&
+    (collected := layout () :: !collected;
+     true)
+  in
+  (* What [f] collects, set apart. *)
+  let collecting f =
+    let outer = !collected in
+    collected := [];
+    let result = f () in
+    let mine =
+      List.dedup_and_sort !collected ~compare:(fun a b ->
+        Int.compare (Mode.Layout.id a) (Mode.Layout.id b))
+    in
+    collected := outer;
+    result, mine
+  in
   let visiting = String.Hash_set.create () in
   let visiting_ids = Int.Hash_set.create () in
   (* Shared aliases and nodes are visited once: a DAG of them is linear. *)
@@ -1732,10 +1753,13 @@ let pointer_free' t ty ~unknown =
     then visit id ~f
     else (
       match Hashtbl.find table id with
-      | Some result -> result
+      | Some (result, mine) ->
+        collected := mine @ !collected;
+        result
       | None ->
-        let result = visit id ~f in
-        Hashtbl.set table ~key:id ~data:result;
+        let ((result, mine) as data) = collecting (fun () -> visit id ~f) in
+        Hashtbl.set table ~key:id ~data;
+        collected := mine @ !collected;
         result)
   in
   let rec ty_ params (ty : Type.ty) =
@@ -1772,8 +1796,14 @@ let pointer_free' t ty ~unknown =
           | Absent -> true
           | Present -> ty_ params entry
           | PVar var ->
-            ty_ params entry
-            || unknown (fun () -> Var_layout.of_presence (layouts t) var))
+            let presence () = Var_layout.of_presence (layouts t) var in
+            (match collecting (fun () -> ty_ params entry) with
+             | false, _ -> unknown presence
+             | true, [] -> true
+             | true, entry ->
+               (* Has pointers once present with an entry that has. *)
+               unknown (fun () ->
+                 Var_layout.both (layouts t) (presence ()) entry)))
          && row_ params rest)
   and arg params : Type.arg -> bool = function
     | ATy entry -> ty_ params entry
@@ -1825,22 +1855,18 @@ let pointer_free' t ty ~unknown =
       Hash_set.remove visiting name;
       result
   in
-  ty_ Int.Map.empty ty
+  collecting (fun () -> ty_ Int.Map.empty ty)
 ;;
 
-let pointer_free t ty = pointer_free' t ty ~unknown:(fun _ -> false)
+let pointer_free t ty = fst (pointer_free' t ty ~layouts:false)
 
 let layout_of t ty : Var_layout.Layout_of.t =
-  let unknown = ref [] in
-  if not
-       (pointer_free' t ty ~unknown:(fun layout ->
-          unknown := layout () :: !unknown;
-          true))
-  then Has_pointers
-  else (
-    match Mode.Layout.roots !unknown with
-    | [] -> Pointer_free
-    | layouts -> Depends layouts)
+  match pointer_free' t ty ~layouts:true with
+  | false, _ -> Has_pointers
+  | true, unknown ->
+    (match Mode.Layout.roots unknown with
+     | [] -> Pointer_free
+     | layouts -> Depends layouts)
 ;;
 
 let create ?(record_references = false) fresh ~report =

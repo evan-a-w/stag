@@ -39,6 +39,10 @@ val of_presence
 (** A layout of its own, for what has pointers if any of [lowers] do. *)
 val above : t -> Mode.Layout.t list -> Mode.Layout.t
 
+(** A layout of its own, for what has pointers once [layout] and any of [lowers]
+    do: a field that may be present, of an entry with those layouts. *)
+val both : t -> Mode.Layout.t -> Mode.Layout.t list -> Mode.Layout.t
+
 (** The variables made while checking a scope: those numbered from [first_id]
     on, until one within it begins. *)
 module Frame : sig

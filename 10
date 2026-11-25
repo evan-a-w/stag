@@ -1,8 +1,0 @@
-      let members = scc.pending in
-      finish_scc
-        t
-        program
-        members
-        ~layouts
-        ~component:scc.component
-        ~quoting:scc.quoting;
