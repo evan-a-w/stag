@@ -1540,21 +1540,13 @@ let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f : Typed.Ident.Set.t =
 (* The toplevels [expr] uses when run, rather than in the code it builds or at
    compile time. *)
 let rec run_toplevels (expr : Typed.Expr.t) ~depth ~f =
-  let go = run_toplevels ~f in
-  match expr.desc with
-  | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
-    if depth = 0 then f ident
-  | Assign ((Bound (Toplevel ident) | Persistent (Toplevel ident)), value) ->
-    if depth = 0 then f ident;
-    go value ~depth
-  | Quote body -> go body ~depth:(depth + 1)
-  | Splice { code; subs } ->
-    go code ~depth:(depth - 1);
-    (match subs with
-     | Explicit subs -> List.iter subs ~f:(fun (_, sub) -> go sub ~depth)
-     | Implicit _ -> ())
-  | Toplevel_splice { code = _; expansion } -> go expansion ~depth
-  | _ -> List.iter (Typed.Expr.sub_exprs expr) ~f:(go ~depth)
+  (match expr.desc with
+   | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
+   | Assign ((Bound (Toplevel ident) | Persistent (Toplevel ident)), _) ->
+     if depth = 0 then f ident
+   | _ -> ());
+  Typed.Expr.iter_children expr ~f:(fun child expr ->
+    run_toplevels expr ~depth:(depth + child.depth) ~f)
 ;;
 
 module Init_need = struct

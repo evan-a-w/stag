@@ -1,12 +1,5 @@
 open! Import
-
-module Namespace : sig
-  type t =
-    | Type
-    | Constructor
-    | Field
-    | Value
-end
+module Namespace = Traverse.Namespace
 
 (** [toplevel] with [f] applied to each of its [Decl_path]s, including those of
     the declarations of its module if it is one, but not those of expansions,

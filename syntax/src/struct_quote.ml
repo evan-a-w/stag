@@ -132,26 +132,29 @@ let expand_exn toplevels ~loc =
     Bound.bind bound ~in_)
 ;;
 
-let rec check_no_expansions (toplevels : Toplevel.t list) =
+(* Its declarations, not those of any struct quote within them, which are not
+   expanded but quoted. *)
+let check_no_expansions toplevels =
+  let default =
+    Traverse.Visitor.default ~enter:(fun () _ -> ()) ~into_expansions:false
+  in
+  let visitor =
+    { default with
+      expr = (fun _ () _ e -> e)
+    ; toplevel =
+        (fun v () (toplevel : Toplevel.t) ->
+          match toplevel.txt with
+          | Include (_, Some _) | Module_splice (_, _, Some _) ->
+            raise
+              (Error
+                 ( toplevel.loc
+                 , "A struct quote can't hold an inline expansion: generated \
+                    declarations have none" ))
+          | _ -> Traverse.toplevel v () toplevel)
+    }
+  in
   List.iter toplevels ~f:(fun toplevel ->
-    match toplevel.txt with
-    | Include (_, Some _) | Module_splice (_, _, Some _) ->
-      raise
-        (Error
-           ( toplevel.loc
-           , "A struct quote can't hold an inline expansion: generated \
-              declarations have none" ))
-    | Module (_, members) -> check_no_expansions members
-    | Include _
-    | Module_splice _
-    | Let _
-    | Let_mut _
-    | Type _
-    | Exception _
-    | External _
-    | Malformed_exception _
-    | Expect_test _
-    | Bench _ -> ())
+    ignore (visitor.toplevel visitor () toplevel : Toplevel.t))
 ;;
 
 let expand toplevels ~loc =

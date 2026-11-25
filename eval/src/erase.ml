@@ -14,57 +14,73 @@ module Uses = struct
     { idents = Set.union a.idents b.idents; free = Set.union a.free b.free }
   ;;
 
-  let rec of_expr (expr : Typed.Expr.t) =
-    let children =
-      List.fold (Typed.Expr.sub_exprs expr) ~init:empty ~f:(fun acc e ->
-        union acc (of_expr e))
-    in
+  (* What [expr] uses itself, not its children. *)
+  let own (expr : Typed.Expr.t) =
     match expr.desc with
     | Var (Bound (Local ident) | Persistent (Local ident))
     | Assign ((Bound (Local ident) | Persistent (Local ident)), _) ->
-      { children with idents = Set.add children.idents ident }
+      { empty with idents = Typed.Ident.Set.singleton ident }
     | Var (Free name) | Assign (Free name, _) ->
-      { children with free = Set.add children.free name }
+      { empty with free = String.Set.singleton name }
     | Splice { subs = Implicit providers; _ } ->
-      { children with
+      { empty with
         idents =
-          Map.fold providers ~init:children.idents ~f:(fun ~key:_ ~data acc ->
-            match (data : Typed.Binder.t) with
-            | Local ident -> Set.add acc ident
-            | Toplevel _ -> acc)
+          Map.fold
+            providers
+            ~init:Typed.Ident.Set.empty
+            ~f:(fun ~key:_ ~data acc ->
+              match (data : Typed.Binder.t) with
+              | Local ident -> Set.add acc ident
+              | Toplevel _ -> acc)
       }
-    | _ -> children
+    | _ -> empty
+  ;;
+
+  (* The uses within the scope of each local [expr] binds, computed in one pass. *)
+  let scopes (expr : Typed.Expr.t) =
+    let scopes = Typed.Ident.Table.create () in
+    let rec go expr =
+      Typed.Expr.fold_children expr ~init:(own expr) ~f:(fun uses child expr ->
+        let child_uses = go expr in
+        List.iter child.binds ~f:(fun ident ->
+          Hashtbl.update scopes ident ~f:(function
+            | None -> child_uses
+            | Some scope -> union scope child_uses));
+        union uses child_uses)
+    in
+    ignore (go expr : t);
+    scopes
   ;;
 end
 
 module Names = struct
   type t =
     { names : string Typed.Ident.Map.t
+    ; named : Typed.Ident.Set.t String.Map.t (** The inverse of [names]. *)
     ; taken : String.Hash_set.t
+    ; scopes : Uses.t Typed.Ident.Table.t
     }
 
   let create (expr : Typed.Expr.t) =
     let taken = String.Hash_set.create () in
-    let add_idents =
-      List.iter ~f:(fun (i : Typed.Ident.t) -> Hash_set.add taken i.name)
-    in
+    let take (i : Typed.Ident.t) = Hash_set.add taken i.name in
     let rec add (expr : Typed.Expr.t) =
       (match expr.desc with
        | Var (Free name) | Assign (Free name, _) -> Hash_set.add taken name
        | Var (Bound (Local ident) | Persistent (Local ident))
        | Assign ((Bound (Local ident) | Persistent (Local ident)), _) ->
-         add_idents [ ident ]
-       | Let { ident; args; _ } -> add_idents (ident :: args)
-       | Let_mut { ident; _ } -> add_idents [ ident ]
-       | Fun { args; _ } -> add_idents args
-       | Match { cases; exception_cases; _ } ->
-         List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
-           add_idents (Typed.Pattern.idents p))
+         take ident
        | _ -> ());
-      List.iter (Typed.Expr.sub_exprs expr) ~f:add
+      Typed.Expr.iter_children expr ~f:(fun child expr ->
+        List.iter child.binds ~f:take;
+        add expr)
     in
     add expr;
-    { names = Typed.Ident.Map.empty; taken }
+    { names = Typed.Ident.Map.empty
+    ; named = String.Map.empty
+    ; taken
+    ; scopes = Uses.scopes expr
+    }
   ;;
 
   let fresh t base =
@@ -77,22 +93,36 @@ module Names = struct
     name
   ;;
 
-  (* Binds [idents] over [scope]: each keeps its name unless that would capture
-     a variable [scope] uses, of that name but bound elsewhere. *)
-  let bind t idents ~(scope : Uses.t) =
+  (* Binds [idents] over their scope: each keeps its name unless that would
+     capture a variable the scope uses, of that name but bound elsewhere. *)
+  let bind t idents =
     List.fold idents ~init:t ~f:(fun t (ident : Typed.Ident.t) ->
+      let scope = Hashtbl.find_exn t.scopes ident in
       let captures =
         Set.mem scope.free ident.name
-        || Set.exists scope.idents ~f:(fun other ->
-          (not (Typed.Ident.equal other ident))
-          && Option.equal
-               String.equal
-               (Map.find t.names other)
-               (Some ident.name)
-          && not (List.mem idents other ~equal:Typed.Ident.equal))
+        || Map.find t.named ident.name
+           |> Option.value_map ~default:false ~f:(fun others ->
+             Set.exists others ~f:(fun other ->
+               (not (Typed.Ident.equal other ident))
+               && Set.mem scope.idents other
+               && not (List.mem idents other ~equal:Typed.Ident.equal)))
       in
       let name = if captures then fresh t ident.name else ident.name in
-      { t with names = Map.set t.names ~key:ident ~data:name })
+      let named =
+        match Map.find t.names ident with
+        | None -> t.named
+        | Some old ->
+          Map.change
+            t.named
+            old
+            ~f:(Option.map ~f:(fun s -> Set.remove s ident))
+      in
+      { t with
+        names = Map.set t.names ~key:ident ~data:name
+      ; named =
+          Map.update named name ~f:(fun others ->
+            Set.add (Option.value others ~default:Typed.Ident.Set.empty) ident)
+      })
   ;;
 end
 
@@ -195,7 +225,7 @@ let expr (expr : Typed.Expr.t) =
       node (Seq (first, second))
     | Let_mut { ident; annot; mode; body; in_ } ->
       let%bind body = go names body in
-      let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in
+      let names = Names.bind names [ ident ] in
       let%bind in_ = go names in_ in
       node
         (Let_mut
@@ -222,13 +252,8 @@ let expr (expr : Typed.Expr.t) =
     | Let
         { ident; args; annots; result_annot; mode; body; in_; generalized = _ }
       ->
-      let outer =
-        Names.bind
-          names
-          [ ident ]
-          ~scope:(Uses.union (Uses.of_expr body) (Uses.of_expr in_))
-      in
-      let inner = Names.bind outer args ~scope:(Uses.of_expr body) in
+      let outer = Names.bind names [ ident ] in
+      let inner = Names.bind outer args in
       let%bind body = go inner body in
       let%bind in_ = go outer in_ in
       node
@@ -239,7 +264,7 @@ let expr (expr : Typed.Expr.t) =
            , body
            , in_ ))
     | Fun { args; annots; body } ->
-      let names = Names.bind names args ~scope:(Uses.of_expr body) in
+      let names = Names.bind names args in
       let%bind body = go names body in
       node (Fun (List.map args ~f:(binding names annots), body))
     | Splice { code; subs } ->
@@ -305,9 +330,7 @@ let expr (expr : Typed.Expr.t) =
     | Match { scrutinee; cases; exception_cases } ->
       let%bind scrutinee = go names scrutinee in
       let case ~exception_ (p, body) =
-        let names =
-          Names.bind names (Typed.Pattern.idents p) ~scope:(Uses.of_expr body)
-        in
+        let names = Names.bind names (Typed.Pattern.idents p) in
         let%map body = go names body in
         let p = pattern names p in
         ( (if exception_ then located p.loc (Syntax.Pattern.Exception p) else p)

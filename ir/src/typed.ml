@@ -312,36 +312,179 @@ module Expr = struct
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
 
+  module Child = struct
+    type t =
+      { depth : int
+      ; binds : Ident.t list
+      }
+    [@@deriving sexp_of]
+
+    let same = { depth = 0; binds = [] }
+    let binding binds = { same with binds }
+  end
+
+  module Traverse (M : Local_monad.S) = struct
+    module Let_syntax = struct
+      let bind = M.bind
+    end
+
+    let rec all list ~(f @ local) =
+      match list with
+      | [] -> M.return []
+      | x :: rest ->
+        let%bindl_fun y = f x in
+        let%bindl_fun rest = all rest ~f in
+        M.return (y :: rest)
+    ;;
+
+    let map_children t ~(f @ local) =
+      let same e = f Child.same e in
+      let snds child fields =
+        all fields ~f:(fun (key, e) ->
+          let%bindl_fun e = f child e in
+          M.return (key, e))
+        [@nontail]
+      in
+      let cases cases =
+        all cases ~f:(fun (pattern, body) ->
+          let%bindl_fun body =
+            f (Child.binding (Pattern.idents pattern)) body
+          in
+          M.return (pattern, body))
+        [@nontail]
+      in
+      let%bindl_fun (desc : t Desc.t) =
+        match t.desc with
+        | ( Lit _ | Var _
+          | Poly_variant (_, None)
+          | Expect _ | External _ | Type _ ) as desc -> M.return desc
+        | App (a, b) ->
+          let%bindl_fun a = same a in
+          let%bindl_fun b = same b in
+          M.return (Desc.App (a, b))
+        | Let let_ ->
+          let%bindl_fun body =
+            f (Child.binding (let_.ident :: let_.args)) let_.body
+          in
+          let%bindl_fun in_ = f (Child.binding [ let_.ident ]) let_.in_ in
+          M.return (Desc.Let { let_ with body; in_ })
+        | Let_mut let_ ->
+          let%bindl_fun body = same let_.body in
+          let%bindl_fun in_ = f (Child.binding [ let_.ident ]) let_.in_ in
+          M.return (Desc.Let_mut { let_ with body; in_ })
+        | Seq (first, second) ->
+          let%bindl_fun first = same first in
+          let%bindl_fun second = same second in
+          M.return (Desc.Seq (first, second))
+        | Assign (var_ref, value) ->
+          let%bindl_fun value = same value in
+          M.return (Desc.Assign (var_ref, value))
+        | Store (target, value) ->
+          let%bindl_fun target = same target in
+          let%bindl_fun value = same value in
+          M.return (Desc.Store (target, value))
+        | Fun fun_ ->
+          let%bindl_fun body = f (Child.binding fun_.args) fun_.body in
+          M.return (Desc.Fun { fun_ with body })
+        | Annotated (e, annot) ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Annotated (e, annot))
+        | Marked (marker, e) ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Marked (marker, e))
+        | Splice { code; subs } ->
+          let%bindl_fun code = f { Child.same with depth = -1 } code in
+          let%bindl_fun (subs : t Subs.t) =
+            match subs with
+            | Explicit subs ->
+              let%bindl_fun subs = snds Child.same subs in
+              M.return (Subs.Explicit subs)
+            | Implicit _ -> M.return subs
+          in
+          M.return (Desc.Splice { code; subs })
+        | Toplevel_splice { code; expansion } ->
+          let%bindl_fun expansion = same expansion in
+          M.return (Desc.Toplevel_splice { code; expansion })
+        | Quote body ->
+          let%bindl_fun body = f { Child.same with depth = 1 } body in
+          M.return (Desc.Quote body)
+        | Tuple es ->
+          let%bindl_fun es = all es ~f:same in
+          M.return (Desc.Tuple es)
+        | Deref e ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Deref e)
+        | Construct (c, es) ->
+          let%bindl_fun es = all es ~f:same in
+          M.return (Desc.Construct (c, es))
+        | Error es ->
+          let%bindl_fun es = all es ~f:same in
+          M.return (Desc.Error es)
+        | Record fields ->
+          let%bindl_fun fields = snds Child.same fields in
+          M.return (Desc.Record fields)
+        | Field (e, field) ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Field (e, field))
+        | Record_update (e, fields) ->
+          let%bindl_fun e = same e in
+          let%bindl_fun fields = snds Child.same fields in
+          M.return (Desc.Record_update (e, fields))
+        | Match { scrutinee; cases = cases'; exception_cases } ->
+          let%bindl_fun scrutinee = same scrutinee in
+          let%bindl_fun cases' = cases cases' in
+          let%bindl_fun exception_cases = cases exception_cases in
+          M.return (Desc.Match { scrutinee; cases = cases'; exception_cases })
+        | Poly_record fields ->
+          let%bindl_fun fields = snds Child.same fields in
+          M.return (Desc.Poly_record fields)
+        | Poly_field (e, label) ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Poly_field (e, label))
+        | Poly_extend (fields, e) ->
+          let%bindl_fun fields = snds Child.same fields in
+          let%bindl_fun e = same e in
+          M.return (Desc.Poly_extend (fields, e))
+        | Poly_restrict (e, label) ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Poly_restrict (e, label))
+        | Poly_update (e, fields) ->
+          let%bindl_fun e = same e in
+          let%bindl_fun fields = snds Child.same fields in
+          M.return (Desc.Poly_update (e, fields))
+        | Poly_variant (tag, Some e) ->
+          let%bindl_fun e = same e in
+          M.return (Desc.Poly_variant (tag, Some e))
+      in
+      M.return { t with desc }
+    ;;
+  end
+
+  module Traverse_identity = Traverse (struct
+      type 'a t = 'a
+
+      let return x = x
+      let bind x ~(f @ local) = f x [@nontail]
+    end)
+
+  let map_children = Traverse_identity.map_children
+
+  let iter_children t ~(f @ local) =
+    ignore
+      (map_children t ~f:(fun child e ->
+         f child e;
+         e)
+       : t)
+  ;;
+
+  let fold_children t ~init ~(f @ local) =
+    let acc = ref init in
+    iter_children t ~f:(fun child e -> acc := f !acc child e);
+    !acc
+  ;;
+
   let sub_exprs t =
-    let snds = List.map ~f:snd in
-    match t.desc with
-    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ | External _ | Type _ ->
-      []
-    | App (a, b)
-    | Let { body = a; in_ = b; _ }
-    | Let_mut { body = a; in_ = b; _ }
-    | Seq (a, b)
-    | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
-    | Splice { code; subs = Explicit subs } -> code :: snds subs
-    | Splice { code; subs = Implicit _ } -> [ code ]
-    | Store (target, value) -> [ target; value ]
-    | Quote e
-    | Annotated (e, _)
-    | Marked (_, e)
-    | Assign (_, e)
-    | Fun { body = e; _ }
-    | Deref e
-    | Field (e, _)
-    | Poly_field (e, _)
-    | Poly_restrict (e, _)
-    | Poly_variant (_, Some e) -> [ e ]
-    | Tuple es | Construct (_, es) | Error es -> es
-    | Record fields -> snds fields
-    | Poly_record fields -> snds fields
-    | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
-    | Record_update (e, fields) -> e :: snds fields
-    | Match { scrutinee; cases; exception_cases } ->
-      (scrutinee :: snds cases) @ snds exception_cases
+    List.rev (fold_children t ~init:[] ~f:(fun acc _ e -> e :: acc))
   ;;
 
   let rec has_error t =
