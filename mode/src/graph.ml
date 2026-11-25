@@ -348,6 +348,13 @@ let generalize nodes ~rank =
     node.state <- Generic { above = find above node; below = find below node })
 ;;
 
+let reopen node ~rank =
+  Undo.assert_not_atomic "reopen";
+  match node.state with
+  | Generic _ -> node.state <- Rank rank
+  | Rank _ -> ()
+;;
+
 module Instance = struct
   type node = t
 

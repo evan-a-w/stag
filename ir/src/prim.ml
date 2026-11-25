@@ -48,12 +48,8 @@ type t =
 
 let equal a b = String.equal a.name b.name
 let sexp_of_t t = Sexp.Atom t.name
-
-let ty t =
-  List.fold_right t.args ~init:(Base_type.ty t.result) ~f:(fun arg res ->
-    Type.arrow (Base_type.ty arg) res)
-;;
-
+let args t = List.map t.args ~f:Base_type.ty
+let result t = Base_type.ty t.result
 let arity t = List.length t.args
 
 let bad_args t args =
@@ -126,6 +122,10 @@ let binary name args result f =
 
 let ok value = Some (Ok value)
 
+(* Base may return an argument itself (eg. [String.sub] of the whole string,
+   [String.concat] of one part), but a prim's result must be new. *)
+let fresh s = Bytes.to_string (Bytes.of_string s)
+
 (* Only an optional minus and decimal digits, unlike OCaml's [int_of_string]. *)
 let int_of_string s =
   let digits = String.chop_prefix s ~prefix:"-" |> Option.value ~default:s in
@@ -178,7 +178,7 @@ let all =
   ; binary "String.concat" [ String; String_list ] String (fun a b ->
       match a, b with
       | String sep, String_list parts ->
-        ok (Value.String (String.concat ~sep parts))
+        ok (Value.String (fresh (String.concat ~sep parts)))
       | _ -> None)
   ; binary "String.append" [ String; String ] String (fun a b ->
       match a, b with
@@ -206,7 +206,7 @@ let all =
       | [ String s; Int pos; Int len ] ->
         Some
           (if pos >= 0 && len >= 0 && pos + len <= String.length s
-           then Ok (Value.String (String.sub s ~pos ~len))
+           then Ok (Value.String (fresh (String.sub s ~pos ~len)))
            else
              Error
                (Invalid_argument

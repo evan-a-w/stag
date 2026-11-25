@@ -285,6 +285,10 @@ module Stag = struct
       | Exclave of ptr[t]
       (* [f x [@nontail]], of an application. *)
       | Nontail of ptr[t]
+      (* [(e : t @ m)], of an expression not a variable. *)
+      | Annotated of ptr[t * Annot.t]
+      (* [forget x, y in e]. *)
+      | Forget of ptr[list[string] * t]
 
     let var name = Var (Path.Name name, Annot.none)
     let construct name args = Construct (Path.Name name, args)

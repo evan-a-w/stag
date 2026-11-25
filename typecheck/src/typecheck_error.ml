@@ -9,6 +9,14 @@ module Unusable_in_quote = struct
   [@@deriving sexp_of]
 end
 
+module Not_embeddable_why = struct
+  type t =
+    | Defining
+    | Unknown
+    | Nonportable
+  [@@deriving sexp_of]
+end
+
 module Splice_kind = struct
   type t =
     | Include
@@ -32,6 +40,12 @@ module Kind = struct
         { name : string
         ; unusable : Unusable_in_quote.t
         }
+    | Not_embeddable of
+        { name : string
+        ; why : Not_embeddable_why.t
+        }
+    | Forgotten of string
+    | Duplicate_forget of string
     | Unbound_module of Syntax.Decl_path.t
     | Unbound_type of Syntax.Decl_path.t
     | Unbound_type_variable of string
@@ -138,6 +152,11 @@ module Kind = struct
     | Malformed_type_splice of Error.t
     | In_type_splice of
         { generated : Syntax.Type_expr.t [@sexp.opaque]
+        ; error : t
+        }
+    | Via_quote of
+        { toplevel : string
+        ; quote : Loc.t
         ; error : t
         }
     | Type_splice_cycle
@@ -366,16 +385,45 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       (level_name used_at)
-  | Free_in_spliced_code { name; unusable = { var_level; used_at; loc = _ } } ->
+  | Free_in_spliced_code
+      { name; unusable = { var_level; used_at = _; loc = _ } } ->
     sprintf
-      "Unbound value %s, which the spliced code uses: %s is a variable of its \
-       quote's context, as the %s bound at %s can't be used in the quote \
-       (level %d), as it is not portable"
+      "Unbound value %s, which the spliced code uses: %s is a free variable of \
+       the quote that made it, as the %s in scope there, %s, is bound in \
+       another quote"
       name
       name
       name
       (level_name var_level)
-      used_at
+  | Not_embeddable { name; why = Defining } ->
+    sprintf
+      "The quote can't embed %s, as it is still being defined. Write [forget \
+       %s in ...] to make %s a free variable of the quote"
+      name
+      name
+      name
+  | Not_embeddable { name; why = Unknown } ->
+    sprintf
+      "The quote can't embed %s, as it may not be portable. Bind it as (%s @ \
+       portable) to embed it, or write [forget %s in ...] to make %s a free \
+       variable of the quote"
+      name
+      name
+      name
+      name
+  | Not_embeddable { name; why = Nonportable } ->
+    sprintf
+      "The quote can't embed %s, as it isn't portable. Write [forget %s in \
+       ...] to make %s a free variable of the quote"
+      name
+      name
+      name
+  | Duplicate_forget name -> sprintf "%s is forgotten twice" name
+  | Forgotten name ->
+    sprintf
+      "%s is not in scope here: it was forgotten by [forget %s in ...]"
+      name
+      name
   | Unbound_module path -> sprintf "Unbound module %s" (decl_path path)
   | Unbound_type path -> sprintf "Unbound type %s" (decl_path path)
   | Unbound_type_variable name -> sprintf "Unbound type variable '%s" name
@@ -628,6 +676,11 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | In_type_splice { generated = _; error } ->
     sprintf
       "In the type this type splice gave: %s"
+      (kind_message error ~show_type)
+  | Via_quote { toplevel; quote = _; error } ->
+    sprintf
+      "In this instance of %s, a use in its quote is wrong: %s"
+      toplevel
       (kind_message error ~show_type)
   | Type_splice_cycle ->
     "This type splice's expression depends on the splice itself (eg. it uses \

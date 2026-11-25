@@ -163,9 +163,10 @@ their own, by interfaces and separately checked code.
 - a variable only on `ptr` cells and mode arguments prints no locality, which
   no position reads; relations through it still print.
 
-A mutable global whose reads are `external` shows it
-(`val g : string @ external`), parenthesizing an arrow or tuple type
-(`val g : (int -> int) @ external`).
+A toplevel whose uses see an `external` value (its own, or of a mutable global
+what it holds) shows it (`val g : string @ external`), parenthesizing an arrow
+or tuple type (`val g : (int -> int) @ external`). It reads back as a binding
+annotation, `let g : string @ external = ...`.
 
 ### Printed constraints
 
@@ -260,8 +261,9 @@ a local result (`release`): it was regional in `fx`'s region, which ends.
 
 ### Annotations on uses
 
-`(x @ m)` (or `(x : t @ m)`) is the check-only form: it bounds the mode of `x`
-at this use, so of the variable, and `x` keeps its own mode. A binding's
+`(e @ m)` (or `(e : t @ m)`, on any expression) is the check-only form: it
+bounds the mode of `e`, so of a variable `x` at this use, and `x` keeps its own
+mode. A binding's
 annotation, `let x @ m = e`, is instead the variable's mode (as in OxCaml): `e`
 must be at most `m`, and uses of `x` see `m` on the axes it names (`e`'s mode
 on the others), though generalisation is still decided by `e`'s own mode.
@@ -290,13 +292,16 @@ splice, while one bound outside the quote crosses none of them.
 - **Closure lock** (entering a function body): the captured variable's mode
   must be at most the closure's mode.
 - **Quote lock**: the variable must be `portable`, and the code is at least
-  as nonportable as it. Otherwise it becomes a free variable of the quote.
+  as nonportable as it. Otherwise using it is an error, unless it is
+  forgotten (`forget x in ...`, see syntax.md), which makes the name a free
+  variable of the quote.
   Whether it is `portable` is decided by its lower bound where it is used,
   then required: a later rise is an error. A (non-mutable) local of a type
   that crosses stage (plain data, as `int`) is `portable` whatever its
   stage, so is used directly. A variable used in its own
-  definition (a local function in its body, a toplevel being checked) is not
-  decided on, so is always a free variable of a quote there. A local function
+  definition is not decided on: a local function in its body can't be used in
+  a quote there (an error), and a toplevel being checked is referred to by
+  name. A local function
   in its own body is nonportable to compute with, as is a local closure
   capturing it (other than itself); so is a toplevel non-function being
   checked. A toplevel function captures nothing, so its mode is known while
@@ -334,11 +339,62 @@ A compiler flag, e.g. `Typecheck.create ~const_toplevels:bool`:
 ## Toplevels in quotes
 
 A toplevel used in a quote is checked first, to know its mode: `const` ones
-are used directly, others are free variables of the quote. One whose checking
-is underway (a recursive reference) is a free variable, and computing with it
-elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
-generalized, whichever order they are checked in. So the order of
-checking matters: with
+are used directly, others are referred to by symbol: the code reads the
+toplevel where it runs, so the use is nonportable, and no local or
+substitution where the code is spliced can replace it. One whose checking is
+underway is referred to by symbol too, and doesn't join its component. In its
+own code, the use is a recursive one, of its type (so `let gen n = forget n in
+.< gen n >.`, whose code type would contain itself, is an error). Elsewhere,
+the use is of a type of its own, unified with the toplevel's once it is
+known, an error being reported at the use:
+
+- If the quote's code is in the toplevel's component (it also uses the
+  toplevel directly), the use is a recursive one, unified before the
+  component is generalized.
+- Otherwise the quote's component is finished first, and the use's type is
+  generalized with its schemes: the schemes *await* the toplevel. Each
+  instance of them has its own instance of the use, unified with an instance
+  of the toplevel's scheme once it is finished, like a use of its own. Once
+  the toplevel is finished, the awaiting schemes are refined in place: their
+  variables are made ones of the code being checked again, the use is
+  unified with an instance of the toplevel's scheme, and they are
+  generalized anew. The typed code shares the variables, so it has the
+  refined types too. Instances made before are unaffected: they have their
+  own uses. So
+
+  ```ocaml
+  let ident x = .~(let _ = (c .<1>., c .<"s">.) in .<x>.)
+  let c (y : <'a>{..'r}) = .< ident .~y >.
+  ```
+
+  gives `c` the type `<'a>{..'b} -> <'a>{..'c}`, used at `int` and `string`
+  in `ident`'s splice, before `ident`'s type is known.
+
+  An error of an instance's use is reported at the instance, with a note at
+  the use in the awaiting toplevel's quote: `c .<"s">.` above is wrong if
+  `ident` turns out to take an `int`, not `c`. If the awaiting toplevel's own
+  use is wrong (its refinement fails), the error is reported there, once, and
+  not again at each instance.
+
+  A local bound to an instance (`let f = c in ...`) is not generalized in the
+  variables the instance's uses involve: `(f .<1>., f .<"s">.)` is an error
+  where `(c .<1>., c .<"s">.)` isn't. Use the toplevel directly.
+- A component that is not generalized (see the value restriction) doesn't
+  generalize the use either: it is unified with an instance of the
+  toplevel's scheme once it is finished.
+
+Code run at compile time while checking a toplevel
+(eg. a type or declaration splice) is not of a component: toplevels it
+checks that depend on ones being checked are finished with the component of
+the toplevel it was checked for. Toplevels it checks that don't are finished
+in components of their own, whatever happens to the code after. Code
+abandoned to be checked anew (see syntax.md, Evaluation) has its uses, and
+the errors reported in it, dropped; those of components it finished are
+kept. A toplevel whose use in a quote turns out wrong once the toplevel used
+is finished has failed, like one with an error of its own, so isn't run at
+compile time. Computing with it elsewhere is
+nonportable: `let z = r` in a toplevel `r` depends on is not generalized,
+whichever order they are checked in. So the order of checking matters: with
 
 ```ocaml
 let q = .<later>.
@@ -347,7 +403,7 @@ let later = .~(let z = q in .<1>.)
 
 checking `q` checks `later`, whose splice needs `q`, which isn't checked yet:
 an error. With the two swapped, `later` is checked first, so `q` is checked
-during its splice, and `later` is a free variable of `q`'s quote.
+during its splice, and refers to `later` by symbol.
 
 ## Toplevel splices
 
@@ -365,8 +421,8 @@ toplevel splice has the mode of its expansion, checked after it is generated.
 - Toplevel constants like `n` resolve directly inside quotes (they are
   `const`), instead of becoming free variables filled in at the splice.
 - Local closures capturing arguments, mutable locals or computed values no
-  longer cross levels: they are free variables of the quote, unless their type
-  is pointer-free.
+  longer cross levels: using one in a quote is an error, unless its type is
+  pointer-free. `forget` makes the name a free variable of the quote instead.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
 - An arrow written in an annotation without modes has the default modes

@@ -756,6 +756,7 @@ let use
   expected
   (entry : Env.Entry.t)
   ~locks
+  ~by_symbol
   ~toplevel
   ~name
   ~loc
@@ -765,6 +766,7 @@ let use
   let held = (entry.held :> Mode.Var.t option) in
   let mode = (entry.mode :> Mode.Var.t) in
   let mutable_ = Option.is_some held in
+  let by_symbol = by_symbol || (toplevel && mutable_) in
   let crossing = ctx.Ctx.crossing entry.scheme in
   let crossed = Env.Entry.crossed entry ~locks in
   List.iteri crossed ~f:(fun index lock ->
@@ -827,7 +829,7 @@ let use
              Stage
              Nonportable
              (reason "%s is captured by a closure in its own definition"))
-    | Quote _ when toplevel && mutable_ -> ()
+    | Quote _ when by_symbol -> ()
     | Quote code ->
       Ctx.add
         ctx
@@ -871,6 +873,14 @@ let use
       ~locality
       ~loc
       ~why
+  | None when by_symbol ->
+    runs
+      ctx
+      expected
+      Nonportable
+      ~loc
+      ~why:(sprintf "%s is read where the code runs" name);
+    joins ctx expected mode ~crossing ~locality ~loc ~why
   | None -> joins ctx expected mode ~crossing ~locality ~loc ~why
 ;;
 
@@ -972,6 +982,37 @@ let ptr_make ctx =
   |> Result.iter_error ~f:(fun error ->
     raise_s [%message "Ptr.make" (error : Mode.Error.t)]);
   arg, res, Mode_arg.Var held
+;;
+
+let prim ctx ~args =
+  let made =
+    Mode.Reason.create "a partial application is allocated at run time"
+  in
+  let held = Mode.Reason.create "a partial application holds it" in
+  let last = List.length args - 1 in
+  let _, arrows =
+    List.fold_mapi args ~init:[] ~f:(fun i taken ty ->
+      let arg = Ctx.fresh ctx in
+      let taken = (arg, ty) :: taken in
+      let res : Arrow_modes.Side.t =
+        if i = last
+        then Fixed Arrow_modes.default_const
+        else (
+          let res = Ctx.fresh ctx in
+          Result.all_unit
+            (Mode.Var.at_least res Stage Portable made
+             :: Mode.Var.allocated res made
+             :: List.map taken ~f:(fun (arg, ty) ->
+               Mode.Var.submode ~crossing:(ctx.Ctx.crossing ty) arg res held))
+          |> Result.iter_error ~f:(fun error ->
+            raise_s [%message "prim" (error : Mode.Error.t)]);
+          Var res)
+      in
+      ( taken
+      , ({ arg = Var arg; res; curry = Arrow_modes.default_curry }
+         : Arrow_modes.t) ))
+  in
+  arrows
 ;;
 
 let assume_global ctx =

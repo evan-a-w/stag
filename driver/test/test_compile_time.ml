@@ -237,7 +237,7 @@ let%expect_test "substitutions at toplevel splices" =
     ~bodies:[ "implicit"; "explicit"; "explicit_toplevel" ]
     {|
 let n = Int.to_string 3
-let code = .<(n, x)>.
+let code = forget n in .<(n, x)>.
 let implicit x = .~code
 let explicit = .~code.{n = true; x = 1}
 let explicit_toplevel = .~code.{n; x = n}
@@ -291,14 +291,10 @@ let applied = implicit false
         : "string * string"))
       : "string * string"))
     -- evaluated at compile time
-    (code
-     (Code
-      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+    (code (Code (Tuple ((Var (Free n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     -- evaluated
     (n (String 3))
-    (code
-     (Code
-      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+    (code (Code (Tuple ((Var (Free n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     (implicit <fun>)
     (explicit (Tuple true 1))
     (explicit_toplevel (Tuple (String 3) (String 3)))
@@ -429,7 +425,7 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
     {|
     type nat = Z | S of ptr[nat]
     val f : nat -> int
-    val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
+    val code : <int>{m : nat; ..'a}
     val used : int
     (f/4
      (Match (scrutinee (Var (Bound (Local n/15)) : nat))
@@ -439,9 +435,7 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
         ((Construct ((type_name nat) (name S) (index 1))
           ((Deref (Var m/16 : nat) : ptr[nat])) : nat)
          (Toplevel_splice
-          (code
-           (Var (Bound (Toplevel code/5)) :
-            "<int>{f : immut nat -> int; m : immut nat}"))
+          (code (Var (Bound (Toplevel code/5)) : "<int>{m : immut nat}"))
           (expansion
            (App (Var (Bound (Toplevel f/4)) : "nat -> int")
             (Var (Bound (Local m/16)) : nat) : int))
@@ -449,10 +443,14 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
       : int))
     -- evaluated at compile time
     (code
-     (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+     (Code
+      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
+       : int)))
     -- evaluated
     (code
-     (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+     (Code
+      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
+       : int)))
     (f <fun>)
     (used 0)
     ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:43-47)
@@ -499,7 +497,7 @@ let%expect_test "toplevels of a component are evaluated separately" =
   run
     {|
 type abc = A | B
-let f x = v; .<x>.
+let f x = v; forget x in .<x>.
 let v = f; match B with A -> 0
 let g y = .~(f; .<y>.)
 |};

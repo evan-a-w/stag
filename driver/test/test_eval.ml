@@ -136,7 +136,7 @@ let failure = only_none v
     {|
     (v (N.r (x 1) (y (Some (Ptr (N.r (x -2) (y (None))))))))
     (only_none <fun>)
-    ("Match failure: no case matches the value {x = 1; y = Some (Ptr.make {x = -2; y = None})}"
+    ("Match failure: no case matches the value {N.x = 1; y = Some (Ptr.make {N.x = -2; y = None})}"
      @ t.stag:7:26-61)
     |}]
 ;;
@@ -179,13 +179,13 @@ type s = {x : bool}
       print_s [%sexp (first : string option), (second : string option)]);
   [%expect
     {|
-    (("{x = 1; y = Some (Ptr.make {x = -2; y = None})}")
-     ("{x = 1; y = Some (Ptr.make {x = -2; y = None})}"))
-    (("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})")
-     ("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"))
-    (("Cons (Ptr.make (N.A {x = 5; y = None}, Nil))")
-     ("Cons (Ptr.make (N.A {x = 5; y = None}, Nil))"))
-    (("`C {x = 6; y = None}") ("`C {x = 6; y = None}"))
+    (("{N.x = 1; y = Some (Ptr.make {N.x = -2; y = None})}")
+     ("{N.x = 1; y = Some (Ptr.make {N.x = -2; y = None})}"))
+    (("N.B ({`a = {N.x = 3; y = None}}, {N.x = 4; y = None})")
+     ("N.B ({`a = {N.x = 3; y = None}}, {N.x = 4; y = None})"))
+    (("Cons (Ptr.make (N.A {N.x = 5; y = None}, Nil))")
+     ("Cons (Ptr.make (N.A {N.x = 5; y = None}, Nil))"))
+    (("`C {N.x = 6; y = None}") ("`C {N.x = 6; y = None}"))
     |}]
 ;;
 

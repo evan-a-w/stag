@@ -1146,6 +1146,114 @@ let decide_clashing_presences (presences : Presence_var.t list) =
     | Generic | Unbound _ | Link _ -> ())
 ;;
 
+(* [close_presence_bounds] removed the bounds variables outside a scheme had
+   with its variables: a reopened [var] gives them back, so that what the
+   outside ones become flows into it again. *)
+let restore_reverse_bounds (var : Presence_var.t) =
+  let restore bound ~(reverse : Type.presence_bound) =
+    match Type.presence_bound_var bound with
+    | Some (other : Presence_var.t) when outside other ->
+      let has_reverse =
+        List.exists other.bounds ~f:(fun existing ->
+          match existing, reverse with
+          | At_most p, At_most q | At_least p, At_least q ->
+            Type.same_presence p q
+          | (At_most _ | At_least _ | If_present _), _ -> false)
+      in
+      if not has_reverse then other.bounds <- reverse :: other.bounds
+    | Some _ | None -> ()
+  in
+  List.iter var.bounds ~f:(fun bound ->
+    match bound with
+    | At_most _ -> restore bound ~reverse:(At_least (PVar var))
+    | At_least _ -> restore bound ~reverse:(At_most (PVar var))
+    | If_present _ -> ())
+;;
+
+let reopen fresh ~rank tys =
+  let kept = Queue.create () in
+  let seen_kept = Int.Hash_set.create () in
+  let presences = Queue.create () in
+  let reopened (var : _ Type.Var.t) =
+    match var.state with
+    | Generic ->
+      var.state <- Unbound rank;
+      List.iter var.kept ~f:(enqueue_kept ~pending:kept ~seen_kept);
+      var.kept <- [];
+      true
+    | Unbound _ | Link _ -> false
+  in
+  let rec reopener : Nothing.t Type.Iter.t =
+    { ty =
+        (fun ~guarded:_ var ->
+          ignore (reopened var : bool);
+          Ok ())
+    ; row =
+        (fun ~guarded:_ var ->
+          if reopened var
+          then
+            List.fold_result
+              var.bounds
+              ~init:()
+              ~f:(fun () (bound : Type.bound) ->
+                Type.iter_row reopener bound.row)
+          else Ok ())
+    ; presence =
+        (fun ~guarded var ->
+          if reopened var
+          then (
+            Queue.enqueue presences var;
+            List.fold_result var.bounds ~init:() ~f:(fun () bound ->
+              match bound with
+              | At_most _ | At_least _ ->
+                (match Type.presence_bound_var bound with
+                 | Some other -> reopener.presence ~guarded other
+                 | None -> Ok ())
+              | If_present (ty1, ty2) ->
+                let%bind.Result () = Type.iter_ty reopener ty1 in
+                Type.iter_ty reopener ty2))
+          else Ok ())
+    ; mode =
+        (fun var ->
+          if Mode.Var.is_generic var then Mode.Var.reopen var ~rank;
+          Ok ())
+    }
+  in
+  let iter_kept_vars kept =
+    match iter_kept kept reopener with
+    | Ok () -> ()
+    | Error _ -> .
+  in
+  (match
+     List.fold_result tys ~init:() ~f:(fun () ty -> Type.iter_ty reopener ty)
+   with
+   | Ok () -> ()
+   | Error _ -> .);
+  (* What the scheme kept of the constraints with the variables it was not
+     generalized with hold again, as for an instance. *)
+  let rec add_kept () =
+    match Queue.dequeue kept with
+    | None -> Ok ()
+    | Some (Pending.Kept kept') ->
+      iter_kept_vars kept';
+      let%bind.Result () =
+        match kept' with
+        | Row_bound { lower; bound; _ } ->
+          Unify.constrain_row
+            fresh
+            ~row:(RVar lower)
+            ~bound:bound.row
+            ~shadowed:bound.shadowed
+        | If_present_kept { presence; ty1; ty2; _ } ->
+          Unify.unify_if_present fresh ~presence:(PVar presence) ~ty1 ~ty2
+      in
+      add_kept ()
+    | Some (Presence_bounds _ | Row_bounds _) -> add_kept ()
+  in
+  Queue.iter presences ~f:restore_reverse_bounds;
+  add_kept ()
+;;
+
 let generalize fresh ~rank tys =
   let presences = Queue.create () in
   let rows = Queue.create () in

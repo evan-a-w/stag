@@ -49,8 +49,9 @@ module Child : sig
     { depth : int
     (** Quotes in, relative to its parent: [1] in a quote, [-1] in a splice. *)
     ; binds : string list
-    (** The locals its parent binds in it. Members bind none: declarations are
-        not locals, and members see each other in any order. *)
+    (** The locals its parent binds or hides in it: [forget x in e] hides [x] in
+        [e], so a plain [x] there is no toplevel either. Members bind none:
+        declarations are not locals, and members see each other in any order. *)
     ; splice : Splice.t option (** It is the expression of this splice. *)
     ; members : Members.t option
     }

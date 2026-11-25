@@ -487,7 +487,7 @@ let local = .<let y = 1 in add y y>.
 let persistent = .<id 1>.
 let n = 5
 let not_persistent = .<n>.
-let outer_arg x = .<x>.
+let outer_arg x = forget x in .<x>.
 let nested = .< .<add x 1>. >.
 |};
   [%expect
@@ -628,7 +628,7 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:2:44-45)
+     @ t.stag:2:35-50)
     |}]
 ;;
 
@@ -666,7 +666,12 @@ let toplevel_splice_level x = .~x
     val toplevel_splice_arg : 'a -> 'a
     val not_captured : <int>{..'a}
     ((Not_in_scope x) @ t.stag:2:27-36)
-    val captured : <bool>{..'a}
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Present)) (TVar (Unbound 35 1))
+        (RVar (Unbound 36 1)))
+       REmpty (Missing_label x)))
+     @ t.stag:2:33-45)
     ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
      t.stag:2:32-33)
     |}]
@@ -767,7 +772,7 @@ let%expect_test "only binders of the enclosing quote capture" =
   check
     {|
 let outer_persistent c = let g v = v in .<.~c>.
-let add_free add = .<add>.
+let add_free add = forget add in .<add>.
 let not_toplevel = .<.~(add_free 1)>.
 |};
   [%expect
@@ -1037,12 +1042,12 @@ let%expect_test "bounds and presences no instance can use are dropped" =
 let unused e = let h c = .< let _ = .~e in .~c >. in e
 let used e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in e
 let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
-let lh e = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in h >.
+let lh e = forget e in .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in h >.
 let not_spliced e k =
-  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in 0 >. in
+  let r = forget e in .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in 0 >. in
   let _ = closeit k in r
 let spliced e k =
-  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in .~k >. in
+  let r = forget e in .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in .~k >. in
   let _ = closeit k in r|};
   [%expect
     {|
@@ -1148,15 +1153,15 @@ let use = conflict_later %s
 
 let%expect_test "references to toplevels in quotes don't join their components" =
   let a = "let a = .<b>.\n" in
-  let b = "let b = (a, 1)\n" in
+  let b = "let b = (let _ = a in 1, 1)\n" in
   check (a ^ b);
   check (b ^ a);
   [%expect
     {|
-    val a : <'_a>{b : '_a; ..'_b}
-    val b : <'_a>{b : '_a; ..'_b} * int
-    val b : <'a>{b : 'a; ..'b} * int
-    val a : <'a>{b : 'a; ..'b}
+    val a : <int * int>{..'_a}
+    val b : int * int
+    val b : int * int
+    val a : <int * int>{..'a}
     |}]
 ;;
 

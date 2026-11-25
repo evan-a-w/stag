@@ -29,7 +29,7 @@ let code2 = .<m>.
     val n : int
     val code : <int>{..'a}
     val m : string
-    val code2 : <'a>{m : 'a; ..'b}
+    val code2 : <string>{..'a}
     |}]
 ;;
 
@@ -48,7 +48,7 @@ let qb = .<b>.
     val a : int
     val b : string
     val qa : <int>{..'a}
-    val qb : <'a>{b : 'a; ..'b}
+    val qb : <string>{..'a}
     |}]
 ;;
 
@@ -121,10 +121,22 @@ let use (x @ local) = apply (fun y -> y) x
     {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-42), then x is used (at t.stag:3:41-42), then it is passed to a function (at t.stag:3:22-42), but must be at most global, because its type is written without a mode (at t.stag:2:15-21), then the function types are unified, then it is passed to a function (at t.stag:2:37-40), then x is used (at t.stag:2:39-40), then x is passed to the function (at t.stag:2:37-40), then the function types are unified |}]
 ;;
 
-let%expect_test "parameters used in quotes are free variables" =
+let%expect_test "parameters used in quotes can't be embedded" =
   modes {|
 let f x = .<x>.
+|};
+  modes {|
 let g x = let h u = x in .<h>.
+|};
+  [%expect
+    {|
+    The quote can't embed x, as it may not be portable. Bind it as (x @ portable) to embed it, or write [forget x in ...] to make x a free variable of the quote
+    The quote can't embed h, as it may not be portable. Bind it as (h @ portable) to embed it, or write [forget h in ...] to make h a free variable of the quote
+    |}];
+  modes
+    {|
+let f x = forget x in .<x>.
+let g x = let h u = x in forget h in .<h>.
 |};
   [%expect
     {|
@@ -243,7 +255,7 @@ let apply f x = f x
 let const_ x y = x
 let chain f g x = f (g x)
 let f (x @ portable) = .<x>.
-let g x = let h u = x in .<h>.
+let g x = let h u = x in forget h in .<h>.
 let h (x @ 'm) : int @ 'm = x
 let fixed (x @ portable) : int @ portable = x
 |};
@@ -300,7 +312,7 @@ let%expect_test "equalities between arrows of different modes are kept" =
   modes
     {|
 let f x = x
-let user = .< let r = f (Int.to_string 1) in let s = String.append r "" in .<r>. >.
+let user = .< let r = f (Int.to_string 1) in let s = String.append r "" in forget r in .<r>. >.
 let pair c d = .< (.~c, .~d) >.
 let both = pair user .< String.append (f "x") "" >.
 let prov = .< let mut cell = "a" in let f (u : string) = cell in .~both >.
@@ -336,10 +348,7 @@ let t f = let r = f 1 in .<r>.
 let u = t (Int.add 1)
 |};
   [%expect
-    {|
-    val t : (int @ 'm1 -> 'a @ 'm2) @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm3 with stage('m2) <= stage('m3)
-    val u : <'_a>{r : '_a; ..'_b}
-    |}];
+    {| The quote can't embed r, as it may not be portable. Bind it as (r @ portable) to embed it, or write [forget r in ...] to make r a free variable of the quote |}];
   modes
     {|
 let b y = let w = a y in y
@@ -347,11 +356,7 @@ let a x = let r = b x in .<r>.
 let c = a (Int.add 1 2)
 |};
   [%expect
-    {|
-    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and stage('m0) <= stage('m1)
-    val c : <'_a>{r : '_a; ..'_b}
-    |}];
+    {| The quote can't embed r, as it may not be portable. Bind it as (r @ portable) to embed it, or write [forget r in ...] to make r a free variable of the quote |}];
   modes
     {|
 let a x = let r = b x in .<r>.
@@ -359,11 +364,7 @@ let b y = let w = a y in y
 let c = a (Int.add 1 2)
 |};
   [%expect
-    {|
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and stage('m0) <= stage('m1)
-    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val c : <'_a>{r : '_a; ..'_b}
-    |}]
+    {| The quote can't embed r, as it may not be portable. Bind it as (r @ portable) to embed it, or write [forget r in ...] to make r a free variable of the quote |}]
 ;;
 
 let%expect_test "mutually recursive toplevels print constraints through each \

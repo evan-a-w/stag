@@ -177,7 +177,7 @@ let compile e =
 let len l = match l with `Nil -> 0 | `Cons (_, *t) -> add 1 (len t)
 let free = .<len l>.
 let provided = .<.~free.{l = `Cons (1, Ptr.make `Nil)}>.
-let spliced_in l = .<.~free.{l = l}>.
+let spliced_in l = forget l in .<.~free.{l = l}>.
 let quoted_ones = .<let ones = `Cons (1, Ptr.make ones) in ones>.
 |};
   [%expect

@@ -257,14 +257,16 @@ val store
 
 (** Uses [entry] under [locks]: constrains its mode by the locks the use
     crosses. Toplevels are referred to by symbol, so closures and code don't
-    capture them: they only cross a quote lock if [portable], so as not to be
-    free variables of the quote, unless mutable. A mutable's value is the one it
-    holds, but closures capture its cell. *)
+    capture them: they cross a quote lock if [portable], and otherwise if
+    [by_symbol] (mutable, or not embeddable), when what the code reads is not
+    known until it runs. A mutable's value is the one it holds, but closures
+    capture its cell. *)
 val use
   :  Ctx.t
   -> Expected.t
   -> Env.Entry.t
   -> locks:Env.Lock.t list
+  -> by_symbol:bool
   -> toplevel:bool
   -> name:string
   -> loc:Loc.t
@@ -331,6 +333,11 @@ val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
 (** The argument and result modes of [Ptr.make], and what its cell may hold: the
     pointer is allocated at run time, and its cell holds the argument. *)
 val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t * Mode_arg.t
+
+(** The modes of the arrows of a prim taking arguments [args], outermost first.
+    A prim only reads its arguments, so takes any, and returns a new value; a
+    partial application holds the arguments so far. *)
+val prim : Ctx.t -> args:Type.ty list -> Arrow_modes.t list
 
 (** Fixes what the cell of a pointer not generalized may hold, once nothing more
     can constrain it: [nonportable gc] on each axis it may, else what it must. *)

@@ -244,6 +244,11 @@ module Defs = struct
     | Stack of expr (** [stack_ e] *)
     | Exclave of expr (** [exclave_ e] *)
     | Nontail of expr (** [f x [@nontail]], of an application. *)
+    | Annotated of expr * annot
+    (** [(e : t @ m)], of an expression not a variable, whose annotation is
+        [Var]'s. *)
+    | Forget of Name.t list * expr
+    (** [forget x, y in e]: [e] without the bindings of [x] and [y]. *)
     | Error (** In place of what did not parse. *)
 
   and bench_param =
@@ -465,7 +470,17 @@ module Expr = struct
     | Stack of t
     | Exclave of t
     | Nontail of t
+    | Annotated of t * Annot.t
+    | Forget of Name.t list * t
     | Error
+
+  (** [(e : annot)], with an annotation of a plain variable kept as the
+      variable's, so each annotated expression has one representation. *)
+  let annotated (e : t) annot =
+    match e.txt with
+    | Var (path, existing) when Annot.is_none existing -> Var (path, annot)
+    | _ -> Annotated (e, annot)
+  ;;
 
   let sexp_of_t = sexp_of_expr
   let compare = compare_expr

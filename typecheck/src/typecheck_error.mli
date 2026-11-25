@@ -11,6 +11,17 @@ module Unusable_in_quote : sig
   [@@deriving sexp_of]
 end
 
+(** Why a quote can't embed a local of an earlier level. *)
+module Not_embeddable_why : sig
+  type t =
+    | Defining (** It is used in its own definition. *)
+    | Unknown
+    (** Its stage isn't known to be [portable], though it could be: eg. an
+        unannotated parameter. *)
+    | Nonportable (** Its value is known not to be [portable]. *)
+  [@@deriving sexp_of]
+end
+
 (** What generates declarations: an include (or a spliced module), or the splice
     defining a type [type t = .~e]. *)
 module Splice_kind : sig
@@ -40,8 +51,15 @@ module Kind : sig
         { name : string
         ; unusable : Unusable_in_quote.t
         }
-    (** Spliced where [name] is unbound, code from a quote in which [name] is
-        free, as the binding of [name] there was [unusable]. *)
+    (** Code is spliced where [name] is unbound, from a quote that had [name] as
+        a free variable: there, [name] was bound in another quote of the same
+        level ([unusable]), so not usable. *)
+    | Not_embeddable of
+        { name : string
+        ; why : Not_embeddable_why.t
+        }
+    | Forgotten of string
+    | Duplicate_forget of string
     | Unbound_module of Syntax.Decl_path.t
     | Unbound_type of Syntax.Decl_path.t
     | Unbound_type_variable of string
@@ -187,6 +205,13 @@ module Kind : sig
         { generated : Syntax.Type_expr.t
         ; error : t
         } (** An error in the type [generated] the type splice here gave. *)
+    | Via_quote of
+        { toplevel : string
+        ; quote : Loc.t
+        ; error : t
+        }
+    (** An error of an instance here of the scheme of [toplevel], in its quote
+        at [quote]: its code uses a toplevel at a type the instance makes wrong. *)
     | Type_splice_cycle
     (** Evaluating the type splice needs the splice itself, eg. its expression
         uses the declaration it is in. *)

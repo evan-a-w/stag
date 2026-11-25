@@ -812,13 +812,24 @@ and record_pattern t : Pattern.t =
   let start = loc t in
   match peek_at t 1 with
   | Lident _ | Uident _ | Root ->
+    (* A final [_], as in OCaml, says the other fields are ignored, as they are
+       anyway. *)
     let fields =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
-        let path = lowercase_path t ~what:"a field name" in
-        expect t Equal;
-        path, pattern t)
+        if is t Underscore
+           &&
+           match peek_at t 1, peek_at t 2 with
+           | Rbrace, _ | Semi, Rbrace -> true
+           | _ -> false
+        then (
+          advance t;
+          None)
+        else (
+          let path = lowercase_path t ~what:"a field name" in
+          expect t Equal;
+          Some (path, pattern t)))
     in
-    since t start (Pattern.Record fields)
+    since t start (Pattern.Record (List.filter_opt fields))
   | _ ->
     advance t;
     let rec loop acc =
@@ -987,6 +998,7 @@ let rec expr ?(seq = true) t : Expr.t =
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
   | Stack_ | Exclave_ -> region t ~seq
+  | Forget -> forget t ~seq
   | _ ->
     let first = assignment t ~seq in
     if seq && is t Semi
@@ -1134,6 +1146,7 @@ and tuple_item t ~seq : Expr.t =
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
   | Stack_ | Exclave_ -> region t ~seq
+  | Forget -> forget t ~seq
   | _ -> construct t
 
 (** [local_ e] or [exclave_ e]. *)
@@ -1147,6 +1160,23 @@ and region t ~seq : Expr.t =
     (match keyword with
      | Exclave_ -> Exclave body
      | _ -> Stack body)
+
+(** [forget x, y in e]. *)
+and forget t ~seq : Expr.t =
+  let start = loc t in
+  expect t Forget;
+  let rec names acc =
+    let acc = lident t ~what:"a name to forget" :: acc in
+    if is t Comma
+    then (
+      advance t;
+      names acc)
+    else List.rev acc
+  in
+  let names = names [] in
+  expect_for t In ~opener:Forget ~open_loc:start;
+  let body = expr t ~seq in
+  expr_at ~loc:(Loc.merge start body.loc) (Expr.Forget (names, body))
 
 (** A value in [{...}]. *)
 and entry_value t = assignment t ~seq:false
@@ -1316,16 +1346,9 @@ and atom t : Expr.t =
       let e = expr t in
       match peek t with
       | Colon | At ->
-        (match e.txt with
-         | Var (path, existing) when Annot.is_none existing ->
-           let annot = annot t in
-           close t Rparen ~opener:Lparen ~open_loc:start;
-           expr_since t start (Var (path, annot))
-         | _ ->
-           fail
-             e.loc
-             "annotations are only supported on variables, as in `(x : t)` or \
-              `(x @ m)`")
+        let annot = annot t in
+        close t Rparen ~opener:Lparen ~open_loc:start;
+        expr_since t start (Expr.annotated e annot)
       | _ ->
         close_parens t ~open_loc:start e ~tuple_items:(function
           | Expr.Tuple items -> Some items

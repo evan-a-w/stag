@@ -38,7 +38,7 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception external type of module
-  struct end`, `true false`, and `stack_ exclave_` (see
+  struct end forget`, `true false`, and `stack_ exclave_` (see
   [Modes](#modes)), so these are not identifiers anywhere, even qualified
   (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
   `external`: it is the `external` mode after `@`, unless it starts a
@@ -90,7 +90,7 @@ e1; e2                              (* Stag.Expr.Seq: runs as let _ = e1 in e2 *
 fun x (y : int) _ -> e              (* anonymous function, of let's params *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)
-(x : t)                             (* annotated variable: Expr.Var's annotation *)
+(x : t)   (e : t)   (e @ m)         (* annotations: Expr.Var's, else Expr.Annotated *)
 (a, b, c)   ()   (e)
 [a; b; c]   []                      (* the prelude's list, see List literals *)
 C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
@@ -106,6 +106,7 @@ r \ `x                              (* restrict *)
 .~e.{}                              (* explicit, nothing provided (Some []) *)
 .~e.{x = e1; y}                     (* explicit; `y` alone is a variable: (y, None) *)
 type t   type list[int]   type (a * b)  (* a type as a value, see Reflection *)
+forget x, y in e                    (* e without x and y in scope, see Forget *)
 ```
 
 Splice binds tighter than application (`.~f x` is `(.~f) x`), and looser than
@@ -119,7 +120,7 @@ Precedence, loosest first:
 
 | Construct                                  | Associativity      |
 | ------------------------------------------ | ------------------ |
-| `let ... in`, `match`, `fun` (extend right) |                    |
+| `let ... in`, `match`, `fun`, `forget` (extend right) |                    |
 | `e1; e2`                                   | right              |
 | `x <- e`                                   | right              |
 | `e1, e2`                                   | n-ary              |
@@ -146,6 +147,39 @@ the typechecker from the declaration (and so also for generated code: `C` of
 polymorphic variant has at most one argument, so `` `A (a, b) `` is always
 `` `A `` of a tuple. A parenthesized expression's location includes its
 parentheses.
+
+### Forget
+
+`forget x, y in e` takes `x` and `y` out of scope in `e`: locals and
+toplevels of those names, so they don't resolve to an outer binding either.
+Only plain names are forgotten; qualified paths (`M.x`, `.x`) are
+unaffected. Outside a quote, using a forgotten name is an error. Inside a
+quote (whether `forget` is outside the quote or inside it), a forgotten name
+is a free variable of the quote, to be provided where the code is spliced
+(implicitly or by `.{x = ...}`). A binding inside `e` (`let x = ... in`, a
+parameter, a pattern) binds `x` again as usual. Naming a variable twice is an
+error. `forget` works at the level it is written, and in the quotes nested in
+`e`: a splice in `e` back to an earlier level, where `x` is a variable, still
+sees it, so `.< forget x in .~(f x) >.` passes the outer `x` to `f` while the
+quote's own `x` is free.
+
+A name in scope inside a quote always means that variable. A local of an
+earlier level is embedded in the code if the quote may use its value (it is
+`portable`, or its type crosses stage, see [modes.md](modes.md)); otherwise
+using it is an error, which suggests `forget` (and `(x @ portable)` where
+that could hold). A local of the quote's level bound in another quote has no
+value to embed: it is a free variable of the quote, provided by a substitution
+where the code is spliced (an implicit one, if spliced in its scope). A toplevel the quote can't embed is referred to by symbol:
+the code names that toplevel wherever it is spliced, so no local there can
+capture it, no substitution can replace it, and `forget` at the splice doesn't
+hide it. So the quote's free variables are exactly the names not in scope
+and the locals of other quotes:
+
+```ocaml
+let argument x = .< x >.             (* error: x may not be portable *)
+let argument x = forget x in .< x >. (* a free x: 'a -> <'b>{x : 'b; ..'c} *)
+let embedded (x @ portable) = .< x >. (* x's value: 'a -> <'a>{..'b} *)
+```
 
 ### List literals
 
@@ -280,9 +314,9 @@ parameter whose type is fixed by a later use), the lookup is lexical. So the
 order matters, and nothing warns of it (there is no `-principal`):
 `let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
 `let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
-non-function toplevel is a free variable of the quote, whose type is not its
-own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
-`N.v`'s type.
+toplevel still being checked by another toplevel has a type of its own there,
+unified with the toplevel's once its component is finished (see modes.md), so in
+`.< N.v.x >.` the `x` is then the one in scope whatever `N.v`'s type.
 
 ## Patterns
 
@@ -290,7 +324,7 @@ own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
 _   x   1   'c'   "s"   true   ()   (p, q)
 C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
 [p; q]   []                         (* list literals, as in expressions *)
-{x = p; M.y = q}                    (* nominal *)
+{x = p; M.y = q}   {x = p; _}       (* nominal: any fields; a final _ as in OCaml *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
 exception p                         (* only at the top of a match arm *)
@@ -349,7 +383,7 @@ A closure captures a mutable local by reference: it shares the variable with
 the code that binds it. Mutable locals are values of their level only: a
 quote can't use one bound outside it, nor can compile-time code use a runtime
 one. A closure capturing one is `nonportable` (see [modes.md](modes.md)), so
-is not used directly in a quote: it becomes a free variable of the quote.
+a quote can't use it either (see [Forget](#forget)).
 
 Toplevel `let mut x = e` declares a mutable global, assignable from anywhere
 it is in scope (`M.x <- 1`). Its value can't need itself (see Evaluation),
@@ -389,9 +423,9 @@ This is the same at a toplevel splice and in a quote.
 A substitution must be of a free variable of the code: substituting a name
 the code's context is known not to have (it is closed without it, or the
 entry is absent) is an error, as is one the code run at a toplevel splice
-turns out not to use when its type doesn't list it. A toplevel constant used
-in a quote is not a free variable (see modes.md), so `.~(.<n>.).{n = 1}` is
-an error for `let n = 3`. Nor is a free variable of a quote inside the
+turns out not to use when its type doesn't list it. A toplevel used in a
+quote is never a free variable (see modes.md), so `.~(.<n>.).{n = 1}` is an
+error for `let n = 3` or `let n = Int.to_string 3`. Nor is a free variable of a quote inside the
 generated code: in `.~(.< .<x>. >.).{x = 1}`, the inner `x` is provided where
 that inner code is spliced, not by the substitution, so it is an error too.
 
@@ -404,8 +438,8 @@ allocates everything on its heap, so `stack_`, `exclave_` and `[@nontail]` evalu
 A binding's annotation is the variable's mode: `let x @ m = e` needs `e`'s
 mode to be at most `m`, and `x` is then `m` on the axes `m` names (and `e`'s
 mode on the others), as are parameters `(x @ m)` and `let mut x @ m`. An
-expression's annotation `(x @ m)` only checks: it bounds `x`'s mode, which it
-keeps. So `let n @ portable = 1` is a `portable` `n`, while
+expression's annotation `(e @ m)` (on any expression) only checks: it bounds
+`e`'s mode, which it keeps. So `let n @ portable = 1` is a `portable` `n`, while
 `let n = (one @ portable)` is as `const` as `one`.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
@@ -423,7 +457,7 @@ keeps a side polymorphic: `(f : int @ 'm -> int @ 'n)`.
 let x @ const = 1                       (* a binder's mode *)
 let f (x @ local) (y : int @ 'm) : int @ global = ...
 let mut name : string @ gc = ""
-(e : t @ m)   (x @ local)               (* an annotated variable *)
+(e : t @ m)   (x @ local)               (* an annotated expression *)
 int @ local -> int @ local              (* a function type's argument/result *)
 'a @ 'm -> 'b @ 'n
 stack_ e                                (* allocate e's allocations in the current region *)
@@ -1021,7 +1055,7 @@ their names, but are renamed (eg. `x_1`) where one would capture a variable
 of the same name bound elsewhere, or a free one; a renamed binder providing
 an implicit splice `.~c` (in a nested quote) provides it explicitly,
 `.~c.{x = x_1}`. Type annotations (on parameters, a let's result, and
-`(x : t)`) are kept as written, the types they name as refs (printed as
+`(e : t)`) are kept as written, the types they name as refs (printed as
 root paths, eg. `(y : .int)`), so generated code has the types its quote
 did; types as values are given as by `Stag.Type.expr`.
 
@@ -1042,10 +1076,8 @@ there), as if named by a path there. Whatever made it was visible where the
 quote was checked, so it exists by the time a splice can use it; checking it
 on demand is subject to the usual rules (eg. a toplevel that needs what the
 running splice generates is an error). Toplevels referred to from inside a
-quote but not yet checked are the quote's free variables by their canonical
-names, and are erased as refs too; a splice provides these from where it is
-even with explicit substitutions, which can't name them (so
-`.~(.<n>.).{n}` inside `module M` works while `M.n` is unchecked). A local the code embeds (a local function
+quote but not yet checked are refs too (by symbol), so a splice never provides
+them. A local the code embeds (a local function
 of the code that made it, used in the quote) has no name where the code is
 spliced: `erase` is a runtime error naming it. A splice inside a nested quote
 of the code takes its entries from what is in scope where spliced, by name,

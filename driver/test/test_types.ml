@@ -875,13 +875,13 @@ let%expect_test "recursive local non-functions are not generalized" =
   print_local "match x with _ -> Nil";
   (* The splices' providers are of the quote's level, so are never the binder. *)
   print_local ".<.~(.<Nil>.)>.";
-  print_local ".<.~(.<x>.)>.";
+  print_local ".<.~(forget x in .<x>.)>.";
   print_local "Nil";
   print_local "let x = Nil in x";
   print_local "match Nil with x -> x";
   print_local "let g x = x in g; Nil";
   print_local ".<.~(.<Nil>.).{y}>.";
-  print_local ".<.~(.<Nil>.).{x}>.";
+  print_local ".<forget x in .~(.<Nil>.).{x}>.";
   [%expect
     {|
     val local : '_a * '_a
@@ -918,5 +918,22 @@ let substitution = .<.~(.<x>.).{x = id Nil}>.
     val nested_app_splice : <<list['a]>{..'b}>{..'c}
     val escaping_app_splice : <<list['_a]>{..'_b}>{..'_c}
     val substitution : <list['a]>{..'b}
+    |}]
+;;
+
+let%expect_test "a record pattern may end with [_]" =
+  check
+    {|
+type r = {a : int; b : string; c : bool}
+let f x = match x with {a = n; _} -> n
+let g (x : r) = match x with {b = s} -> s
+let h x = match x with {a = 1; c = true; _} -> 1 | {a = n; _} -> n
+|};
+  [%expect
+    {|
+    type r = { a : int; b : string; c : bool }
+    val f : r -> int
+    val g : r -> string
+    val h : r -> int
     |}]
 ;;

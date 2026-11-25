@@ -345,6 +345,14 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Nontail e, Nontail e' ->
     let+ e = expr e e' in
     Expr.Nontail e
+  | Annotated (e, a), Annotated (e', a') ->
+    let* e = expr e e' in
+    let+ a = annot a a' in
+    Expr.Annotated (e, a)
+  | Forget (ns, e), Forget (ns', e') ->
+    let* ns = list name ns ns' in
+    let+ e = expr e e' in
+    Expr.Forget (ns, e)
   | ( ( Lit _
       | Var _
       | App _
@@ -375,6 +383,8 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Stack _
       | Exclave _
       | Nontail _
+      | Annotated _
+      | Forget _
       | Error )
     , _ ) -> None
 

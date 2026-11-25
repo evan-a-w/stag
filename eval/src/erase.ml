@@ -178,7 +178,6 @@ let expr (expr : Typed.Expr.t) =
     | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
       Ok (resolved ident.name)
     | Free name -> Ok (Path (Syntax.Path.of_string name))
-    | Free_toplevel name -> Ok (resolved name)
     | Prim prim -> Ok (resolved (Prim.canonical_name prim))
     | Intrinsic Ptr_make -> Ok (resolved (Prelude_path.canonical "Ptr.make"))
     | Intrinsic Assume_global ->
@@ -242,9 +241,7 @@ let expr (expr : Typed.Expr.t) =
       (match e.txt with
        | Var (path, existing) when Syntax.Annot.is_none existing ->
          node (Var (path, annot))
-       | _ ->
-         Or_error.error_s
-           [%message "annotated non-variable" (e : Syntax.Expr.t)])
+       | _ -> node (Annotated (e, annot)))
     | App (f, x) ->
       let%bind f = go names f in
       let%bind x = go names x in

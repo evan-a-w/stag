@@ -24,3 +24,16 @@ val instantiate : Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
     that may share the variables generalized, as what is not seen in them may be
     simplified away or dropped. *)
 val generalize : Fresh.t -> rank:Type.rank -> Type.ty list -> unit
+
+(** Makes the [Generic] variables of [tys], type and mode, ones of [rank] again,
+    in place, with the constraints the scheme kept with variables it was not
+    generalized with: the scheme is refined by unifying its own variables, and
+    whatever shares them (such as the code it is the type of) sees it, before it
+    is generalized anew. Instances made before are unaffected. [tys] must have
+    every type of the scheme, as for [generalize]. Errs if a kept constraint no
+    longer holds, as a variable outside the scheme has changed since. *)
+val reopen
+  :  Fresh.t
+  -> rank:Type.rank
+  -> Type.ty list
+  -> (unit, Unification_error.t) Result.t

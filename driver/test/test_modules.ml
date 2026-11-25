@@ -795,7 +795,8 @@ let captured = .<let n = () in .~(q_root ())>.
     |}]
 ;;
 
-let%expect_test "splicing code with canonically named free variables" =
+let%expect_test "code refers to toplevels by symbol, so they aren't substituted"
+  =
   (* [explicit] and [shorthand] on the DSL: source can't write a qualified name
      in a splice's substitutions. *)
   check_program
@@ -806,13 +807,27 @@ module M = struct
 end
 let implicit = .~.<M.n>.
 let local_does_not_provide n = cond n () (); .~.<M.n>.
+|});
+  check_program
+    (parse_exn {|
+module M = struct
+  let n = Int.to_string 5
+end
 |}
      @ Helpers.
          [ top
              "explicit"
              []
              (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
-         ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
+         ]);
+  check_program
+    (parse_exn {|
+module M = struct
+  let n = Int.to_string 5
+end
+|}
+     @ Helpers.
+         [ top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
          ]);
   check
     {|
@@ -828,8 +843,8 @@ end
     end
     val implicit : string
     val local_does_not_provide : bool -> string
-    val explicit : string
-    val shorthand : string
+    (Unused_substitution M.n)
+    (Unused_substitution M.n)
     ((Unused_substitution n) @ t.stag:4:28-29)
     |}]
 ;;

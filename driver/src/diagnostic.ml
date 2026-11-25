@@ -92,6 +92,12 @@ let of_typecheck_error (error : Typecheck_error.t) =
              | Type_definition -> "The type splice is here")
         }
       ]
+    | Via_quote { toplevel; quote; error } ->
+      notes error
+      @ [ { Note.loc = quote
+          ; message = sprintf "The use in %s's quote is here" toplevel
+          }
+        ]
     | Generated_after_include { error; include_; splice_kind } ->
       notes error
       @ [ { Note.loc = include_
