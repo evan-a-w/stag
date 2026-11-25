@@ -108,11 +108,12 @@ module Next = struct
   ;;
 end
 
-(* A toplevel not yet evaluated. *)
-module Pending = struct
+module Toplevel_state = struct
   type t =
     | Component of Typed.Scc.t (** None of its members' closures are bound. *)
-    | Value of Typed.Expr.t
+    | Unevaluated of Typed.Expr.t
+    | Evaluating
+    | Evaluated
     | Failed of
         { error : Error.t
         ; uncatchable : Error.t
@@ -123,7 +124,9 @@ end
 
 type t =
   { sccs : Typed.Scc.t Queue.t
-  ; pending : Pending.t Typed.Ident.Table.t
+  ; toplevels : Toplevel_state.t Typed.Ident.Table.t
+  (** Each has a slot in [env] once queued, filled once [Evaluated]. Only
+      [force] changes the state of one queued. *)
   ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
   ; closure_captures : Typed.Ident.Hash_set.t Typed.Ident.Table.t
   ; mutable env : Value.t Env.t
@@ -222,7 +225,7 @@ let type_id = Type_equal.Id.create ~name:"Treewalk" sexp_of_opaque
 
 let create ~stamps () =
   { sccs = Queue.create ()
-  ; pending = Typed.Ident.Table.create ()
+  ; toplevels = Typed.Ident.Table.create ()
   ; ident_info = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
   ; env = Env.create ()
@@ -248,18 +251,18 @@ let add_ident_info t ~ident ~info =
   Hashtbl.set t.ident_info ~key:ident ~data:info
 ;;
 
-(* [lookup] relies on a filled slot's ident never being pending. *)
 let add_scc t (scc : Typed.Scc.t) =
   List.iter scc.members ~f:(fun { ident; _ } ->
-    match Env.find_slot t.env ~fallback:t.env ident with
-    | This { value = This _ } ->
+    match Hashtbl.find t.toplevels ident with
+    | Some (Evaluating | Evaluated) ->
       raise_s
         [%message
           "Treewalk.add_scc: toplevel already evaluated" (ident : Typed.Ident.t)]
-    | This { value = Null } | Null -> ());
+    | Some (Component _ | Unevaluated _ | Failed _) | None -> ());
   Queue.enqueue t.sccs scc;
   List.iter scc.members ~f:(fun { ident; _ } ->
-    Hashtbl.set t.pending ~key:ident ~data:(Component scc))
+    if not (Env.mem t.env ident) then Env.declare t.env ~ident;
+    Hashtbl.set t.toplevels ~key:ident ~data:(Component scc))
 ;;
 
 let global_info t ~ident =
@@ -692,27 +695,26 @@ let code_of_value (value : Value.t)
     Eval_result.error_s [%message "Spliced a non-code value" (value : Value.t)]
 ;;
 
-(* Closures capturing a toplevel not yet evaluated share its slot, so it is
-   kept. *)
-let declare_toplevel t ident =
-  if not (Env.mem t.env ident) then Env.declare t.env ~ident
-;;
-
 (* Toplevels are evaluated on first use, so compile time evaluation only runs
    what it needs. *)
 let rec force t ident : unit Eval_result.t @ local = exclave_
-  match Hashtbl.find t.pending ident with
-  | None -> Eval_result.return ()
+  match Hashtbl.find t.toplevels ident with
+  | None | Some (Evaluating | Evaluated) -> Eval_result.return ()
   | Some (Component scc) ->
     let%bindl.Local_result { global = () } = bind_functions t scc in
     force t ident
   | Some (Failed { error; uncatchable = _ }) -> Eval_result.error error
-  | Some (Value body) ->
-    Hashtbl.remove t.pending ident;
-    declare_toplevel t ident;
+  | Some (Unevaluated body) ->
+    Hashtbl.set t.toplevels ~key:ident ~data:Evaluating;
+    (* An exception, eg. from [reflect], abandons the evaluation, to be done
+       again when next forced. *)
     (match eval t ~env:(Env.create ()) ~level:0 body with
+     | exception exn ->
+       Hashtbl.set t.toplevels ~key:ident ~data:(Unevaluated body);
+       raise exn
      | Ok { global = value } ->
        Env.set t.env ~ident ~value;
+       Hashtbl.set t.toplevels ~key:ident ~data:Evaluated;
        Eval_result.return ()
      | Error { global = error } ->
        let uncatchable =
@@ -727,10 +729,10 @@ let rec force t ident : unit Eval_result.t @ local = exclave_
                    (Runtime_error.Raised.to_string_for_message exn)))
          | Some { kind = Message _; loc = _ } | None -> error
        in
-       Hashtbl.set t.pending ~key:ident ~data:(Failed { error; uncatchable });
+       Hashtbl.set t.toplevels ~key:ident ~data:(Failed { error; uncatchable });
        Eval_result.error error)
 
-(* A filled slot's ident is never pending, so needs no [force]. *)
+(* A filled slot's toplevel is [Evaluated], so needs no [force]. *)
 and lookup t env ident ~loc : Value.t Eval_result.t @ local = exclave_
   match Env.find_slot env ~fallback:t.env ident with
   | This { value = This value } -> Eval_result.return value
@@ -739,9 +741,10 @@ and lookup t env ident ~loc : Value.t Eval_result.t @ local = exclave_
 and lookup_forcing t env ident ~loc : Value.t Eval_result.t @ local = exclave_
   match force t ident with
   | Error error ->
-    (match Hashtbl.find t.pending ident with
+    (match Hashtbl.find t.toplevels ident with
      | Some (Failed { uncatchable; error = _ }) -> Eval_result.error uncatchable
-     | Some (Component _ | Value _) | None -> Error error)
+     | Some (Component _ | Unevaluated _ | Evaluating | Evaluated) | None ->
+       Error error)
   | Ok { global = () } ->
     (match Env.find_slot env ~fallback:t.env ident with
      | This { value = This value } -> Eval_result.return value
@@ -756,22 +759,20 @@ and lookup_forcing t env ident ~loc : Value.t Eval_result.t @ local = exclave_
 
 (* Making closures reads nothing, so a component's functions are all bound at
    once, and its values evaluated each when first used. *)
-and bind_functions t ({ members; recursive } : Typed.Scc.t)
+and bind_functions t ({ members; recursive = _ } : Typed.Scc.t)
   : unit Eval_result.t @ local
   = exclave_
   let functions, values =
     List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
   in
   List.iter values ~f:(fun { ident; body; _ } ->
-    Hashtbl.set t.pending ~key:ident ~data:(Value body));
-  List.iter functions ~f:(fun { ident; _ } ->
-    Hashtbl.remove t.pending ident;
-    if recursive then declare_toplevel t ident);
+    Hashtbl.set t.toplevels ~key:ident ~data:(Unevaluated body));
   Eval_result.List.iter functions ~f:(fun { ident; args; body; _ } -> exclave_
     let%mapl_fun.Local_result { global = value } =
       closure t ~env:t.env ~level:0 ~ident ~args ~body
     in
-    { global = Env.set t.env ~ident ~value })
+    Env.set t.env ~ident ~value;
+    { global = Hashtbl.set t.toplevels ~key:ident ~data:Evaluated })
 
 and store_place t ~env ~level (expr : Typed.Expr.t)
   : Store_place.t Eval_result.t @ local
@@ -1047,8 +1048,6 @@ and closure t ~env ~level ~ident ~args ~body : Value.t Eval_result.t @ local
     Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
       captures t ~ident ~args ~body)
   in
-  Hash_set.iter captures ~f:(fun ident ->
-    if Hashtbl.mem t.pending ident then declare_toplevel t ident);
   match Env.of_captures env ~fallback:t.env ~captures with
   | Ok env -> Eval_result.return (Value.Function { args; body; env; level })
   | Error error -> Eval_result.error error

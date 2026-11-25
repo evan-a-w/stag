@@ -195,3 +195,28 @@ let%expect_test "a toplevel already evaluated can't be queued again" =
     (Error ("Treewalk.add_scc: toplevel already evaluated" (ident y/5)))
     |}]
 ;;
+
+let%expect_test "toplevels are evaluated in program order, those used before \
+                 their turn on demand"
+  =
+  run
+    ~show:[]
+    {|
+let a = print_endline "a"; b
+let b = print_endline "b"
+let mut c = print_endline "c"
+module M = struct
+  let d = print_endline "d"; e
+end
+let e = print_endline "e"
+let f = print_endline "f"
+|};
+  [%expect {|
+    a
+    b
+    c
+    d
+    e
+    f
+    |}]
+;;

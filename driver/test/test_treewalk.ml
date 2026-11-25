@@ -311,3 +311,51 @@ let%expect_test "with_output restores the previous output" =
     ((outer hello) (raising ""))
     |}]
 ;;
+
+let%expect_test "a toplevel whose evaluation an exception abandons is \
+                 evaluated again when next used"
+  =
+  let t =
+    Option.value_exn
+      (typecheck
+         {|
+let head ty =
+  match Stag.Type.expr ty with
+  | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
+let x = print_endline "evaluating x"; Stag.Type.decl (head (type int))
+let y = x
+|})
+  in
+  let interpreter = Driver.interpreter (driver t) in
+  let ident name =
+    List.find_map_exn (members t) ~f:(fun { ident; _ } ->
+      Option.some_if (String.equal ident.name name) ident)
+  in
+  let y = ident "y" in
+  let use_y =
+    { Typed.Expr.desc = Var (Bound (Toplevel y))
+    ; ty = Type.error
+    ; loc = Loc.none
+    }
+  in
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () ->
+         Interpreter.run interpreter use_y ~level:0 ~reflect:(fun _ ->
+           raise_s [%message "abandoned"]))
+       : Interpreter.Value.t Or_error.t Or_error.t)];
+  print_s
+    [%sexp
+      (Interpreter.eval_toplevel interpreter ~ident:(ident "x")
+       : unit Or_error.t)];
+  print_s
+    [%sexp (Interpreter.eval_toplevel interpreter ~ident:y : unit Or_error.t)];
+  [%expect
+    {|
+    evaluating x
+    (Error abandoned)
+    evaluating x
+    (Error ("Stag.Type.decl is only available at compile time" @ t.stag:5:38-70))
+    (Error ("Stag.Type.decl is only available at compile time" @ t.stag:5:38-70))
+    |}]
+;;
