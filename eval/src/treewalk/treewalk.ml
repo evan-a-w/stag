@@ -142,9 +142,8 @@ let captures t ~ident ~args ~body =
     (Hashtbl.find_exn t.ident_info ident).level
   in
   let closure_level = level ident in
-  let defined = Typed.Ident.Hash_set.create () in
+  let defined = Typed.Ident.Hash_set.of_list args in
   let captures = Typed.Ident.Hash_set.create () in
-  let def ident = Hash_set.add defined ident in
   let use ~depth ident =
     if depth >= 0
        && (not (Hash_set.mem defined ident))
@@ -156,69 +155,17 @@ let captures t ~ident ~args ~body =
     | Bound (Toplevel ident | Local ident)
     | Persistent (Toplevel ident | Local ident) -> use ~depth ident
   in
-  let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
-    match desc with
-    | Lit _ | Expect _ | External _ | Type _ -> ()
-    | Var var_ref -> var ~depth var_ref
-    | Assign (var_ref, value) ->
-      var ~depth var_ref;
-      go ~depth value
-    | Store (target, value) ->
-      go ~depth target;
-      go ~depth value
-    | Let { ident; args; body; in_; _ } ->
-      def ident;
-      List.iter args ~f:def;
-      go ~depth body;
-      go ~depth in_
-    | Let_mut { ident; body; in_; annot = _ } ->
-      def ident;
-      go ~depth body;
-      go ~depth in_
-    | Seq (first, second) ->
-      go ~depth first;
-      go ~depth second
-    | Fun { args; annots = _; body } ->
-      List.iter args ~f:def;
-      go ~depth body
-    | Annotated (expr, _) | Marked (_, expr) -> go ~depth expr
-    | Splice { code; subs } ->
-      go ~depth:(depth - 1) code;
-      (match subs with
-       | Explicit subs -> go_fields ~depth subs
-       | Implicit providers ->
-         Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
-           use ~depth ident))
-    | Toplevel_splice { code = _; expansion } -> go ~depth expansion
-    | Match { scrutinee; cases; exception_cases } ->
-      go ~depth scrutinee;
-      List.iter (cases @ exception_cases) ~f:(fun (pattern, body) ->
-        List.iter (Typed.Pattern.idents pattern) ~f:def;
-        go ~depth body)
-    | Quote expr -> go ~depth:(depth + 1) expr
-    | Deref expr
-    | Field (expr, _)
-    | Poly_field (expr, _)
-    | Poly_restrict (expr, _)
-    | Poly_variant (_, Some expr) -> go ~depth expr
-    | Poly_variant (_, None) -> ()
-    | App (f, x) ->
-      go ~depth f;
-      go ~depth x
-    | Tuple exprs | Construct (_, exprs) | Error exprs ->
-      List.iter exprs ~f:(go ~depth)
-    | Record fields -> go_fields ~depth fields
-    | Record_update (expr, fields) ->
-      go ~depth expr;
-      go_fields ~depth fields
-    | Poly_record fields -> go_fields ~depth fields
-    | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
-      go ~depth expr;
-      go_fields ~depth fields
-  and go_fields : 'a. depth:int -> ('a * Typed.Expr.t) list -> unit =
-    fun ~depth fields -> List.iter fields ~f:(fun (_, expr) -> go ~depth expr)
+  let rec go ~depth (expr : Typed.Expr.t) =
+    (match expr.desc with
+     | Var var_ref | Assign (var_ref, _) -> var ~depth var_ref
+     | Splice { subs = Implicit providers; _ } ->
+       Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
+         use ~depth ident)
+     | _ -> ());
+    Typed.Expr.iter_children expr ~f:(fun child expr ->
+      List.iter child.binds ~f:(Hash_set.add defined);
+      go ~depth:(depth + child.depth) expr)
   in
-  List.iter args ~f:def;
   go ~depth:0 body;
   captures
 ;;
@@ -283,112 +230,24 @@ let map_fields fields ~(f @ local) =
   [@nontail]
 ;;
 
+module Traverse_or_error = Typed.Expr.Traverse (struct
+    type 'a t = 'a Or_error.t
+
+    let return = Or_error.return
+
+    let bind x ~(f @ local) =
+      match x with
+      | Ok x -> f x
+      | Error _ as error -> error
+    ;;
+  end)
+
 (* [expr] with [f ~depth] applied to its children, where [depth] is that of
    [expr], counting quotes up and splices down. Children are visited in order. *)
 let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
-  let same expr = f ~depth expr in
-  let%mapl_fun (desc : Typed.Expr.t Typed.Expr.Desc.t) =
-    match expr.desc with
-    | (Lit _ | Var _ | Poly_variant (_, None) | Expect _ | External _ | Type _)
-      as desc -> Ok desc
-    | App (a, b) ->
-      let%bindl_fun a = same a in
-      let%mapl_fun b = same b in
-      Typed.Expr.Desc.App (a, b)
-    | Let let_ ->
-      let%bindl_fun body = same let_.body in
-      let%mapl_fun in_ = same let_.in_ in
-      Typed.Expr.Desc.Let { let_ with body; in_ }
-    | Let_mut let_ ->
-      let%bindl_fun body = same let_.body in
-      let%mapl_fun in_ = same let_.in_ in
-      Typed.Expr.Desc.Let_mut { let_ with body; in_ }
-    | Seq (first, second) ->
-      let%bindl_fun first = same first in
-      let%mapl_fun second = same second in
-      Typed.Expr.Desc.Seq (first, second)
-    | Assign (var_ref, value) ->
-      let%mapl_fun value = same value in
-      Typed.Expr.Desc.Assign (var_ref, value)
-    | Store (target, value) ->
-      let%bindl_fun target = same target in
-      let%mapl_fun value = same value in
-      Typed.Expr.Desc.Store (target, value)
-    | Fun fun_ ->
-      let%mapl_fun body = same fun_.body in
-      Typed.Expr.Desc.Fun { fun_ with body }
-    | Marked (marker, expr) ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Marked (marker, expr)
-    | Annotated (expr, ty) ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Annotated (expr, ty)
-    | Splice { code; subs } ->
-      let%bindl_fun code = f ~depth:(depth - 1) code in
-      let%mapl_fun (subs : Typed.Expr.t Typed.Expr.Subs.t) =
-        match subs with
-        | Explicit subs ->
-          let%mapl_fun subs = map_fields subs ~f:same in
-          Typed.Expr.Subs.Explicit subs
-        | Implicit _ -> Ok subs
-      in
-      Typed.Expr.Desc.Splice { code; subs }
-    | Toplevel_splice { code; expansion } ->
-      let%bindl_fun code = f ~depth:(depth - 1) code in
-      let%mapl_fun expansion = same expansion in
-      Typed.Expr.Desc.Toplevel_splice { code; expansion }
-    | Quote body ->
-      let%mapl_fun body = f ~depth:(depth + 1) body in
-      Typed.Expr.Desc.Quote body
-    | Tuple exprs ->
-      let%mapl_fun exprs = map_result exprs ~f:same in
-      Typed.Expr.Desc.Tuple exprs
-    | Deref expr ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Deref expr
-    | Construct (constructor, exprs) ->
-      let%mapl_fun exprs = map_result exprs ~f:same in
-      Typed.Expr.Desc.Construct (constructor, exprs)
-    | Error exprs ->
-      let%mapl_fun exprs = map_result exprs ~f:same in
-      Typed.Expr.Desc.Error exprs
-    | Record fields ->
-      let%mapl_fun fields = map_fields fields ~f:same in
-      Typed.Expr.Desc.Record fields
-    | Field (expr, field) ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Field (expr, field)
-    | Record_update (expr, fields) ->
-      let%bindl_fun expr = same expr in
-      let%mapl_fun fields = map_fields fields ~f:same in
-      Typed.Expr.Desc.Record_update (expr, fields)
-    | Match { scrutinee; cases; exception_cases } ->
-      let%bindl_fun scrutinee = same scrutinee in
-      let%bindl_fun cases = map_fields cases ~f:same in
-      let%mapl_fun exception_cases = map_fields exception_cases ~f:same in
-      Typed.Expr.Desc.Match { scrutinee; cases; exception_cases }
-    | Poly_record fields ->
-      let%mapl_fun fields = map_fields fields ~f:same in
-      Typed.Expr.Desc.Poly_record fields
-    | Poly_field (expr, label) ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Poly_field (expr, label)
-    | Poly_extend (fields, expr) ->
-      let%bindl_fun fields = map_fields fields ~f:same in
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Poly_extend (fields, expr)
-    | Poly_restrict (expr, label) ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Poly_restrict (expr, label)
-    | Poly_update (expr, fields) ->
-      let%bindl_fun expr = same expr in
-      let%mapl_fun fields = map_fields fields ~f:same in
-      Typed.Expr.Desc.Poly_update (expr, fields)
-    | Poly_variant (tag, Some expr) ->
-      let%mapl_fun expr = same expr in
-      Typed.Expr.Desc.Poly_variant (tag, Some expr)
-  in
-  { expr with desc }
+  Traverse_or_error.map_children expr ~f:(fun child expr ->
+    f ~depth:(depth + child.depth) expr)
+  [@nontail]
 ;;
 
 let fresh_like t (ident : Typed.Ident.t) ~info =
@@ -408,9 +267,18 @@ let instantiate t (code : Typed.Expr.t) ~entry =
     Hashtbl.set renames ~key:ident ~data:fresh;
     fresh
   in
-  let rename_binder : Typed.Binder.t -> Typed.Binder.t = function
+  (* A persistent local the code does not bind is one embedded in it, bound
+     outside it to its value; any other is bound in the code. *)
+  let rename_binder ~persistent : Typed.Binder.t -> Typed.Binder.t = function
     | Local ident ->
-      Local (Hashtbl.find renames ident |> Option.value ~default:ident)
+      (match Hashtbl.find renames ident with
+       | Some ident -> Local ident
+       | None when persistent -> Local ident
+       | None ->
+         raise_s
+           [%message
+             "Treewalk.instantiate: a local the code does not bind"
+               (ident : Typed.Ident.t)])
     | Toplevel _ as binder -> binder
   in
   let rename_annots =
@@ -451,12 +319,14 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | Assign (((Free name | Free_toplevel name) as var_ref), value)
         when depth = 0 ->
         Assign (Option.value (entry name) ~default:var_ref, value)
-      | Var (Bound binder) -> Var (Bound (rename_binder binder))
-      | Var (Persistent binder) -> Var (Persistent (rename_binder binder))
+      | Var (Bound binder) ->
+        Var (Bound (rename_binder ~persistent:false binder))
+      | Var (Persistent binder) ->
+        Var (Persistent (rename_binder ~persistent:true binder))
       | Assign (Bound binder, value) ->
-        Assign (Bound (rename_binder binder), value)
+        Assign (Bound (rename_binder ~persistent:false binder), value)
       | Assign (Persistent binder, value) ->
-        Assign (Persistent (rename_binder binder), value)
+        Assign (Persistent (rename_binder ~persistent:true binder), value)
       | Let_mut let_ -> Let_mut { let_ with ident = fresh let_.ident }
       | Let let_ ->
         let ident = fresh let_.ident in
@@ -473,7 +343,11 @@ let instantiate t (code : Typed.Expr.t) ~entry =
           ; exception_cases = rename exception_cases
           }
       | Splice { code; subs = Implicit providers } ->
-        Splice { code; subs = Implicit (Map.map providers ~f:rename_binder) }
+        Splice
+          { code
+          ; subs =
+              Implicit (Map.map providers ~f:(rename_binder ~persistent:false))
+          }
       | desc -> desc
     in
     map_children ~depth { expr with desc } ~f:go

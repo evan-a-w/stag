@@ -1,18 +1,13 @@
 open! Import
-
-module Namespace : sig
-  type t =
-    | Type
-    | Constructor
-    | Field
-    | Value
-end
+module Namespace = Traverse.Namespace
 
 (** [toplevel] with [f] applied to each of its [Decl_path]s, including those of
     the declarations of its module if it is one, but not those of expansions,
     given the names of [toplevel]'s modules enclosing it, outermost first, and
     the [locals] in scope there (empty but for values), nor those of list
-    literals, which name the prelude's [Cons] and [Nil] anywhere. *)
+    literals, which name the prelude's [Cons] and [Nil] anywhere, nor those
+    quoted by a struct quote: of a struct quote, only its antiquotes' paths are,
+    in the scope around the quote, which is where they are evaluated. *)
 val map
   :  Syntax.Toplevel.t
   -> f:

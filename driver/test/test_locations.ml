@@ -400,7 +400,11 @@ let rec loc_tree (expr : Typed.Expr.t) =
   Sexp.List
     (Atom head
      :: Atom (Loc.to_string expr.loc)
-     :: List.map (Typed.Expr.sub_exprs expr) ~f:loc_tree)
+     :: List.map
+          (match expr.desc with
+           | Toplevel_splice { code; expansion } -> [ code; expansion ]
+           | _ -> Typed.Expr.sub_exprs expr)
+          ~f:loc_tree)
 ;;
 
 let print_loc_trees source =

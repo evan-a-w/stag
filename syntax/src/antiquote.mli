@@ -5,16 +5,7 @@ open! Import
     quote or struct quote within it quotes its splices, a splice within that
     unquoting again. *)
 
-module Kind : sig
-  type t =
-    | Item
-    (** [include .~e] or [module M = .~e], of a [list[Stag.Toplevel.t]]. *)
-    | Type_expr (** [.~e] as a type, of a [Stag.Type_expr.t]. *)
-    | Type_kind
-    (** [type t = .~e], the definition, of a [Stag.Type_decl.Kind.t]. *)
-    | Expr (** [.~e] as an expression, of a [Stag.Expr.t]. *)
-  [@@deriving sexp_of, compare, equal]
-end
+module Kind = Traverse.Splice.Kind
 
 type t =
   { kind : Kind.t

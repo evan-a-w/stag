@@ -1067,7 +1067,8 @@ since toplevels in any module may refer to each other in any order, files may
 refer to each other in any order too.
 
 Evaluation: toplevels are evaluated in file order. Files are in dependency
-order: a file depends on the files its toplevels refer to; strongly connected
+order: a file depends on the files its toplevels refer to at runtime (not
+only in the compile-time code of a toplevel splice); strongly connected
 components of files come after those they depend on, ties broken by the order
 the files are given, and the files of a component are in the order given.
 Within a file, toplevels are evaluated top to bottom. A toplevel used before

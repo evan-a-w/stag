@@ -262,6 +262,30 @@ module Expr : sig
     }
   [@@deriving sexp_of]
 
+  (** How a child's scope differs from its parent's. *)
+  module Child : sig
+    type t =
+      { depth : int
+      (** Quotes in, relative to its parent: [1] in a quote, [-1] in a splice's
+          code. *)
+      ; binds : Ident.t list (** The locals its parent binds in it. *)
+      }
+    [@@deriving sexp_of]
+  end
+
+  (** The one enumeration of an expression's children, which every walker over
+      expressions shares. The children are what the expression evaluates, in the
+      order it does: not a [Toplevel_splice]'s [code], which ran while checking,
+      so is no part of what it means. *)
+  module Traverse (M : Local_monad.S) : sig
+    (** [t] with [f] applied to each of its children, in order. *)
+    val map_children : t -> f:(Child.t -> t -> t M.t) @ local -> t M.t
+  end
+
+  val map_children : t -> f:(Child.t -> t -> t) @ local -> t
+  val iter_children : t -> f:(Child.t -> t -> unit) @ local -> unit
+  val fold_children : t -> init:'a -> f:('a -> Child.t -> t -> 'a) @ local -> 'a
+
   (** The children of [t], in order. *)
   val sub_exprs : t -> t list
 

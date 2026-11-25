@@ -15,3 +15,6 @@ module Relocate = Stag_syntax.Relocate
 module Struct_quote = Stag_syntax.Struct_quote
 module List_literal = Stag_syntax.List_literal
 module Lift = Stag_syntax.Lift
+module Decl_paths = Stag_syntax.Decl_paths
+module Traverse = Stag_syntax.Traverse
+module Antiquote = Stag_syntax.Antiquote
