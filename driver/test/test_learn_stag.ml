@@ -190,8 +190,12 @@ let run_project (block : Doc_blocks.Block.t) =
           match
             Stag_build.Program.check
               ~output:(Buffer.add_string output)
+              ~limits
               project
               target
+            |> Result.map_error ~f:List.return
+            |> Result.bind ~f:(fun (_, checked) ->
+              Stag_build.Pipeline.Checked.to_result checked)
           with
           | Error diagnostics ->
             { t with errors = t.errors ^ print_diagnostics diagnostics }
