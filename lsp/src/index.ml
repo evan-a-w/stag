@@ -528,7 +528,10 @@ let create
     declarations t ~up_to_date ~values ~prefix [ toplevel ]);
   let syntax =
     Syntax_at.create
-      ~references:(Option.value checked.references ~default:[])
+      ~references:
+        (Option.value_exn
+           checked.references
+           ~message:"Index.create: [checked] did not record its references")
       ~known_files:
         (List.concat_map (List.map files ~f:snd @ prelude) ~f:toplevel_files
          |> List.dedup_and_sort ~compare:Loc.File.compare)

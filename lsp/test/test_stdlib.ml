@@ -652,19 +652,15 @@ let%expect_test "stag, stag-build and the server agree on the prelude a \
         | Error diagnostics -> print_s [%sexp (diagnostics : Diagnostic.t list)]
         | Ok project ->
           let target = Option.value_exn (Project.find project "app") in
-          let prelude =
-            Pipeline_config.Prelude_choice.prelude
-              (Program.prelude_choice project target)
-            |> Result.ok
-            |> Option.value_exn
-          in
           (match
              Program.check
                ~output:ignore
-               ?prelude
                ~limits:Limits.unlimited
                project
                target
+             |> Result.map_error ~f:List.return
+             |> Result.bind ~f:(fun (_, checked) ->
+               Stag_build.Pipeline.Checked.to_result checked)
            with
            | Ok (_ : Stag_driver.Driver.t) -> print_endline "checks"
            | Error diagnostics ->

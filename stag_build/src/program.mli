@@ -38,13 +38,17 @@ val prelude_choice
   -> Project.Target.t
   -> Pipeline_config.Prelude_choice.t
 
-(** [Pipeline.check_sources] of [parse_recovering] seeing [prelude] (eg. loaded
-    as [prelude_choice] says), failing with all the errors. [output] is as for
-    [Driver.check]. *)
+(** [Pipeline.check] of [parse_recovering], with the [compile_time_c_calls] and
+    [prelude_choice] of [target] and [limits]. *)
 val check
-  :  ?output:(string -> unit)
-  -> ?prelude:Syntax.Toplevel.t list
+  :  ?load_prelude:
+       (Pipeline_config.Prelude_choice.t
+        -> (Pipeline_config.Loaded_prelude.t, Diagnostic.t) Result.t)
+  -> ?record_references:bool
+  -> ?output:(string -> unit)
   -> limits:Limits.t
   -> Project.t
   -> Project.Target.t
-  -> (Driver.t, Diagnostic.t list) Result.t
+  -> ( Pipeline_config.Loaded_prelude.t * Pipeline.Checked.t
+       , Diagnostic.t )
+       Result.t

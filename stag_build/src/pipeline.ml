@@ -3,7 +3,6 @@ open! Import
 module Checked = struct
   type t =
     { groups : Driver.Module_group.t list option
-    ; prelude : Syntax.Toplevel.t list option
     ; checked : Typecheck.Checked.t option
     ; driver : Driver.t option
     ; diagnostics : Diagnostic.t list
@@ -15,7 +14,7 @@ module Checked = struct
     | None -> Error t.diagnostics
   ;;
 
-  let of_result ~groups ~prelude ~errors result =
+  let of_result ~groups ~errors result =
     let driver, checked, type_errors =
       match result with
       | Ok driver -> Some driver, Driver.checked driver, []
@@ -26,7 +25,6 @@ module Checked = struct
         (errors @ List.map type_errors ~f:Diagnostic.of_typecheck_error)
     in
     { groups
-    ; prelude
     ; checked = Some checked
     ; driver = Option.filter driver ~f:(fun _ -> List.is_empty diagnostics)
     ; diagnostics
@@ -47,14 +45,13 @@ let check_sources
   ?compile_time_c_calls
   ?record_references
   ?output
-  ?prelude
+  ~prelude
   ~limits
   (groups, errors)
   =
   match groups with
   | None ->
     { Checked.groups
-    ; prelude
     ; checked = None
     ; driver = None
     ; diagnostics = Diagnostic.sort errors
@@ -65,29 +62,28 @@ let check_sources
       ?record_references
       ~limits
       ?output
-      ?prelude
+      ?prelude:(Pipeline_config.Loaded_prelude.toplevels prelude)
       modules
-    |> Checked.of_result ~groups ~prelude ~errors
+    |> Checked.of_result ~groups ~errors
 ;;
 
 let check
   ?compile_time_c_calls
   ?record_references
   ?output
-  ?contents
+  ?(load_prelude = Pipeline_config.Loaded_prelude.load ?contents:None)
   ({ prelude; limits } : Pipeline_config.t)
   sources
   =
-  let%map.Result prelude =
-    Pipeline_config.Prelude_choice.prelude ?contents prelude
-  in
-  check_sources
-    ?compile_time_c_calls
-    ?record_references
-    ?output
-    ?prelude
-    ~limits
-    sources
+  let%map.Result prelude = load_prelude prelude in
+  ( prelude
+  , check_sources
+      ?compile_time_c_calls
+      ?record_references
+      ?output
+      ~prelude
+      ~limits
+      sources )
 ;;
 
 let check_prelude ?record_references ?output ~limits prelude =
@@ -100,6 +96,5 @@ let check_prelude ?record_references ?output ~limits prelude =
                 , List.map prelude ~f:(fun toplevel ->
                     Driver.Module_group.File toplevel) )
             ])
-       ~prelude:None
        ~errors:[]
 ;;

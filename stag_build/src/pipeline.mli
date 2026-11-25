@@ -7,8 +7,6 @@ module Checked : sig
   type t =
     { groups : Driver.Module_group.t list option
     (** The program's modules, if it parsed (as far as it did). *)
-    ; prelude : Syntax.Toplevel.t list option
-    (** The prelude it was checked with, if not the embedded one. *)
     ; checked : Typecheck.Checked.t option
     (** What checked of [groups], which with errors is
         [Typecheck.Failed.partial]. *)
@@ -26,27 +24,30 @@ val parse_files
   -> Driver.Module_group.t list option * Diagnostic.t list
 
 (** Checks the program [groups], if it parsed, with [errors] (its parse errors),
-    seeing [prelude] ([Prelude] if none) within [limits]. [output] is as for
-    [Driver.check], [record_references] as for [Typecheck.create]. *)
+    seeing [prelude] within [limits]. [output] is as for [Driver.check],
+    [record_references] as for [Typecheck.create]. *)
 val check_sources
   :  ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?record_references:bool
   -> ?output:(string -> unit)
-  -> ?prelude:Syntax.Toplevel.t list
+  -> prelude:Pipeline_config.Loaded_prelude.t
   -> limits:Limits.t
   -> Driver.Module_group.t list option * Diagnostic.t list
   -> Checked.t
 
-(** [check_sources] with the prelude of [config], erring if it doesn't parse.
-    Its files are read as [Pipeline_config.Prelude_choice.prelude] does. *)
+(** [check_sources] with the prelude of [config], loaded by [load_prelude]
+    ([Pipeline_config.Loaded_prelude.load] by default), erring if it fails, and
+    that prelude. *)
 val check
   :  ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?record_references:bool
   -> ?output:(string -> unit)
-  -> ?contents:(string -> string option)
+  -> ?load_prelude:
+       (Pipeline_config.Prelude_choice.t
+        -> (Pipeline_config.Loaded_prelude.t, Diagnostic.t) Result.t)
   -> Pipeline_config.t
   -> Driver.Module_group.t list option * Diagnostic.t list
-  -> (Checked.t, Diagnostic.t) Result.t
+  -> (Pipeline_config.Loaded_prelude.t * Checked.t, Diagnostic.t) Result.t
 
 (** Checks [prelude] itself ([Driver.check_prelude]), as the module
     [Prelude_path.root] of its toplevels. *)

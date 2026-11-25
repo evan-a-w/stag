@@ -63,12 +63,12 @@ let prelude_choice project target =
   Pipeline_config.Prelude_choice.of_paths (paths project target)
 ;;
 
-let check ?output ?prelude ~limits project target =
-  Pipeline.check_sources
+let check ?load_prelude ?record_references ?output ~limits project target =
+  Pipeline.check
     ~compile_time_c_calls:(compile_time_c_calls project target)
+    ?load_prelude
+    ?record_references
     ?output
-    ?prelude
-    ~limits
+    { prelude = prelude_choice project target; limits }
     (parse_recovering project target)
-  |> Pipeline.Checked.to_result
 ;;

@@ -24,11 +24,23 @@ module Prelude_choice = struct
              | None -> false) -> Checkout checkout
     | _ -> Embedded
   ;;
+end
 
-  let prelude ?contents = function
-    | Embedded -> Ok None
+module Loaded_prelude = struct
+  type t =
+    | Embedded
+    | Parsed of Syntax.Toplevel.t list
+
+  let load ?contents : Prelude_choice.t -> _ = function
+    | Embedded -> Ok Embedded
     | Checkout checkout ->
-      Stdlib_checkout.prelude ?contents checkout |> Result.map ~f:Option.some
+      Stdlib_checkout.prelude ?contents checkout
+      |> Result.map ~f:(fun toplevels -> Parsed toplevels)
+  ;;
+
+  let toplevels = function
+    | Embedded -> None
+    | Parsed toplevels -> Some toplevels
   ;;
 end
 

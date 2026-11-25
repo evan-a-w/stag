@@ -59,18 +59,21 @@ let warn_stale files driver =
     report ~warning:true files (Inline_expansion.diagnostic expansion))
 ;;
 
-let check ?output config files =
+(* The driver of the program, and the prelude it sees. *)
+let check_with_prelude ?output config files =
   match Pipeline.check ?output config (Pipeline.parse_files files) with
   | Error diagnostic ->
     report [] diagnostic;
     exit 1
-  | Ok checked ->
+  | Ok (prelude, checked) ->
     (match Pipeline.Checked.to_result checked with
-     | Ok driver -> driver
+     | Ok driver -> driver, prelude
      | Error diagnostics ->
        report_all files diagnostics;
        exit 1)
 ;;
+
+let check ?output config files = fst (check_with_prelude ?output config files)
 
 let eval ~limits files driver =
   match Driver.eval ~limits driver with
@@ -132,7 +135,10 @@ let check_with_prelude_sources ~limits ~sources ~program =
       let files = read_files program in
       let driver =
         match
-          Pipeline.check_sources ~prelude ~limits (Pipeline.parse_files files)
+          Pipeline.check_sources
+            ~prelude:(Parsed prelude)
+            ~limits
+            (Pipeline.parse_files files)
           |> Pipeline.Checked.to_result
         with
         | Ok driver -> driver
@@ -303,13 +309,19 @@ let bench_command ~fake_clock =
      in
      fun () ->
        let files = read_files paths in
-       let driver =
-         check ~output:ignore (Pipeline_config.create ~limits paths) files
+       let driver, prelude =
+         check_with_prelude
+           ~output:ignore
+           (Pipeline_config.create ~limits paths)
+           files
        in
        warn_stale files driver;
        let benches =
          if phases
-         then Phase_bench.benches (Phase_bench.parse_files files)
+         then
+           Phase_bench.benches
+             ~prelude:(Pipeline_config.Loaded_prelude.toplevels prelude)
+             (Phase_bench.parse_files files)
          else (
            eval ~limits files driver;
            match Bench_runner.benches driver with

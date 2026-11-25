@@ -13,13 +13,22 @@ module Prelude_choice : sig
   (** Of a program of files at [paths], absolute or relative to the current
       directory. *)
   val of_paths : string list -> t
+end
 
-  (** The parsed prelude, [None] for the embedded one. The contents of a file
-      are [contents path] if some, else read from disk. *)
-  val prelude
+(** A [Prelude_choice.t], loaded. *)
+module Loaded_prelude : sig
+  type t =
+    | Embedded
+    | Parsed of Syntax.Toplevel.t list (** A checkout's sources. *)
+
+  (** The contents of a file are [contents path] if some, else read from disk. *)
+  val load
     :  ?contents:(string -> string option)
-    -> t
-    -> (Syntax.Toplevel.t list option, Diagnostic.t) Result.t
+    -> Prelude_choice.t
+    -> (t, Diagnostic.t) Result.t
+
+  (** As [Driver.check]'s [prelude]. *)
+  val toplevels : t -> Syntax.Toplevel.t list option
 end
 
 type t =

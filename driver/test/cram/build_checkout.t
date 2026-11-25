@@ -16,3 +16,35 @@ target is checked.
       ^
   Error: Expected an expression, found end of file
   [1]
+
+From a directory in the project, paths are still relative to the project.
+
+  $ cd app && stag-build build
+  File "../prelude/prelude.stag", line 2, characters 0-0:
+  2 | 
+      ^
+  Error: Expected an expression, found end of file
+  [1]
+  $ cd ../..
+
+A project outside the checkout whose files are all symlinks into it sees the
+checkout's prelude too, named relative to the project.
+
+  $ mkdir ../outside && cd ../outside && touch stag-project
+  $ mkdir lib app
+  $ echo '(library (name lib))' > lib/stag
+  $ ln -s ../../stag/proj/lib/v.stag lib/v.stag
+  $ echo '(executable (name app) (libraries lib))' > app/stag
+  $ ln -s ../../stag/proj/app/main.stag app/main.stag
+  $ stag-build build
+  File "../stag/prelude/prelude.stag", line 2, characters 0-0:
+  2 | 
+      ^
+  Error: Expected an expression, found end of file
+  [1]
+
+With the prelude fixed, both build.
+
+  $ echo 'let x = 1' > ../stag/prelude/prelude.stag
+  $ stag-build build
+  $ cd ../stag/proj && stag-build build

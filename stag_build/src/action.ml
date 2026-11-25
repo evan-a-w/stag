@@ -3,9 +3,7 @@ open! Import
 let corrections_dir = "_stag"
 
 let contents project path =
-  Option.try_with (fun () ->
-    In_channel.read_all
-      (if Filename.is_absolute path then path else Project.root project ^/ path))
+  Option.try_with (fun () -> In_channel.read_all (Project.root project ^/ path))
 ;;
 
 (* Files outside the project, eg. a checkout's prelude, are named relative to it
@@ -79,28 +77,34 @@ let stale_expansions (target : Project.Target.t) driver =
     Set.mem files (Loc.file_name expansion.loc))
 ;;
 
+(* Loads each checkout's prelude once, reporting its error then. *)
+let prelude_loader project =
+  let preludes = String.Table.create () in
+  function
+  | Pipeline_config.Prelude_choice.Embedded ->
+    Ok Pipeline_config.Loaded_prelude.Embedded
+  | Checkout checkout as choice ->
+    Hashtbl.findi_or_add
+      preludes
+      (Stdlib_checkout.root checkout)
+      ~default:(fun _ ->
+        let loaded = Pipeline_config.Loaded_prelude.load choice in
+        Result.iter_error loaded ~f:(fun diagnostic ->
+          report project [ diagnostic ]);
+        loaded)
+;;
+
 (* The program of a target, checked once, reporting its errors once, and its
    stale expansions as warnings unless [stale_are_errors]. A target is not
    checked if a library it depends on fails. Output at compile time is
    discarded. *)
-let checker ?(stale_are_errors = false) ~limits project =
-  let status = String.Table.create () in
-  (* By checkout root, each reporting its error once. *)
-  let preludes = String.Table.create () in
-  let prelude target =
-    match Program.prelude_choice project target with
-    | Embedded -> Some None
-    | Checkout checkout as choice ->
-      Hashtbl.findi_or_add
-        preludes
-        (Stdlib_checkout.root checkout)
-        ~default:(fun _ ->
-          match Pipeline_config.Prelude_choice.prelude choice with
-          | Ok prelude -> Some prelude
-          | Error diagnostic ->
-            report project [ diagnostic ];
-            None)
+let checker ?(stale_are_errors = false) ?load_prelude ~limits project =
+  let load_prelude =
+    match load_prelude with
+    | Some load_prelude -> load_prelude
+    | None -> prelude_loader project
   in
+  let status = String.Table.create () in
   let rec check (target : Project.Target.t) =
     let name = Project.Target.name target in
     match Hashtbl.find status name with
@@ -111,22 +115,27 @@ let checker ?(stale_are_errors = false) ~limits project =
           Option.is_some (check dep))
       in
       let driver =
-        match deps_ok, prelude target with
-        | false, _ | _, None -> None
-        | true, Some prelude ->
-          (match
-             Program.check ~output:ignore ?prelude ~limits project target
-           with
-           | Ok driver ->
-             warn_unrun_tests project target driver;
-             if not stale_are_errors
-             then
-               List.iter (stale_expansions target driver) ~f:(fun expansion ->
-                 warn project (Inline_expansion.diagnostic expansion));
-             Some driver
-           | Error diagnostics ->
-             report project diagnostics;
-             None)
+        if not deps_ok
+        then None
+        else (
+          match
+            Program.check ~load_prelude ~output:ignore ~limits project target
+          with
+          | Error (_ : Diagnostic.t) ->
+            (* The prelude's, which [load_prelude] reported. *)
+            None
+          | Ok ((_ : Pipeline_config.Loaded_prelude.t), checked) ->
+            (match Pipeline.Checked.to_result checked with
+             | Ok driver ->
+               warn_unrun_tests project target driver;
+               if not stale_are_errors
+               then
+                 List.iter (stale_expansions target driver) ~f:(fun expansion ->
+                   warn project (Inline_expansion.diagnostic expansion));
+               Some driver
+             | Error diagnostics ->
+               report project diagnostics;
+               None))
       in
       Hashtbl.set status ~key:name ~data:driver;
       driver
@@ -300,14 +309,23 @@ let test ~limits project names =
 let bench_dir = corrections_dir ^/ "bench"
 
 let bench ~limits project options ~filters ~phases =
-  let check = checker ~limits project in
+  let load_prelude = prelude_loader project in
+  let check = checker ~load_prelude ~limits project in
   let benches (target : Project.Target.t) =
     let name = Project.Target.name target in
     let prefix = name ^ "/" in
     if phases
-    then
-      Option.map (check target) ~f:(fun (_ : Driver.t) ->
-        Phase_bench.benches ~prefix (fun () -> Program.parse project target))
+    then (
+      let%bind.Option (_ : Driver.t) = check target in
+      (* Loaded, and so cached, by [check]. *)
+      let%map.Option prelude =
+        load_prelude (Program.prelude_choice project target) |> Result.ok
+      in
+      Phase_bench.benches
+        ~prefix
+        ~compile_time_c_calls:(Program.compile_time_c_calls project target)
+        ~prelude:(Pipeline_config.Loaded_prelude.toplevels prelude)
+        (fun () -> Program.parse project target))
     else (
       let%bind.Option driver = check target in
       Interpreter.set_output (Driver.interpreter driver) ignore;

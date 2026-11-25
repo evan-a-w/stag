@@ -83,30 +83,20 @@ let source_paths checkout =
   |> Option.value ~default:[]
 ;;
 
-(* A program of [files] sees the prelude of [Pipeline_config]; the embedded
-   one's definitions are found in [stdlib]'s sources that are the same. *)
-let check_program
-  ?compile_time_c_calls
+(* A program sees [prelude_choice], loaded into [checked]; the embedded one's
+   definitions are found in [stdlib]'s sources that are the same. *)
+let of_program
   ?stdlib
-  ~limits
   ~contents
   ~path
   ~absolute
   ~files
   ~depends_on
-  sources
+  ~(prelude_choice : Pipeline_config.Prelude_choice.t)
+  checked
   =
-  let config = Pipeline_config.create ~limits files in
   let result =
-    match
-      Pipeline.check
-        ?compile_time_c_calls
-        ~record_references:true
-        ~output:ignore
-        ~contents
-        config
-        sources
-    with
+    match checked with
     | Error diagnostic ->
       (* The prelude's error is reported in its source, and the program left
          unchecked, which is said in it. *)
@@ -121,13 +111,16 @@ let check_program
               "This file is not checked: its checkout's prelude has errors"
           ]
         None
-    | Ok { groups; prelude; checked; diagnostics; driver = _ } ->
+    | Ok
+        ( (prelude : Pipeline_config.Loaded_prelude.t)
+        , { Pipeline.Checked.groups; checked; diagnostics; driver = _ } ) ->
       let program = Option.both groups checked in
       (match prelude, stdlib with
-       | Some prelude, _ ->
+       | Parsed prelude, _ ->
          of_checked ~prelude ~path ~absolute ~files ~diagnostics program
-       | None, None -> of_checked ~path ~absolute ~files ~diagnostics program
-       | None, Some checkout ->
+       | Embedded, None ->
+         of_checked ~path ~absolute ~files ~diagnostics program
+       | Embedded, Some checkout ->
          let embedded = Stdlib_checkout.relocate_embedded ~contents checkout in
          of_checked
            ~prelude:(relocated ~relocate:embedded (force Prelude.toplevels))
@@ -138,7 +131,7 @@ let check_program
            program)
   in
   let prelude_sources =
-    match config.prelude, stdlib with
+    match prelude_choice, stdlib with
     | Checkout checkout, _ | Embedded, Some checkout -> source_paths checkout
     | Embedded, None -> []
   in
@@ -161,13 +154,7 @@ let in_stdlib ~limits ~contents checkout path =
       ~diagnostics:[ error ]
       None
   | Ok prelude ->
-    let { Pipeline.Checked.groups
-        ; checked
-        ; diagnostics
-        ; prelude = _
-        ; driver = _
-        }
-      =
+    let { Pipeline.Checked.groups; checked; diagnostics; driver = _ } =
       Pipeline.check_prelude
         ~record_references:true
         ~limits
@@ -184,16 +171,22 @@ let in_stdlib ~limits ~contents checkout path =
 ;;
 
 let standalone ?stdlib ~limits ~contents ~depends_on path =
-  check_program
+  let config = Pipeline_config.create ~limits [ path ] in
+  of_program
     ?stdlib
-    ~limits
     ~contents
     ~path
     ~absolute:Fn.id
     ~files:[ path ]
     ~depends_on
-    (Pipeline.parse_files
-       [ { Source_file.path; contents = read ~contents path } ])
+    ~prelude_choice:config.prelude
+    (Pipeline.check
+       ~load_prelude:(Pipeline_config.Loaded_prelude.load ~contents)
+       ~record_references:true
+       ~output:ignore
+       config
+       (Pipeline.parse_files
+          [ { Source_file.path; contents = read ~contents path } ]))
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =
@@ -238,16 +231,21 @@ let in_project ?stdlib ~limits ~contents ~root path =
      | None -> Second depends_on
      | Some target ->
        First
-         (check_program
-            ~compile_time_c_calls:(Program.compile_time_c_calls project target)
+         (of_program
             ?stdlib
-            ~limits
             ~contents
             ~path
             ~absolute
             ~files:(Program.paths project target)
             ~depends_on
-            (Program.parse_recovering project target)))
+            ~prelude_choice:(Program.prelude_choice project target)
+            (Program.check
+               ~load_prelude:(Pipeline_config.Loaded_prelude.load ~contents)
+               ~record_references:true
+               ~output:ignore
+               ~limits
+               project
+               target)))
 ;;
 
 let check ?stdlib ~limits ~contents path =
