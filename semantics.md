@@ -74,6 +74,7 @@ nullable pointer, unobservably).
 
 ```ocaml
 Ptr.make e          (* allocate: heap, or data stack under stack_ *)
+Box.make e          (* allocate an immutable box[t]: no stores; covariant *)
 &x                  (* address of a variable: local *)
 *e   e.*            (* read *)
 e.*.x               (* field of the pointee *)
