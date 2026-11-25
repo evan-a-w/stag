@@ -836,6 +836,13 @@ let find_constructor (scope : Scope.t) ~loc ~known : Source.Constructor.t -> _
          ~loc:path.loc
          ~missing:(fun ~type_name constructor ->
            No_such_constructor { type_name; constructor })
+       |> Result.map ~f:(fun (constructor : Type_env.Constructor.t) ->
+         Type_env.record_reference
+           scope.program.type_env
+           Constructor
+           constructor.name
+           ~loc:path.loc;
+         constructor)
      | _ -> Type_env.find_constructor scope.program.type_env scope.module_ path)
   | Ref { name; _ } -> Type_env.constructor scope.program.type_env name ~loc
 ;;
@@ -857,6 +864,13 @@ let find_field (scope : Scope.t) ~loc ~known (field : Source.Field.t) =
          ~member_name:Type_env.Field.name
          ~loc:path.loc
          ~missing:(fun ~type_name field -> No_such_field { type_name; field })
+       |> Result.map ~f:(fun field ->
+         Type_env.record_reference
+           scope.program.type_env
+           Field
+           (Type_env.Field.name field)
+           ~loc:path.loc;
+         field)
      | _ -> Type_env.find_field scope.program.type_env scope.module_ path)
   | Ref field ->
     Type_env.field scope.program.type_env (Typed.Field_ref.name field) ~loc
@@ -3766,6 +3780,7 @@ module Checked = struct
     { signature : Signature.t
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
+    ; references : (Loc.t * Name_reference.t) list
     }
 end
 
@@ -4432,6 +4447,7 @@ let check_module t (program_env : Program_env.t) module_
         signature program_env module_ ~complete:(List.is_empty errors)
     ; program
     ; expansions = expansions module_
+    ; references = Type_env.references program_env.type_env
     }
   in
   match errors with

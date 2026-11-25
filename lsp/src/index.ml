@@ -20,9 +20,6 @@ module Target = struct
     | Loc of Loc.t
     | Local of Typed.Ident.t
     | Value of string
-    | Type of string
-    | Constructor of string
-    | Field of string
 end
 
 module Entry = struct
@@ -46,9 +43,9 @@ type t =
   { entries : Entry.t Queue.t String.Table.t
   ; locals : Loc.t Typed.Ident.Table.t
   ; values : Loc.t String.Table.t
-  ; types : Loc.t String.Table.t
-  ; constructors : Loc.t String.Table.t
-  ; fields : Loc.t String.Table.t
+  ; references : Name_reference.t Span.Table.t
+  ; known_files : Loc.File.t list
+  (** Of the program and [create]'s prelude, in which declarations are found. *)
   ; functions : Int.Hash_set.t String.Table.t
   ; splices : Span.Hash_set.t
   ; of_prelude : bool
@@ -192,6 +189,14 @@ let add t (entry : Entry.t) =
       entry
 ;;
 
+(* Where the type, constructor or field named at [loc] is declared, if found. *)
+let declaration t loc =
+  let%bind.Option reference = Hashtbl.find t.references (Span.of_loc loc) in
+  Option.some_if
+    (List.mem t.known_files reference.declaration.file ~equal:Loc.File.equal)
+    (Target.Loc reference.declaration)
+;;
+
 let is_arrow ty =
   match Type.canonical_ty ty with
   | TArrow _ -> true
@@ -271,7 +276,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
         { loc = path.loc
         ; label = Some constructor.name
         ; ty = Some p.ty
-        ; target = Some (Constructor constructor.name)
+        ; target = declaration t path.loc
         });
     List.iter ps ~f:recurse
   | Record fields ->
@@ -284,7 +289,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
           { loc = path.loc
           ; label = Some (Typed.Field_ref.name field)
           ; ty = Some p.ty
-          ; target = Some (Field (Typed.Field_ref.name field))
+          ; target = declaration t path.loc
           });
       recurse p)
   | Poly_record { fields; rest } ->
@@ -311,7 +316,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
             { loc = path.loc
             ; label = Some (Typed.Field_ref.name field)
             ; ty = Some value.ty
-            ; target = Some (Field (Typed.Field_ref.name field))
+            ; target = declaration t path.loc
             }))
   in
   let var_target : Typed.Var_ref.t -> _ = function
@@ -354,7 +359,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
          { loc = path.loc
          ; label = Some constructor.name
          ; ty = Some e.ty
-         ; target = Some (Constructor constructor.name)
+         ; target = declaration t path.loc
          })
    | Record record | Record_update (_, record) ->
      typed ();
@@ -368,7 +373,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
            { loc = path.loc
            ; label = Some (Typed.Field_ref.name field)
            ; ty = Some e.ty
-           ; target = Some (Field (Typed.Field_ref.name field))
+           ; target = declaration t path.loc
            }))
    | Match { cases; exception_cases; _ } ->
      typed ();
@@ -439,19 +444,7 @@ let rec declarations
     | Let_mut (name, _, body) ->
       set t.values name;
       Hashtbl.set values ~key:(canonical name) ~data:(name, [], body)
-    | Type { name; params = _; kind } ->
-      set t.types name;
-      let rec members : Syntax.Type_decl.Kind.t -> unit = function
-        | Variant constructors ->
-          List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
-        | Record fields ->
-          List.iter fields ~f:(fun (name, _) -> set t.fields name)
-        | Malformed kind -> members kind
-        | Alias _ | Abstract | Splice _ -> ()
-      in
-      members kind
-    | Exception (name, _) | Malformed_exception (name, _) ->
-      set t.constructors name
+    | Type _ | Exception _ | Malformed_exception _ -> ()
     | External { name; _ } -> set t.values name
     | Module (name, toplevels) ->
       declarations
@@ -486,49 +479,50 @@ let rec files ~prefix (group : Driver.Module_group.t) =
     List.concat_map members ~f:(files ~prefix:(prefix @ [ name.txt ]))
 ;;
 
-let resolve_type t ~module_path path =
-  List.range ~stride:(-1) (List.length module_path) 0 ~stop:`inclusive
-  |> List.map ~f:(List.take module_path)
-  |> Fn.flip List.append [ [ Prelude_path.root ] ]
-  |> List.find_map ~f:(fun enclosing ->
-    let name = String.concat ~sep:"." (enclosing @ path) in
-    Option.some_if (Hashtbl.mem t.types name) name)
-;;
-
 let create
   ?(prelude = [])
   ?(of_prelude = false)
   ~groups
-  ~(program : Typed.Program.t)
-  ~expansions
+  ~(checked : Typecheck.Checked.t)
   ()
   =
+  let program = checked.program in
   let up_to_date =
-    List.filter_map expansions ~f:(fun (expansion : Expansion.t) ->
+    List.filter_map checked.expansions ~f:(fun (expansion : Expansion.t) ->
       match expansion.status with
       | Up_to_date -> Some (Span.of_loc expansion.expansion.loc)
       | Stale _ -> None)
     |> Span.Hash_set.of_list
   in
+  let files = List.concat_map groups ~f:(files ~prefix:[]) in
+  let rec toplevel_files (toplevel : Syntax.Toplevel.t) =
+    toplevel.loc.file
+    ::
+    (match toplevel.txt with
+     | Module (_, members) -> List.concat_map members ~f:toplevel_files
+     | _ -> [])
+  in
   let t =
     { entries = String.Table.create ()
     ; locals = Typed.Ident.Table.create ()
     ; values = String.Table.create ()
-    ; types = String.Table.create ()
-    ; constructors = String.Table.create ()
-    ; fields = String.Table.create ()
+    ; references = Span.Table.create ()
+    ; known_files =
+        List.concat_map (List.map files ~f:snd @ prelude) ~f:toplevel_files
+        |> List.dedup_and_sort ~compare:Loc.File.compare
     ; functions = String.Table.create ()
     ; splices = Span.Hash_set.create ()
     ; of_prelude
     }
   in
+  List.iter checked.references ~f:(fun (loc, reference) ->
+    Hashtbl.set t.references ~key:(Span.of_loc loc) ~data:reference);
   declarations
     t
     ~up_to_date
     ~values:(String.Table.create ())
     ~prefix:[ Prelude_path.root ]
     prelude;
-  let files = List.concat_map groups ~f:(files ~prefix:[]) in
   let values = String.Table.create () in
   List.iter files ~f:(fun (prefix, toplevel) ->
     declarations t ~up_to_date ~values ~prefix [ toplevel ]);
@@ -559,11 +553,16 @@ let create
            Hash_set.mem up_to_date (Span.of_loc expansion.loc))
          ~module_path
          [ toplevel ])
-      ~f:(fun { loc; kind; path; declaration = _; module_path; quoted } ->
+      ~f:(fun { loc; kind; path; declaration = _; module_path = _; quoted } ->
         match kind with
         | Type ->
           let target =
-            if quoted then None else resolve_type t ~module_path path
+            if quoted
+            then None
+            else
+              Option.map
+                (Hashtbl.find t.references (Span.of_loc loc))
+                ~f:(fun reference -> reference.name)
           in
           add
             t
@@ -581,7 +580,7 @@ let create
                           || t.of_prelude -> target
                    | Some _ | None -> String.concat ~sep:"." path)
             ; ty = None
-            ; target = Option.map target ~f:(fun name -> Target.Type name)
+            ; target = (if quoted then None else declaration t loc)
             }
         | Module
         | Constructor
@@ -639,9 +638,8 @@ let relocate t ~f =
   { entries
   ; locals = Hashtbl.map t.locals ~f
   ; values = Hashtbl.map t.values ~f
-  ; types = Hashtbl.map t.types ~f
-  ; constructors = Hashtbl.map t.constructors ~f
-  ; fields = Hashtbl.map t.fields ~f
+  ; references = t.references
+  ; known_files = t.known_files
   ; functions
   ; splices =
       Hash_set.to_list t.splices
@@ -709,9 +707,6 @@ let definition t ~file ~offset =
   | Loc loc -> Some loc
   | Local ident -> Hashtbl.find t.locals ident
   | Value name -> Hashtbl.find t.values name
-  | Type name -> Hashtbl.find t.types name
-  | Constructor name -> Hashtbl.find t.constructors name
-  | Field name -> Hashtbl.find t.fields name
 ;;
 
 let is_function t ~file ~offset =

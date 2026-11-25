@@ -355,3 +355,31 @@ module M = .~q
          2:41 no definition
          |}])
 ;;
+
+let%expect_test "types, constructors and fields are as the typechecker resolved \
+                 them"
+  =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|type t = { f : int }
+module M = struct
+  type t = A | B
+  let g (x : t) = x
+end
+let h (x : M.t) (y : t) = (x, y.f, M.A)
+module N = .~(.< struct type u = C end >.)
+let k (x : N.u) = x
+let l (x : int) = x
+|}
+        )
+      ]
+    (fun client ->
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at
+        client
+        "a.stag"
+        [ 3, 13; 5, 13; 5, 22; 5, 32; 5, 37; 7, 12; 8, 11 ];
+      [%expect {| |}])
+;;

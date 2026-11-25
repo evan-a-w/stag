@@ -28,10 +28,21 @@ val parse
   -> Project.Target.t
   -> (Driver.Module_group.t list, Diagnostic.t list) Result.t
 
-(** [parse_recovering], then [Driver.check_modules] if a program parsed, failing
-    with all the errors of both, by location. [output] is as for [Driver.check]. *)
+(** The absolute paths of the files of [target]'s program. *)
+val paths : Project.t -> Project.Target.t -> string list
+
+(** Of [target]'s program, as [Pipeline_config.create] of its [paths]. *)
+val config
+  :  limits:Limits.t
+  -> Project.t
+  -> Project.Target.t
+  -> Pipeline_config.t
+
+(** [Pipeline.check] of [parse_recovering] with [config], failing with all the
+    errors, or the error of the prelude. [output] is as for [Driver.check]. *)
 val check
   :  ?output:(string -> unit)
+  -> limits:Limits.t
   -> Project.t
   -> Project.Target.t
   -> (Driver.t, Diagnostic.t list) Result.t

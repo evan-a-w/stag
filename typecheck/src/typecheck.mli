@@ -32,6 +32,9 @@ module Checked : sig
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
     (** Of each [include%inline] and [module%inline], in source order. *)
+    ; references : (Loc.t * Name_reference.t) list
+    (** The names of types, constructors and fields in the source, by location,
+        and what they resolved to. *)
     }
 end
 

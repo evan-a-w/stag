@@ -25,3 +25,6 @@ module Typecheck = Stag_typecheck.Typecheck
 module Stdlib_checkout = Stag_build.Stdlib_checkout
 module Prelude = Stag_eval.Prelude
 module Prelude_path = Stag_types.Prelude_path
+module Pipeline = Stag_build.Pipeline
+module Pipeline_config = Stag_build.Pipeline_config
+module Name_reference = Stag_typecheck.Name_reference

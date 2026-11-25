@@ -7,3 +7,7 @@ module Lsp_types = Lsp.Types
 module Limits = Stag_common.Limits
 module Prelude = Stag_eval.Prelude
 module Stdlib_checkout = Stag_build.Stdlib_checkout
+module Pipeline_config = Stag_build.Pipeline_config
+module Program = Stag_build.Program
+module Project = Stag_build.Project
+module Diagnostic = Stag_driver.Diagnostic

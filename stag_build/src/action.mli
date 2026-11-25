@@ -6,21 +6,22 @@ open! Import
 val corrections_dir : string
 
 (** Each command checks a target at most once, and not if a library it depends
-    on has errors. Output at compile time is discarded. An expect test in an
+    on has errors, within [limits] in each phase, and sees the prelude of
+    [Program.config]. Output at compile time is discarded. An expect test in an
     executable is warned about, as it is never run. *)
 
 (** Checks every target. *)
-val build : Project.t -> bool
+val build : limits:Limits.t -> Project.t -> bool
 
 (** Checks and evaluates the executable [name]. *)
-val exec : Project.t -> string -> bool
+val exec : limits:Limits.t -> Project.t -> string -> bool
 
 (** Runs the expect tests in the files of each library and test named, or all of
     them. A file whose tests fail has its corrected version written to
     [corrections_dir], mirroring its path, with the digest of the version it
     corrects, and the diff printed. A file whose tests pass, or whose target
     doesn't check or evaluate, has its stale correction removed. *)
-val test : Project.t -> string list -> bool
+val test : limits:Limits.t -> Project.t -> string list -> bool
 
 (** Where [-save-baseline] saves baselines. *)
 val bench_dir : string
@@ -30,7 +31,8 @@ val bench_dir : string
     program of each target ([TARGET/parse], etc., see [Phase_bench]), those
     containing any of [filters] (all without). Output is discarded. *)
 val bench
-  :  Project.t
+  :  limits:Limits.t
+  -> Project.t
   -> Bench_command.Options.t
   -> filters:string list
   -> phases:bool

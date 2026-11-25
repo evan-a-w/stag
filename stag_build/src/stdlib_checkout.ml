@@ -110,23 +110,13 @@ let prelude ?contents t =
   Prelude.parse sources |> Result.map_error ~f:Diagnostic.of_source_file_error
 ;;
 
-module Checked = struct
-  type t =
-    { prelude : Syntax.Toplevel.t list
-    ; driver : Driver.t
-    }
-end
-
 let check ?contents ?output ~limits t =
   let%bind.Result prelude =
     prelude ?contents t |> Result.map_error ~f:List.return
   in
-  let%map.Result driver =
-    Driver.check_prelude ~limits ?output prelude
-    |> Result.map_error ~f:(fun { Typecheck.Failed.errors; partial = _ } ->
-      List.map errors ~f:Diagnostic.of_typecheck_error)
-  in
-  { Checked.prelude; driver }
+  Driver.check_prelude ~limits ?output prelude
+  |> Result.map_error ~f:(fun { Typecheck.Failed.errors; partial = _ } ->
+    List.map errors ~f:Diagnostic.of_typecheck_error)
 ;;
 
 let signature_of_source t (signature : Signature.t) path =

@@ -65,7 +65,7 @@ let stale_expansions (target : Project.Target.t) driver =
    stale expansions as warnings unless [stale_are_errors]. A target is not
    checked if a library it depends on fails. Output at compile time is
    discarded. *)
-let checker ?(stale_are_errors = false) project =
+let checker ?(stale_are_errors = false) ~limits project =
   let status = String.Table.create () in
   let rec check (target : Project.Target.t) =
     let name = Project.Target.name target in
@@ -80,7 +80,7 @@ let checker ?(stale_are_errors = false) project =
         if not deps_ok
         then None
         else (
-          match Program.check ~output:ignore project target with
+          match Program.check ~output:ignore ~limits project target with
           | Ok driver ->
             warn_unrun_tests project target driver;
             if not stale_are_errors
@@ -98,28 +98,28 @@ let checker ?(stale_are_errors = false) project =
   check
 ;;
 
-let build project =
-  let check = checker project in
+let build ~limits project =
+  let check = checker ~limits project in
   all (Project.targets project) ~f:(fun target -> Option.is_some (check target))
 ;;
 
-let eval project driver =
+let eval ~limits project driver =
   Interpreter.set_output (Driver.interpreter driver) print_string;
-  match Driver.eval driver with
+  match Driver.eval ~limits driver with
   | Ok () -> true
   | Error error ->
     report project [ Diagnostic.of_runtime_error error ];
     false
 ;;
 
-let exec project name =
+let exec ~limits project name =
   match Project.find project name with
   | None -> error (sprintf "Unknown executable %s" name)
   | Some ({ stanza = { kind = Executable; _ }; _ } as target) ->
     let ok =
-      match checker project target with
+      match checker ~limits project target with
       | None -> false
-      | Some driver -> eval project driver
+      | Some driver -> eval ~limits project driver
     in
     Out_channel.flush stdout;
     ok
@@ -182,77 +182,39 @@ module Correction = struct
   ;;
 end
 
-let test_target project ~check (target : Project.Target.t) =
+let test_target project ~limits ~check (target : Project.Target.t) =
   let root = Project.root project in
-  let checked =
-    Option.map (check target) ~f:(fun driver ->
-      let expansions = stale_expansions target driver in
-      report project (List.map expansions ~f:Inline_expansion.diagnostic);
-      let results =
-        if not (eval project driver)
-        then None
-        else (
-          let results = Expect_test_runner.run ~files:(files target) driver in
-          report project (List.concat_map results ~f:Diagnostic.of_test_result);
-          Some results)
-      in
-      results, expansions)
-  in
-  let corrections =
-    List.map target.files ~f:(fun ({ path; contents } as file) ->
-      match
-        Option.bind checked ~f:(fun (results, expansions) ->
-          Corrected_file.create
-            ~path
-            ~contents
-            ~tests:(Option.value results ~default:[])
-            ~expansions)
-      with
-      | None -> Correction.remove ~root path
-      | Some corrected ->
-        Option.iter
-          (Text_diff.unified
-             ~old_name:path
-             ~new_name:(Correction.path path)
-             ~old:contents
-             ~new_:corrected)
-          ~f:print_string;
-        Correction.write ~root file ~corrected)
+  match check target with
+  | None ->
+    List.map target.files ~f:(fun file -> Correction.remove ~root file.path)
     |> Result.combine_errors_unit
-  in
-  Out_channel.flush stdout;
-  let corrections_ok =
-    match corrections with
-    | Ok () -> true
-    | Error diagnostics ->
-      report project diagnostics;
-      false
-  in
-  match checked with
-  | None -> false
-  | Some (results, expansions) ->
-    let failed =
-      Option.value_map results ~default:1 ~f:(fun results ->
-        let failed =
-          List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
-        in
-        if failed > 0
-        then
-          eprintf
-            "%s: %d of %d test(s) failed\n%!"
-            (Project.Target.name target)
-            failed
-            (List.length results);
-        failed)
+    |> Result.iter_error ~f:(report project);
+    false
+  | Some driver ->
+    Interpreter.set_output (Driver.interpreter driver) print_string;
+    let outcome =
+      Test_and_correct.run
+        ~limits
+        ~report:(fun diagnostic -> report project [ diagnostic ])
+        ~write:(fun ({ path; contents } as file) ~corrected ->
+          match corrected with
+          | None -> Correction.remove ~root path
+          | Some corrected ->
+            Option.iter
+              (Text_diff.unified
+                 ~old_name:path
+                 ~new_name:(Correction.path path)
+                 ~old:contents
+                 ~new_:corrected)
+              ~f:print_string;
+            Correction.write ~root file ~corrected)
+        ~files:target.files
+        driver
     in
-    let stale = List.length expansions in
-    if stale > 0
-    then
-      eprintf
-        "%s: %d inline expansion(s) out of date\n%!"
-        (Project.Target.name target)
-        stale;
-    corrections_ok && failed = 0 && stale = 0
+    Test_and_correct.Outcome.print_summary
+      ~target:(Project.Target.name target)
+      outcome;
+    Test_and_correct.Outcome.passed ~mismatches_fail:true outcome
 ;;
 
 (* Whether [corrections_dir] exists, erring if it is not a directory. *)
@@ -265,7 +227,7 @@ let corrections_dir_exists project =
 
 let not_a_directory () = error (sprintf "%s is not a directory" corrections_dir)
 
-let test project names =
+let test ~limits project names =
   let has_tests (target : Project.Target.t) =
     match target.stanza.kind with
     | Library | Test -> true
@@ -292,13 +254,17 @@ let test project names =
   | Ok targets, Ok (_ : bool) ->
     all
       targets
-      ~f:(test_target project ~check:(checker ~stale_are_errors:true project))
+      ~f:
+        (test_target
+           project
+           ~limits
+           ~check:(checker ~stale_are_errors:true ~limits project))
 ;;
 
 let bench_dir = corrections_dir ^/ "bench"
 
-let bench project options ~filters ~phases =
-  let check = checker project in
+let bench ~limits project options ~filters ~phases =
+  let check = checker ~limits project in
   let benches (target : Project.Target.t) =
     let name = Project.Target.name target in
     let prefix = name ^ "/" in
@@ -311,7 +277,7 @@ let bench project options ~filters ~phases =
       Interpreter.set_output (Driver.interpreter driver) ignore;
       match
         let%bind.Result () =
-          Driver.eval driver |> Result.map_error ~f:Diagnostic.of_runtime_error
+          Driver.eval ~limits driver |> Result.map_error ~f:Diagnostic.of_runtime_error
         in
         Bench_runner.benches ~files:(files target) driver
       with

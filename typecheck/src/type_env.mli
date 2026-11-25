@@ -195,3 +195,11 @@ val field_modality : t -> string -> Modality.t
     records and variants of such types. [false] while unknown, e.g. for a
     variable or an open row. *)
 val pointer_free : t -> Type.ty -> bool
+
+(** Records that the name at [loc] is [name], declared in [t] (else nothing is
+    recorded). Declared types, types named in type expressions and constructors
+    and fields found by path are recorded by [t] itself. *)
+val record_reference : t -> Name_reference.Kind.t -> string -> loc:Loc.t -> unit
+
+(** By location of the name. *)
+val references : t -> (Loc.t * Name_reference.t) list

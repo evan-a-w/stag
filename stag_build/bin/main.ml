@@ -27,15 +27,19 @@ let exit_unless ok = if not ok then exit 1
 let build_command =
   Command.basic
     ~summary:"Typecheck every library, executable and test"
-    (let%map_open.Command () = return () in
-     fun () -> exit_unless (Action.build (load ())))
+    ~readme:(fun () -> Pipeline_config.limits_readme ~phases:"compile time")
+    (let%map_open.Command limits = Pipeline_config.limits_param () in
+     fun () -> exit_unless (Action.build ~limits (load ())))
 ;;
 
 let exec_command =
   Command.basic
     ~summary:"Typecheck and evaluate an executable"
-    ~readme:(fun () -> "Arguments after -- are not supported yet.")
+    ~readme:(fun () ->
+      "Arguments after -- are not supported yet. "
+      ^ Pipeline_config.limits_readme ~phases:"compile time and evaluation")
     (let%map_open.Command name = anon ("NAME" %: string)
+     and limits = Pipeline_config.limits_param ()
      and args =
        flag "--" escape ~doc:"ARGS arguments for the program (unsupported)"
      in
@@ -45,7 +49,7 @@ let exec_command =
        | Some (_ :: _) ->
          eprintf "Error: executables cannot take arguments yet\n%!";
          exit 1
-       | None | Some [] -> exit_unless (Action.exec project name))
+       | None | Some [] -> exit_unless (Action.exec ~limits project name))
 ;;
 
 let test_command =
@@ -56,9 +60,13 @@ let test_command =
         "The corrected version of each file whose tests fail is written to \
          %s/, mirroring its path, and the diff printed. stag-build promote \
          moves them over the sources."
-        Action.corrections_dir)
-    (let%map_open.Command names = anon (sequence ("NAME" %: string)) in
-     fun () -> exit_unless (Action.test (load ()) names))
+        Action.corrections_dir
+      ^ " "
+      ^ Pipeline_config.limits_readme
+          ~phases:"compile time, evaluation and each test")
+    (let%map_open.Command names = anon (sequence ("NAME" %: string))
+     and limits = Pipeline_config.limits_param () in
+     fun () -> exit_unless (Action.test ~limits (load ()) names))
 ;;
 
 let promote_command =
@@ -81,10 +89,11 @@ let bench_command ~fake_clock =
         Action.bench_dir)
     (let%map_open.Command filters = anon (sequence ("FILTER" %: string))
      and options = Bench_command.Options.param ~fake_clock
+     and limits = Pipeline_config.limits_param ()
      and phases =
        flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
      in
-     fun () -> exit_unless (Action.bench (load ()) options ~filters ~phases))
+     fun () -> exit_unless (Action.bench ~limits (load ()) options ~filters ~phases))
 ;;
 
 let fmt_command =
