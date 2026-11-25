@@ -492,6 +492,21 @@ let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let ok = capped 1                   (* val ok : int = 1 *)
 ```
 
+An arrow written without modes has the default ones, `nonportable gc global`,
+as OCaml code would expect: annotating `(f : string -> string)` makes `f` take
+and return global values. Write mode variables to keep it polymorphic.
+
+```stag-error
+let apply (f : string -> int) x = f x
+let use (x @ local) = apply (fun y -> 0) x
+(* Error: because its type is written without a mode *)
+```
+
+```stag
+let apply (f : string @ 'm -> int) x = f x
+let use (x @ local) = apply (fun y -> 0) x
+```
+
 ```stag-error
 let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let bad = capped (Int.to_string 3)
@@ -570,7 +585,7 @@ let embed (x @ portable) = .< x >.
 (* val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1 *)
 
 let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
-(* val mk : ptr[int] @ local -> ptr[int @@ 'm1] @ 'm0 with nonportable gc local <= 'm0 *)
+(* val mk : ptr[int] @ 'm0 -> ptr[int @@ 'm2] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
 
 let same (x : string @ 'm) : string @ 'm = x
 (* val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0) *)
