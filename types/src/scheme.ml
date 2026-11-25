@@ -255,6 +255,21 @@ let generalize_watchers ~rank tys =
   Queue.to_list errors
 ;;
 
+let fix_joins fresh tys =
+  let errors = Queue.create () in
+  iter_generalizable
+    ~rank:Int.min_value
+    tys
+    { ty =
+        (fun var ->
+          Result.iter_error (Unify.fix_join fresh var) ~f:(Queue.enqueue errors))
+    ; row = ignore
+    ; presence = ignore
+    ; mode = ignore
+    };
+  Queue.to_list errors
+;;
+
 let uppers (var : Presence_var.t) =
   List.filter_map var.bounds ~f:(function
     | At_most _ as bound -> Type.presence_bound_var bound

@@ -5,6 +5,7 @@ type t =
   ; mutable value_parameters : Value_layout.parameters
   ; mutable variances : Variance.of_con
   ; modes : Mode.Id_source.t
+  ; mutable settling : (unit -> (unit, Mode.Error.t) Result.t) Queue.t option
   }
 
 let create () =
@@ -12,6 +13,7 @@ let create () =
   ; value_parameters = (fun _ -> None)
   ; variances = (fun _ -> None)
   ; modes = Mode.Id_source.create ()
+  ; settling = None
   }
 ;;
 
@@ -20,6 +22,28 @@ let set_value_parameters t f = t.value_parameters <- f
 let value_parameters t = t.value_parameters
 let set_variances t f = t.variances <- f
 let variances t = t.variances
+
+let settle t f =
+  match t.settling with
+  | Some queue ->
+    Queue.enqueue queue f;
+    Ok ()
+  | None ->
+    let queue = Queue.create () in
+    Queue.enqueue queue f;
+    t.settling <- Some queue;
+    let rec drain first_error =
+      match Queue.dequeue queue with
+      | None -> first_error
+      | Some f ->
+        drain
+          (match first_error, f () with
+           | (Error _ as error), _ | Ok (), error -> error)
+    in
+    Exn.protect
+      ~f:(fun () -> drain (Ok ()))
+      ~finally:(fun () -> t.settling <- None)
+;;
 
 let id t =
   let id = t.next_id in

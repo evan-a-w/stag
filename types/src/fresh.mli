@@ -13,6 +13,14 @@ val value_parameters : t -> Value_layout.parameters
 val set_variances : t -> Variance.of_con -> unit
 val variances : t -> Variance.of_con
 
+(** Runs [f], unless within another [settle]: then once what that one runs is
+    done, so watchers binding variables whose watchers bind others don't nest.
+    The first error of all that is run goes to the outermost [settle]. *)
+val settle
+  :  t
+  -> (unit -> (unit, Mode.Error.t) Result.t)
+  -> (unit, Mode.Error.t) Result.t
+
 (** The source of mode variables' ids. *)
 val modes : t -> Mode.Id_source.t
 

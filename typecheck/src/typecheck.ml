@@ -2315,7 +2315,7 @@ let finish_scc
   let settle_joins ty =
     if generalize
     then Scheme.generalize_watchers ~rank:0 [ ty ]
-    else Unify.fix_joins t [ ty ]
+    else Scheme.fix_joins t [ ty ]
   in
   List.iter2_exn members tys ~f:(fun member ty ->
     List.iter (settle_joins ty) ~f:(fun error ->

@@ -83,10 +83,12 @@ val present_entry
     even while either is unknown, so it becomes their join. *)
 val join_var : Fresh.t -> rank:Type.rank -> (Type.ty, Nothing.t) Type.Var.t
 
-(** Makes each join variable of [tys] still unknown equal to what is to have its
-    structure, as generalizing does: for a weak toplevel, whose type is then
-    fixed. *)
-val fix_joins : Fresh.t -> Type.ty list -> Mode.Error.t list
+(** Makes [var], if still unknown, equal to what is to have its structure, as
+    generalizing it does ([Scheme.fix_joins]). *)
+val fix_join
+  :  Fresh.t
+  -> (Type.ty, Nothing.t) Type.Var.t
+  -> (unit, Mode.Error.t) Result.t
 
 (** [lower <= upper]: what has type [lower] may be used where [upper] is
     expected. Their structures are unified as by [unify_ty], but the modes in
