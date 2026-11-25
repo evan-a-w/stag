@@ -742,9 +742,9 @@ let apply
           && (not (allocator ()))
           && not (is_arrow res_ty) ->
      (* A tail call ends the region before the callee runs, so what the callee
-        returns is made in the caller's region, as by [exclave_]. An
-        allocator like [Box.make] is no call, and nor may be an application
-        giving a function (a partial application): they allocate here. *)
+        returns is made in the caller's region, as by [exclave_]. An allocator
+        like [Box.make] is no call, and nor may be an application giving a
+        function (a partial application): they allocate here. *)
      Ctx.add
        ctx
        ~loc

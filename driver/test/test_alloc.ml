@@ -90,7 +90,8 @@ let use (u : unit) = let l @ local = [stack_ (Box.make 1)] in sum (match last l 
     ; {|let own (u : unit) = let b = stack_ (Box.make 1) in mk (sum b)
 let bad (u : unit) = let b = stack_ (Box.make 1) in (fun (c : box[int] @ local) -> c) b [@nontail]|}
     ];
-  [%expect {|
+  [%expect
+    {|
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val via : box[int] @ 'm0 -> box[int] @ 'm1 with local <= 'm0 and 'm0 <= 'm1

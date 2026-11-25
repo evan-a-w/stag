@@ -129,7 +129,7 @@ let add compare t k v =
   match t with
   | Empty -> Internal.create Empty k v Empty
   | Node *{left = l; key = k2; value = v2; right = r; height = h} ->
-    let c = compare k k2 in
+    let c : int = compare k k2 in
     match Int.equal c 0 with
     | true ->
       Node (Box.make {left = l; key = k; value = v; right = r; height = h})
@@ -142,7 +142,7 @@ let find compare t k =
   match t with
   | Empty -> None
   | Node *{left = l; key = k2; value = v; right = r} ->
-    let c = compare k k2 in
+    let c : int = compare k k2 in
     match Int.equal c 0 with
     | true -> Some v
     | false ->
@@ -167,7 +167,7 @@ let remove compare t k =
   match t with
   | Empty -> Empty
   | Node *{left = l; key = k2; value = v2; right = r} ->
-    let c = compare k k2 in
+    let c : int = compare k k2 in
     match Int.equal c 0 with
     | true -> Internal.merge l r
     | false ->

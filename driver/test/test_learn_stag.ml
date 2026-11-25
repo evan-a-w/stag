@@ -783,16 +783,41 @@ let%expect_test "learn_stag.md" =
     Doc.mk = <fun>
     Doc.same = <fun>
     Doc.static_if = <fun>
-    === learn_stag.md:706
+    === learn_stag.md:711
+    module Doc : sig
+      val m : Core.Map.t[int, string, portable]
+      val wide : Core.Map.t[int, string, external]
+      val size : unit -> int
+      val three : int
+      val keywords : Core.Map.t[string, int, portable]
+      val is_let : bool
+      val cache : Core.Lru.t[int, string, gc]
+      val used : option[string]
+    end
+    Doc.m = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 1; value = "a"; right = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = "b"; right = Core.Map.Empty; height = 1}); height = 2})
+    Doc.wide = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 1; value = "a"; right = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = "b"; right = Core.Map.Empty; height = 1}); height = 2})
+    Doc.size = <fun>
+    Doc.three = 3
+    Doc.keywords = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = "in"; value = 2; right = Core.Map.Empty; height = 1}); key = "let"; value = 1; right = Core.Map.Empty; height = 2})
+    Doc.is_let = true
+    Doc.cache = {Core.Lru.capacity = 2; compare = <fun>; index = Ptr.make (Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = Ptr.make {Core.Lru.key = 2; value = "b"; prev = Core.Lru.Entry (Ptr.make {Core.Lru.key = 3; value = "c"; prev = Core.Lru.Nil; next = Core.Lru.Entry <cycle>}); next = C...
+    Doc.used = None
+    === learn_stag.md:733
+    File "doc.stag", line 735, characters 54-59:
+    735 | let as_external : Core.Lru.t[int, string, external] = cache
+                                                                ^^^^^
+    Error: This expression has type Core.Lru.t[int, string, gc] but an expression was expected of type Core.Lru.t[int, string, external]
+    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    === learn_stag.md:744
     module Doc : sig
       val labs : int -> int
       val a : int
     end
     Doc.labs = <fun>
     Doc.a = 42
-    === learn_stag.md:711
-    File "doc.stag", line 712, characters 18-31:
-    712 | external strlen : string -> int = "strlen"
+    === learn_stag.md:749
+    File "doc.stag", line 750, characters 18-31:
+    750 | external strlen : string -> int = "strlen"
                             ^^^^^^^^^^^^^
     Error: The external strlen has no C signature: string would be passed to C as a pointer, which is not supported yet
     |}]
