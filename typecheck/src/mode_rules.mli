@@ -343,6 +343,14 @@ val box_make : Ctx.t -> Mode.Var.t * Mode.Var.t
     partial application holds the arguments so far. *)
 val prim : Ctx.t -> args:Type.ty list -> Arrow_modes.t list
 
-(** Fixes what the cell of a pointer not generalized may hold, once nothing more
-    can constrain it: [nonportable gc] on each axis it may, else what it must. *)
-val default_held : Mode.Var.t -> name:string -> unit
+(** Fixes a mode argument of the type of a toplevel not generalized, once
+    nothing more can constrain it. Where it occurs ([None]: in several ways):
+    covariantly, at its lower bound, and contravariantly, at its upper one, the
+    most a use at another type allows (its bound from the value it was made
+    from); else, as what a cell holds, at [nonportable gc] on each axis it may,
+    else what it must. *)
+val default_mode_arg
+  :  Mode.Var.t
+  -> Mode_arg_position.t option
+  -> name:string
+  -> unit

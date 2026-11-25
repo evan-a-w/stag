@@ -799,10 +799,17 @@ and sub_structure state sub ~flip ~lower ~upper =
   in
   match ty1, ty2 with
   | _ when phys_equal ty1 ty2 -> Ok ()
+  (* A variable used at a join variable, or the reverse, is made the join
+     variable, which stays one: what is used at it later is joined, whichever
+     came first. *)
+  | TVar { state = Unbound _; join = true; _ }, TVar { join = false; _ } ->
+    unify_ty' state ~ty1:ty2 ~ty2:ty1
+  | TVar { join = false; _ }, TVar { state = Unbound _; join = true; _ } ->
+    unify_ty' state ~ty1 ~ty2
   | TVar _, TVar _ -> unify_ty ~lower:ty1 ~upper:ty2
-  | _, TVar { id; state = Unbound rank; _ } when Fresh.is_join state.fresh id ->
+  | _, TVar { state = Unbound rank; join = true; _ } ->
     join_at ~var:ty2 ~rank ty1 ~sub:(fun copy -> co ~lower:ty1 ~upper:copy)
-  | TVar { id; state = Unbound rank; _ }, _ when Fresh.is_join state.fresh id ->
+  | TVar { state = Unbound rank; join = true; _ }, _ ->
     join_at ~var:ty1 ~rank ty2 ~sub:(fun copy -> co ~lower:copy ~upper:ty2)
   | TCon (name1, args1), TCon (name2, args2)
     when String.equal name1 name2 && List.length args1 = List.length args2 ->

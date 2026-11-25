@@ -298,8 +298,8 @@ end
        ((Value
          ((name f)
           (scheme
-           (TArrow (TVar (Generic 3))
-            (TVar (Link (TCon box ((ATy (TVar (Link (TVar (Generic 3)))))))))))
+           (TArrow (TVar (Link (TVar (Generic 6))))
+            (TVar (Link (TCon box ((ATy (TVar (Generic 6)))))))))
           (stage Const) (provenance Static)))
         (Value
          ((name n) (scheme (TVar (Link (TCon int ())))) (stage Const)

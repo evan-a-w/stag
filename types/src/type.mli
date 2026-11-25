@@ -21,6 +21,9 @@ type ('a, 'bound) var =
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
   ; mutable in_record : bool
+  ; mutable join : bool
+  (** Of a type variable: made the join of what is used at it, by
+      [Unify.sub_ty], rather than equal to it ([Fresh.join_var]). *)
   }
 
 and ty =
@@ -118,6 +121,7 @@ module Var : sig
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     ; mutable in_record : bool
+    ; mutable join : bool
     }
 
   val create : id -> 'a state -> ('a, _) t
@@ -276,9 +280,6 @@ end
 
 val iter_ty : 'e Iter.t @ local -> ty -> (unit, 'e) Result.t
 val iter_row : 'e Iter.t @ local -> row -> (unit, 'e) Result.t
-
-(** The variables of what the cells of the pointers in the type may hold. *)
-val iter_held : ty -> f:(Mode.Var.t -> unit) @ local -> unit
 
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are

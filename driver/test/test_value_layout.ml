@@ -111,7 +111,7 @@ type next['a] = Next of int
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 4 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 7 1))))) @
      t.stag:2:51-64)
     val tie : 'a -> wrap['a]
     val close : wrap[(wrap['a] as 'a)] -> wrap['a]

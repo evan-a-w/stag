@@ -58,14 +58,14 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
   let rows = Int.Table.create () in
   let modes = Mode.Var.Instance.create (Fresh.modes fresh) ~rank in
   let presences = Int.Table.create () in
-  let inst table (var : _ Type.Var.t) ~wrap ~bounds =
+  let inst table (var : _ Type.Var.t) ~create ~wrap ~bounds =
     match var.state with
     | Unbound _ | Link _ -> wrap var
     | Generic ->
       (match Hashtbl.find table var.id with
        | Some instance -> instance
        | None ->
-         let var' = Fresh.join_var fresh ~rank in
+         let (var' : _ Type.Var.t) = create () in
          var'.in_record <- var.in_record;
          let instance = wrap var' in
          Hashtbl.set table ~key:var.id ~data:instance;
@@ -75,12 +75,18 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
   in
   { ty =
       (fun var ->
-        inst tys var ~wrap:(fun var -> Type.TVar var) ~bounds:(fun _ _ -> ()))
+        inst
+          tys
+          var
+          ~create:(fun () -> Fresh.join_var fresh ~rank)
+          ~wrap:(fun var -> Type.TVar var)
+          ~bounds:(fun _ _ -> ()))
   ; row =
       (fun var ->
         inst
           rows
           var
+          ~create:(fun () -> Fresh.var fresh ~rank)
           ~wrap:(fun var -> Type.RVar var)
           ~bounds:(fun var var' ->
             Queue.enqueue pending (Row_bounds (var, var'))))
@@ -89,6 +95,7 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
         inst
           presences
           var
+          ~create:(fun () -> Fresh.var fresh ~rank)
           ~wrap:(fun var -> Type.PVar var)
           ~bounds:(fun var var' ->
             Queue.enqueue pending (Presence_bounds (var, var'))))

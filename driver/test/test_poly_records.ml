@@ -456,7 +456,7 @@ let deref t = match t with T r -> r.`next.*
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 34 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 32 1))))) @
      t.stag:2:30-31)
     ((Unification_error
       (Row_mismatch

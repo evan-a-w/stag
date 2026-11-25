@@ -2105,6 +2105,20 @@ let instance_for_use t (awaited : Toplevel.t) (use : Quoted_use.t) ~rank ~on_use
            ~reporter:use.reporter))
 ;;
 
+(* Fixes the mode arguments of [ty], of toplevel [name] not generalized, each by
+   where it occurs: [None] if in several ways. *)
+let default_mode_args t ty ~name =
+  let positions = Int.Table.create () in
+  Mode_arg_position.iter ~con:(Fresh.variances t) ty ~f:(fun var position ->
+    Hashtbl.update positions (Mode.Var.id var) ~f:(function
+      | None -> var, Some position
+      | Some (var, Some before) when Mode_arg_position.equal before position ->
+        var, Some position
+      | Some (var, _) -> var, None));
+  Hashtbl.iter positions ~f:(fun (var, position) ->
+    Mode_rules.default_mode_arg var position ~name)
+;;
+
 (* Refines [awaiting]'s schemes by the finished toplevels it uses. *)
 let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
   let awaited (use : Quoted_use.t) =
@@ -2148,7 +2162,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
       ~rank:0
       (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty));
     List.iter awaiting.schemes ~f:(fun (name, ty) ->
-      Type.iter_held ty ~f:(Mode_rules.default_held ~name));
+      default_mode_args t ty ~name);
     awaiting.uses <- uses;
     List.iter uses ~f:(fun use -> await awaiting (awaited use)))
 ;;
@@ -2313,7 +2327,7 @@ let finish_scc
   if failed then Component.fail component;
   Component.finish component;
   List.iter2_exn members tys ~f:(fun member ty ->
-    Type.iter_held ty ~f:(Mode_rules.default_held ~name:member.ident.name));
+    default_mode_args t ty ~name:member.ident.name);
   let members =
     List.map2_exn members tys ~f:(fun member ty ->
       match member.state with

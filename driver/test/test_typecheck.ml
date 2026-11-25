@@ -1085,7 +1085,7 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 125 1))
+       (RExtend y (PVar (Link Present)) (TVar (Link (TVar (Unbound 113 1))))
         (RVar (Unbound 128 1)))
        (RVar (Link REmpty)) (Missing_label y)))
      @ t.stag:4:21-28)

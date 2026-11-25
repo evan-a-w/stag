@@ -15,6 +15,7 @@ type ('a, 'bound) var =
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
   ; mutable in_record : bool
+  ; mutable join : bool
   }
 
 and ty =
@@ -94,10 +95,18 @@ module Var = struct
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     ; mutable in_record : bool
+    ; mutable join : bool
     }
 
   let create id state =
-    { id; state; bounds = []; in_bounds_of = []; kept = []; in_record = false }
+    { id
+    ; state
+    ; bounds = []
+    ; in_bounds_of = []
+    ; kept = []
+    ; in_record = false
+    ; join = false
+    }
   ;;
 
   let rank_exn t =
@@ -472,22 +481,6 @@ let iter_ty f ty =
 
 let iter_row f row =
   iterate f ~held:(fun var -> f.mode var) (stack_ Iter_start.Row row) [@nontail]
-;;
-
-let iter_held ty ~f =
-  let ok _ = Ok () in
-  match
-    iterate
-      { ty = (fun ~guarded:_ -> ok)
-      ; row = (fun ~guarded:_ -> ok)
-      ; presence = (fun ~guarded:_ -> ok)
-      ; mode = ok
-      }
-      ~held:(fun var -> Ok (f var))
-      (stack_ Iter_start.Ty ty)
-  with
-  | Ok () -> ()
-  | Error (_ : Nothing.t) -> .
 ;;
 
 module Mapper = struct

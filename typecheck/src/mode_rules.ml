@@ -1053,24 +1053,37 @@ let assume_global ctx =
   arg, res
 ;;
 
-let default_held var ~name =
+let default_mode_arg var (position : Mode_arg_position.t option) ~name =
   if not (Mode.Var.is_generic var)
   then (
     let fix (type a) (axis : a Mode.Axis.t) ~(default : a) reason =
       let module C = (val Mode.Axis.chain axis) in
       let lower = Mode.Const.get (Mode.Var.lower var) axis
       and upper = Mode.Const.get (Mode.Var.upper var) axis in
-      let held = if C.le default upper then C.join lower default else lower in
+      let held =
+        match position with
+        | Some Mode_arg_position.Covariant -> lower
+        | Some Contravariant -> upper
+        | Some Held | None ->
+          if C.le default upper then C.join lower default else lower
+      in
       let%bind.Result () = Mode.Var.at_least var axis held reason in
       Mode.Var.at_most var axis held reason
     in
     let default = Mode_arg.Const.default in
     let reason =
       Mode.Reason.create
-        (sprintf
-           "%s is not generalized, so what its cells hold is fixed by its \
-            definition (nonportable gc by default)"
-           name)
+        (match position with
+         | Some Held | None ->
+           sprintf
+             "%s is not generalized, so what its cells hold is fixed by its \
+              definition (nonportable gc by default)"
+             name
+         | Some (Covariant | Contravariant) ->
+           sprintf
+             "%s is not generalized, so its type's mode arguments are fixed by \
+              its definition"
+             name)
     in
     (let%bind.Result () = fix Stage ~default:default.stage reason in
      fix Provenance ~default:default.provenance reason)
