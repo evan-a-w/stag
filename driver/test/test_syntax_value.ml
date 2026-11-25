@@ -265,6 +265,48 @@ let%expect_test "the prelude's signature" =
         val sort : ('a -> 'a -> int) -> list['a] -> list['a]
         val dedup : ('a -> 'a -> int) -> list['a] -> list['a]
       end
+      module Lru : sig
+        type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
+        type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a -> 'a -> int; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], gc]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        val create : int -> ('a -> 'a -> int) -> t['a, 'b, 'm0]
+        val length : t['a, 'b, 'm0] -> int
+        module Internal : sig
+          val unlink : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
+          val push_front : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
+          val use : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
+          val evict_last : t['a, 'b, 'm0] -> unit
+        end
+        val find : t['a, 'b, 'm0] -> 'a -> option['b]
+        val add : t['a, 'b, 'm0] -> 'a -> 'b -> unit
+        val to_list : t['a, 'b, 'm0] -> list['a * 'b]
+      end
+      module Map : sig
+        type t['a, 'b, 'm0 : mode] = Empty | Node of box[node['a, 'b, 'm0]]
+        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
+        val empty : t['a, 'b, 'm0]
+        val is_empty : t['a, 'b, 'm0] -> bool
+        val height : t['a, 'b, 'm0] -> int
+        module Internal : sig
+          val max : int -> int -> int
+          val create : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+          val bal : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
+          val onto : t['a, 'b, 'm0] -> list['a * 'b] -> list['a * 'b]
+          val remove_min : t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+          val merge : t['a, 'b, 'm0] -> t['a, 'b, 'm1] -> t['a, 'b, 'm1]
+        end
+        val singleton : 'a -> 'b -> t['a, 'b, 'm0]
+        val add : ('a -> 'a -> int) -> t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1]
+        val find : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> option['c]
+        val mem : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> bool
+        val min_binding : t['a, 'b, 'm0] -> option['a * 'b]
+        val remove : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> t['b, 'c, 'm1]
+        val fold : ('a -> 'b -> 'c -> 'c) -> t['a, 'b, 'm0] -> 'c -> 'c
+        val iter : ('a -> 'b -> 'c) -> t['a, 'b, 'm0] -> unit
+        val cardinal : t['a, 'b, 'm0] -> int
+        val to_list : t['a, 'b, 'm0] -> list['a * 'b]
+        val of_list : ('a -> 'a -> int) -> list['a * 'b] -> t['a, 'b, 'm0]
+      end
       module Option : sig
         val some : 'a -> option['a]
         val is_some : option['a] -> bool

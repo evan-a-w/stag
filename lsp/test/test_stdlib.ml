@@ -44,6 +44,8 @@ let%expect_test "the prelude's sources check cleanly, as the prelude" =
       opened stag/core/char.stag
       opened stag/core/int.stag
       opened stag/core/list.stag
+      opened stag/core/lru.stag
+      opened stag/core/map.stag
       opened stag/core/option.stag
       opened stag/core/result.stag
       opened stag/core/sexp.stag

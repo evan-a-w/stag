@@ -1,0 +1,189 @@
+(* Persistent ordered maps: AVL trees, ordered by a comparison function passed
+   to each operation ([compare a b] negative, zero or positive as [a] is
+   less than, equal to or greater than [b]), as [Int.compare].
+
+   ['p] bounds the provenance of the values: a [t[string, string, external]]
+   may hold C strings, and reading one gives an external value, while a
+   [t[string, string, gc]] holds only values the GC manages, and is usable as
+   the former. An operation returning a map makes its nodes where its caller
+   uses the result: on the heap, or in the caller's region. *)
+
+type t['k, 'v, 'p : mode] = Empty | Node of box[node['k, 'v, 'p]]
+
+type node['k, 'v, 'p : mode] = {
+  left : t['k, 'v, 'p];
+  key : 'k;
+  value : 'v @@ 'p;
+  right : t['k, 'v, 'p];
+  height : int;
+}
+
+let empty = Empty
+
+let is_empty t =
+  match t with
+  | Empty -> true
+  | Node _ -> false
+
+let height t =
+  match t with
+  | Empty -> 0
+  | Node *{height = h} -> h
+
+module Internal = struct
+  let max a b =
+    match Int.lt a b with
+    | true -> b
+    | false -> a
+
+  (* A node of [l] and [r], whose heights differ by at most 2. *)
+  let create l k v r =
+    Node
+      (Box.make
+         {
+           left = l;
+           key = k;
+           value = v;
+           right = r;
+           height = Int.add 1 (max (height l) (height r));
+         })
+
+  let bal l k v r =
+    let hl = height l in
+    let hr = height r in
+    match Int.gt hl (Int.add hr 1) with
+    | true ->
+      (match l with
+       | Node *{left = ll; key = lk; value = lv; right = lr} ->
+         (match Int.ge (height ll) (height lr) with
+          | true -> create ll lk lv (create lr k v r)
+          | false ->
+            match lr with
+            | Node *{left = lrl; key = lrk; value = lrv; right = lrr} ->
+              create (create ll lk lv lrl) lrk lrv (create lrr k v r)
+            | Empty -> create l k v r)
+       | Empty -> create l k v r)
+    | false ->
+      match Int.gt hr (Int.add hl 1) with
+      | true ->
+        (match r with
+         | Node *{left = rl; key = rk; value = rv; right = rr} ->
+           (match Int.ge (height rr) (height rl) with
+            | true -> create (create l k v rl) rk rv rr
+            | false ->
+              match rl with
+              | Node *{left = rll; key = rlk; value = rlv; right = rlr} ->
+                create (create l k v rll) rlk rlv (create rlr rk rv rr)
+              | Empty -> create l k v r)
+         | Empty -> create l k v r)
+      | false -> create l k v r
+
+  (* [t]'s bindings, then [acc]. *)
+  let onto t acc =
+    match t with
+    | Empty -> acc
+    | Node *{left = l; key = k; value = v; right = r} ->
+      onto l (Cons (Box.make ((k, v), onto r acc)))
+
+  (* [t] without its least binding. *)
+  let remove_min t =
+    match t with
+    | Empty -> Empty
+    | Node *{left = Empty; right = r} -> r
+    | Node *{left = l; key = k; value = v; right = r} ->
+      bal (remove_min l) k v r
+
+  (* The bindings of [l], then of [r], all of whose keys are greater. *)
+  let merge l r =
+    match (l, r) with
+    | Empty, _ -> r
+    | _, Empty -> l
+    | _ ->
+      match min_binding r with
+      | Some (k, v) -> bal l k v (remove_min r)
+      | None -> l
+end
+
+let singleton k v = Internal.create Empty k v Empty
+
+(* [add compare t k v] binds [k] to [v], replacing any binding of [k]. *)
+let add compare t k v =
+  match t with
+  | Empty -> Internal.create Empty k v Empty
+  | Node *{left = l; key = k2; value = v2; right = r; height = h} ->
+    let c = compare k k2 in
+    match Int.equal c 0 with
+    | true ->
+      Node (Box.make {left = l; key = k; value = v; right = r; height = h})
+    | false ->
+      match Int.lt c 0 with
+      | true -> Internal.bal (add compare l k v) k2 v2 r
+      | false -> Internal.bal l k2 v2 (add compare r k v)
+
+let find compare t k =
+  match t with
+  | Empty -> None
+  | Node *{left = l; key = k2; value = v; right = r} ->
+    let c = compare k k2 in
+    match Int.equal c 0 with
+    | true -> Some v
+    | false ->
+      match Int.lt c 0 with
+      | true -> find compare l k
+      | false -> find compare r k
+
+let mem compare t k =
+  match find compare t k with
+  | Some _ -> true
+  | None -> false
+
+(* The binding of the least key, or [None] for an empty map. *)
+let min_binding t =
+  match t with
+  | Empty -> None
+  | Node *{left = Empty; key = k; value = v} -> Some (k, v)
+  | Node *{left = l} -> min_binding l
+
+(* [remove compare t k] has no binding of [k]. *)
+let remove compare t k =
+  match t with
+  | Empty -> Empty
+  | Node *{left = l; key = k2; value = v2; right = r} ->
+    let c = compare k k2 in
+    match Int.equal c 0 with
+    | true -> Internal.merge l r
+    | false ->
+      match Int.lt c 0 with
+      | true -> Internal.bal (remove compare l k) k2 v2 r
+      | false -> Internal.bal l k2 v2 (remove compare r k)
+
+(* [fold f t init] is [f kN vN (... (f k1 v1 init))], in increasing key
+   order. *)
+let fold f t acc =
+  match t with
+  | Empty -> acc
+  | Node *{left = l; key = k; value = v; right = r} ->
+    fold f r (f k v (fold f l acc)) [@nontail]
+
+let iter f t =
+  match t with
+  | Empty -> ()
+  | Node *{left = l; key = k; value = v; right = r} ->
+    iter f l;
+    f k v;
+    iter f r [@nontail]
+
+let cardinal t = fold (fun _ _ n -> Int.add n 1) t 0
+
+(* The bindings, in increasing key order. *)
+let to_list t = Internal.onto t []
+
+(* [of_list compare l] binds each key of [l] to its value, the last binding of
+   a key winning. *)
+let of_list compare l =
+  let loop t l =
+    match l with
+    | [] -> t
+    | Cons *((k, v), rest) -> loop (add compare t k v) rest
+  in
+  loop Empty l
