@@ -249,7 +249,7 @@ let length u = String.length (ext "a")
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val length : 'a -> int
+    val length : 'a @ 'm0 -> int @ 'm1
     |}];
   provenance {|
 let built u = String.append "a" "b"
