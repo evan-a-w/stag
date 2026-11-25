@@ -3,12 +3,14 @@ open! Import
 type t =
   { mutable next_id : int
   ; mutable value_parameters : Value_layout.parameters
+  ; mutable variances : Variance.of_con
   ; modes : Mode.Id_source.t
   }
 
 let create () =
   { next_id = 0
   ; value_parameters = (fun _ -> None)
+  ; variances = (fun _ -> None)
   ; modes = Mode.Id_source.create ()
   }
 ;;
@@ -16,6 +18,8 @@ let create () =
 let modes t = t.modes
 let set_value_parameters t f = t.value_parameters <- f
 let value_parameters t = t.value_parameters
+let set_variances t f = t.variances <- f
+let variances t = t.variances
 
 let id t =
   let id = t.next_id in

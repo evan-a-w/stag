@@ -77,3 +77,16 @@ val present_entry
   -> name:string
   -> rank:Type.rank
   -> (Type.ty, Unification_error.t) Result.t
+
+(** [lower <= upper]: what has type [lower] may be used where [upper] is
+    expected. Their structures are unified as by [unify_ty], but the modes in
+    them are related by variance: a function's argument contravariantly, its
+    result and a tuple's components covariantly, a nominal type's parameters as
+    [Fresh.variances] says (invariantly if it doesn't know). Records, variants,
+    code contexts and arrows' [curry] are unified exactly, and so is a variable
+    with what it is bound to. *)
+val sub_ty
+  :  Fresh.t
+  -> lower:Type.ty
+  -> upper:Type.ty
+  -> (unit, Unification_error.t) Result.t

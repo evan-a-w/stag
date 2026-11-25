@@ -984,6 +984,21 @@ let ptr_make ctx =
   arg, res, Mode_arg.Var held
 ;;
 
+let box_make ctx =
+  let arg = Ctx.fresh ctx in
+  let res = Ctx.fresh ctx in
+  let reason = Mode.Reason.create "Box.make holds it" in
+  let made = Mode.Reason.create "Box.make allocates it at run time" in
+  Result.all_unit
+    [ Mode.Var.submode arg res reason
+    ; Mode.Var.at_least res Stage Portable made
+    ; Mode.Var.at_least res Provenance Gc made
+    ]
+  |> Result.iter_error ~f:(fun error ->
+    raise_s [%message "Box.make" (error : Mode.Error.t)]);
+  arg, res
+;;
+
 let prim ctx ~args =
   let made =
     Mode.Reason.create "a partial application is allocated at run time"

@@ -156,6 +156,7 @@ let string_of_sexp t =
 
 let sexp_of_list sexp_of_elt l = List (List.map sexp_of_elt l)
 let sexp_of_ptr sexp_of_elt p = sexp_of_elt p.*
+let sexp_of_box sexp_of_elt (b : box['a]) = sexp_of_elt b.*
 
 (* Stops at the first element that fails. *)
 let list_of_sexp elt_of_sexp t =
@@ -164,7 +165,7 @@ let list_of_sexp elt_of_sexp t =
     | [] -> Ok (List.rev acc)
     | Cons * (x, rest) ->
       match elt_of_sexp x with
-      | Ok y -> loop rest (Cons (Ptr.make ( (y, acc))))
+      | Ok y -> loop rest (Cons (Box.make ( (y, acc))))
       | Error e -> Error e
   in
   match t with
@@ -248,6 +249,8 @@ let string_of_sexp_exn t = of_sexp_exn string_of_sexp t
 let list_of_sexp_exn elt_of_sexp t = of_sexp_exn (list_of_sexp elt_of_sexp) t
 let ptr_of_sexp elt_of_sexp t = Result.map Ptr.make (elt_of_sexp t)
 let ptr_of_sexp_exn elt_of_sexp t = of_sexp_exn (ptr_of_sexp elt_of_sexp) t
+let box_of_sexp elt_of_sexp t = Result.map .Box.make (elt_of_sexp t)
+let box_of_sexp_exn elt_of_sexp t = of_sexp_exn (box_of_sexp elt_of_sexp) t
 
 let option_of_sexp_exn value_of_sexp t =
   of_sexp_exn (option_of_sexp value_of_sexp) t
@@ -301,7 +304,7 @@ module Deriving = struct
     match sexp with
     | Atom tag -> Atom (String.capitalize tag)
     | List (Cons * (Atom tag, args)) ->
-      List (Cons (Ptr.make ( (Atom (String.capitalize tag), args))))
+      List (Cons (Box.make ( (Atom (String.capitalize tag), args))))
     | List _ -> sexp
 
   (* Raises the error of [sexp], which is not a variant of the constructors
@@ -340,7 +343,7 @@ module Deriving = struct
       | [], [] -> Some values
       | Cons * (name, names), Cons * (List [Atom given; value], items) ->
         (match String.equal name given with
-         | true -> in_order names items (Cons (Ptr.make ( (value, values))))
+         | true -> in_order names items (Cons (Box.make ( (value, values))))
          | false -> None)
       | _ -> None
     in
@@ -385,9 +388,9 @@ module Internal = struct
       | [] -> List.rev repeated
       | Cons * (name, rest) ->
         match (is_in seen name, is_in repeated name) with
-        | true, false -> repeats rest seen (Cons (Ptr.make ( (name, repeated))))
+        | true, false -> repeats rest seen (Cons (Box.make ( (name, repeated))))
         | true, true -> repeats rest seen repeated
-        | false, _ -> repeats rest (Cons (Ptr.make ( (name, seen)))) repeated
+        | false, _ -> repeats rest (Cons (Box.make ( (name, seen)))) repeated
     in
     let pairs = List.map pair items in
     let given = List.map (fun p -> match p with name, _ -> name) pairs in

@@ -115,6 +115,7 @@ module Kind : sig
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
+    | Store_into_box (** A [Store] through a [box], which is immutable. *)
     | Exclave_not_in_tail_position
     (** [exclave_ e] other than as the result of a function body. *)
     | Mutable_captured_in_exclave of string

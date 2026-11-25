@@ -158,6 +158,11 @@ module Builtin = struct
       .< Sexp.ptr_of_sexp >.
       .< Sexp.ptr_of_sexp_exn >.;
     create
+      ["box"]
+      .< Sexp.sexp_of_box >.
+      .< Sexp.box_of_sexp >.
+      .< Sexp.box_of_sexp_exn >.;
+    create
       ["option"]
       .< Sexp.sexp_of_option >.
       .< Sexp.option_of_sexp >.
@@ -218,7 +223,7 @@ let named (ctx : Context.t) dir r =
     in
     match is_self with
     | true -> var name
-    | false -> var (String.concat "." (Cons (Ptr.make ( ("", List.append modules [name])))))
+    | false -> var (String.concat "." (Cons (Box.make ( ("", List.append modules [name])))))
 
 (* A converter of [ty], as a function. Its arguments are [To_sexp] or [Of_sexp]
    ones. *)
@@ -349,7 +354,7 @@ let poly_cases (ctx : Context.t) row =
       construct = fun es -> Stag.Expr.Poly_variant (Ptr.make ( (tag, List.hd es)));
       pattern = fun ps -> Stag.Pattern.Poly_variant (Ptr.make ( (tag, List.hd ps)));
     } in
-    Cons (Ptr.make ( (case, poly_cases ctx rest)))
+    Cons (Box.make ( (case, poly_cases ctx rest)))
 
 let variant_to_sexp ctx cases e prefix =
   let arm (case : Case.t) =
@@ -359,7 +364,7 @@ let variant_to_sexp ctx cases e prefix =
     let sexp =
       match binds with
       | [] -> atom case.tag
-      | _ -> sexp_list (Cons (Ptr.make ( (atom case.tag, List.map snd binds))))
+      | _ -> sexp_list (Cons (Box.make ( (atom case.tag, List.map snd binds))))
     in
     (case.pattern (List.map fst binds), sexp)
   in
@@ -373,7 +378,7 @@ let variant_of_sexp (ctx : Context.t) poly cases v prefix =
     | [] -> (atom_pattern case.tag, case.construct [])
     | args ->
       let vs = vars prefix (List.length args) in
-      (list_pattern (Cons (Ptr.make ( (atom_pattern case.tag, List.map pvar vs)))),
+      (list_pattern (Cons (Box.make ( (atom_pattern case.tag, List.map pvar vs)))),
        case.construct (of_sexps ctx args vs))
   in
   let tags with_args =

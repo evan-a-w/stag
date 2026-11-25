@@ -91,3 +91,25 @@ let sexp_of_t t =
   | Fixed const -> [%sexp (const : Const.t)]
   | Var var -> [%sexp Var (Mode.Var.id var : int)]
 ;;
+
+let sub_reason = Mode.Reason.create "a type is used at one with another mode"
+
+let sub ~lower ~upper =
+  on_axes
+    { f =
+        (fun axis ~get ->
+          match lower, upper with
+          | Fixed lower, Fixed upper ->
+            Mode.Error.le_on
+              axis
+              ~lower:(get lower)
+              ~upper:(get upper)
+              sub_reason
+          | Var var, Fixed const ->
+            Mode.Var.at_most var axis (get const) sub_reason
+          | Fixed const, Var var ->
+            Mode.Var.at_least var axis (get const) sub_reason
+          | Var lower, Var upper ->
+            Mode.Var.submode_on lower upper axis sub_reason)
+    }
+;;

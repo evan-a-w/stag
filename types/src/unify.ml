@@ -642,6 +642,121 @@ and unify_if_present' state ~presence ~ty1 ~ty2 =
       Ok ())
 ;;
 
+(* [lower <= upper]: their structures are unified, but the modes inside them are
+   related by their positions' variances. Records, variants and code contexts
+   are unified exactly. *)
+module Sub_state = struct
+  type t =
+    { links : Int.Hash_set.t
+    ; left : Type.ty Type.Link_pairs.t
+    ; right : Type.ty Type.Link_pairs.t
+    }
+
+  let create () =
+    { links = Int.Hash_set.create ()
+    ; left = Type.Link_pairs.create ()
+    ; right = Type.Link_pairs.create ()
+    }
+  ;;
+
+  (* Ordered, as [a <= b] and [b <= a] differ. *)
+  let assume t id1 id2 =
+    let key = (id1 lsl 31) lor id2 in
+    Hash_set.mem t.links key
+    ||
+    (Hash_set.add t.links key;
+     false)
+  ;;
+
+  let seen t (lower : Type.ty) upper =
+    match lower with
+    | TVar { state = Link _; _ } -> Type.Link_pairs.ty t.left lower upper
+    | _ -> Type.Link_pairs.ty t.right lower upper
+  ;;
+end
+
+let modes_error ty1 ty2 error =
+  Unification_error.Type_mismatch (ty1, ty2, Modes error)
+;;
+
+let rec sub_ty' state sub ~flip ~lower ~upper
+  : (unit, Unification_error.t) Result.t
+  =
+  match lower, upper with
+  | ( Type.TVar { id = id1; state = Link _; _ }
+    , Type.TVar { id = id2; state = Link _; _ } )
+    when Sub_state.assume sub id1 id2 -> Ok ()
+  | Type.TVar { state = Link _; _ }, Type.TVar { state = Link _; _ } ->
+    sub_structure state sub ~flip ~lower ~upper
+  | _ when Sub_state.seen sub lower upper -> Ok ()
+  | _ -> sub_structure state sub ~flip ~lower ~upper
+
+(* Errors name the expected type first, which is [upper] unless [flip]: in a
+   contravariant position, the expected type's part is [lower]. *)
+and sub_structure state sub ~flip ~lower ~upper =
+  let ty1 = Type.canonical_ty lower in
+  let ty2 = Type.canonical_ty upper in
+  let expected, actual = if flip then ty1, ty2 else ty2, ty1 in
+  let modes_error error = modes_error expected actual error in
+  let co ~lower ~upper = sub_ty' state sub ~flip ~lower ~upper in
+  let contra ~lower ~upper = sub_ty' state sub ~flip:(not flip) ~lower ~upper in
+  (* Exact unification, naming the expected type first. *)
+  let unify_ty ~lower ~upper =
+    if flip
+    then unify_ty' state ~ty1:lower ~ty2:upper
+    else unify_ty' state ~ty1:upper ~ty2:lower
+  in
+  let mode_arg (variance : Variance.t) mode1 mode2 =
+    (match variance with
+     | Covariant -> Mode_arg.sub ~lower:mode1 ~upper:mode2
+     | Contravariant -> Mode_arg.sub ~lower:mode2 ~upper:mode1
+     | Invariant | Bivariant -> Mode_arg.equate mode1 mode2)
+    |> Result.map_error ~f:modes_error
+  in
+  match ty1, ty2 with
+  | _ when phys_equal ty1 ty2 -> Ok ()
+  | TCon (name1, args1), TCon (name2, args2)
+    when String.equal name1 name2 && List.length args1 = List.length args2 ->
+    let variances =
+      match Fresh.variances state.fresh name1 with
+      | Some variances when List.length variances = List.length args1 ->
+        variances
+      | Some _ | None -> List.map args1 ~f:(fun _ -> Variance.Invariant)
+    in
+    iter2_result
+      (List.zip_exn args1 args2)
+      variances
+      ~f:(fun (arg1, arg2) (variance : Variance.t) ->
+        match arg1, arg2, variance with
+        | ATy lower, ATy upper, Covariant -> co ~lower ~upper
+        | ATy upper, ATy lower, Contravariant -> contra ~lower ~upper
+        | ATy lower, ATy upper, (Invariant | Bivariant) ->
+          unify_ty ~lower ~upper
+        | AMode mode1, AMode mode2, variance -> mode_arg variance mode1 mode2
+        | ARow row1, ARow row2, _ -> unify_row' state ~row1 ~row2
+        | (ATy _ | ARow _ | AMode _), _, _ ->
+          Error
+            (Type_mismatch (expected, actual, Mismatch_arg_kind (arg1, arg2))))
+  | TArrow (arg1, res1, modes1), TArrow (arg2, res2, modes2) ->
+    let%bind.Result () = contra ~lower:arg2 ~upper:arg1 in
+    let%bind.Result () = co ~lower:res1 ~upper:res2 in
+    Arrow_modes.sub ~lower:modes1 ~upper:modes2
+    |> Result.map_error ~f:modes_error
+  | TTuple tys1, TTuple tys2 when List.length tys1 = List.length tys2 ->
+    iter2_all tys1 tys2 ~f:(fun lower upper -> co ~lower ~upper)
+  | ( TCode { inner = inner1; context = row1 }
+    , TCode { inner = inner2; context = row2 } ) ->
+    let%bind.Result () = co ~lower:inner1 ~upper:inner2 in
+    if flip
+    then unify_row' state ~row1 ~row2
+    else unify_row' state ~row1:row2 ~row2:row1
+  | _ -> unify_ty ~lower:ty1 ~upper:ty2
+;;
+
+let sub_ty fresh ~lower ~upper =
+  sub_ty' (State.create fresh) (Sub_state.create ()) ~flip:false ~lower ~upper
+;;
+
 let lower_ty ~rank ty =
   match Type.iter_ty (adjuster ~rank ~seen:ignore ~in_bounds_of:[]) ty with
   | Ok () -> ()

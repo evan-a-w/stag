@@ -100,6 +100,10 @@ let expand_exn toplevels ~loc =
         node (Expr.App (node (Expr.Var (resolved "Ptr.make", Annot.none)), e))
       ;;
 
+      let box e =
+        node (Expr.App (node (Expr.Var (resolved "Box.make", Annot.none)), e))
+      ;;
+
       let record fields =
         node
           (Expr.Poly_record

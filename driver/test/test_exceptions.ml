@@ -47,8 +47,8 @@ let e : exn = E
 let f = F 1
 let g = G (1, "x")
 let h = H (1, "x")
-let l = L (Cons (Ptr.make ( (None, Nil))))
-let es = Cons (Ptr.make ( (E, Cons (Ptr.make ( (M.E false, Cons (Ptr.make ( (M.e, Nil)))))))))
+let l = L (Cons (Box.make ( (None, Nil))))
+let es = Cons (Box.make ( (E, Cons (Box.make ( (M.E false, Cons (Box.make ( (M.e, Nil)))))))))
 |};
   [%expect
     {|
@@ -307,14 +307,14 @@ let main = raise (M.E (1, "x"))
     {|
 module M = struct exception F of list[int] * option[exn] end
 exception G
-let main = raise (M.F (Cons (Ptr.make ( (1, Nil))), Some G))
+let main = raise (M.F (Cons (Box.make ( (1, Nil))), Some G))
 |};
   [%expect
     {|
     File "a.stag", line 4, characters 11-60:
-    4 | let main = raise (M.F (Cons (Ptr.make ( (1, Nil))), Some G))
+    4 | let main = raise (M.F (Cons (Box.make ( (1, Nil))), Some G))
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: Uncaught exception A.M.F (Cons (Ptr.make (1, Nil)), Some A.G)
+    Error: Uncaught exception A.M.F (Cons (Box.make (1, Nil)), Some A.G)
     |}]
 ;;
 
@@ -613,8 +613,8 @@ let%expect_test "generated exception declarations" =
     ~signature:true
     {|
 module M = .~(
-  Cons (Ptr.make ( (Stag.Toplevel.Exception ("E", Cons (Ptr.make ( (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)))),
-  Cons (Ptr.make ( (Stag.Toplevel.Exception ("F", Nil), Nil)))))))
+  Cons (Box.make ( (Stag.Toplevel.Exception ("E", Cons (Box.make ( (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)))),
+  Cons (Box.make ( (Stag.Toplevel.Exception ("F", Nil), Nil)))))))
 let main =
   match raise (M.E 3) with
   | () -> ()

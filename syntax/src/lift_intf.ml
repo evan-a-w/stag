@@ -14,6 +14,9 @@ module type Builder = sig
   val tuple : t list -> t
   val ptr : t -> t
 
+  (** What [Box.make] makes: a list's cells. *)
+  val box : t -> t
+
   (** A polymorphic record. *)
   val record : (string * t) list -> t
 

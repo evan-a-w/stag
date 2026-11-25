@@ -180,6 +180,21 @@ let of_ptr ty =
   | _ -> None
 ;;
 
+let box_name = Prelude_path.canonical "box"
+
+let is_pointer_name name =
+  String.equal name ptr_name || String.equal name box_name
+;;
+
+let box contents = TCon (box_name, [ ATy contents ])
+
+let of_box ty =
+  match canonical_ty ty with
+  | TCon (name, [ ATy contents ]) when String.equal name box_name ->
+    Some contents
+  | _ -> None
+;;
+
 let rec tail_var row =
   match row with
   | REmpty -> None

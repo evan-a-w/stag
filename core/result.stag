@@ -57,7 +57,7 @@ let all rs =
   let loop rs acc =
     match rs with
     | [] -> Ok (List.rev acc)
-    | Cons * (Ok x, rest) -> loop rest (Cons (Ptr.make ( (x, acc))))
+    | Cons * (Ok x, rest) -> loop rest (Cons (Box.make ( (x, acc))))
     | Cons * (Error e, _) -> Error e
   in
   loop rs []

@@ -175,6 +175,17 @@ val ptr : ?held:Mode_arg.t -> ty -> ty
 (** Of a pointer type, with what it points to. *)
 val of_ptr : ty -> (ty * Mode_arg.t) option
 
+val box_name : string
+
+(** [ptr] or [box]: a pointer, through which types may be recursive. *)
+val is_pointer_name : string -> bool
+
+(** [box[contents]]: an immutable block holding [contents], read as a part of
+    the box (at most the box's mode). *)
+val box : ty -> ty
+
+val of_box : ty -> ty option
+
 (** Copies of types as they are now, unaffected by later unification, eg. for an
     error to show them as they were when it arose. Variables keep their ids, and
     only their state is copied, not their bounds. *)

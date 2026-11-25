@@ -20,10 +20,20 @@ type t =
       ; because : Reason.t
       }
       -> t (** Two different constants that [because] requires equal. *)
+  | Exceeds :
+      { axis : 'a Axis.t
+      ; lower : 'a
+      ; upper : 'a
+      ; because : Reason.t
+      }
+      -> t (** A constant above another that [because] requires below it. *)
 [@@deriving sexp_of]
 
 (** [Unequal] unless the points are equal. *)
 val equal_on : 'a Axis.t -> 'a -> 'a -> Reason.t -> (unit, t) Result.t
+
+(** [Exceeds] unless [lower <= upper]. *)
+val le_on : 'a Axis.t -> lower:'a -> upper:'a -> Reason.t -> (unit, t) Result.t
 
 (** Raises on [Error]: for constraints that cannot fail. *)
 val ok_exn : (unit, t) Result.t -> unit

@@ -159,7 +159,7 @@ let boom = f 1                      (* Error: Match failure *)
 
 `ptr[t]` is the one pointer type, `Ptr.make e` allocates, `p.*` (or `*p`)
 reads, `p.* <- v` stores. Recursive types must go through a pointer (or a
-function): the prelude's `list` is `Nil | Cons of ptr['a * list['a]]`.
+function): the prelude's `list` is `Nil | Cons of box['a * list['a]]`.
 
 ```stag
 let p = Ptr.make 1                  (* val p : ptr[int] *)

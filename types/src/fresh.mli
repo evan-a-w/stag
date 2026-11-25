@@ -10,6 +10,8 @@ val create : unit -> t
 val id : t -> Type.id
 val set_value_parameters : t -> Value_layout.parameters -> unit
 val value_parameters : t -> Value_layout.parameters
+val set_variances : t -> Variance.of_con -> unit
+val variances : t -> Variance.of_con
 
 (** The source of mode variables' ids. *)
 val modes : t -> Mode.Id_source.t

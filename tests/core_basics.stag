@@ -161,7 +161,7 @@ let%expect_test "Char" =
     in
     print_sexp
       (Core.Sexp.List (Cons
-         (Ptr.make
+         (Box.make
             (Core.Sexp.sexp_of_char c, Core.List.filter_map class_ classes))))
   in
   Core.List.iter
