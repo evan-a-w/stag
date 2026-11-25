@@ -40,7 +40,7 @@ let bad u = (ext "s" @ gc)
 let bad = (Int.to_string 1 : string @ const)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:11-26), but must be at most const, because it is annotated const (at t.stag:2:38-43) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:2:11-26), but must be at most const, because it is annotated const (at t.stag:2:38-43) |}];
   show {|
 let bad = (1 : string)
 |};

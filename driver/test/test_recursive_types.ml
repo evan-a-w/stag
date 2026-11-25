@@ -160,7 +160,7 @@ let bad = eval (`Add (Ptr.make (`Num 1, `Num 2)))
                   (RExtend Num Present (TCon int ()) (RVar (Unbound 87 1))))
                  (TVariant
                   (RExtend Num Present (TCon int ()) (RVar (Unbound 89 1)))))))))
-            (AMode (Var 151))))))
+            (AMode (Var 149))))))
         (RVar (Unbound 95 1)))
        (Missing_label Add)))
      @ after_eval.stag:2:15-49)

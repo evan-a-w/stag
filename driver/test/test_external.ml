@@ -222,7 +222,7 @@ let f : int -> int @ portable = plain
   [%expect
     {|
     This expression has type int -> int but an expression was expected of type int -> int
-    Their modes differ, in ways types don't print: This is nonportable, because a function type fixes it, then a function is used at a type with other modes, but must be at most portable, because it is annotated portable (at t.stag:3:21-29)
+    Their modes differ, in ways types don't print: This is nonportable, because a function type fixes it, as a function is used at a type with other modes, but must be at most portable, because it is annotated portable (at t.stag:3:21-29)
     |}];
   modes {|
 external results : int @ local -> int @ external = "labs"

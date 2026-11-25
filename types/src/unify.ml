@@ -952,7 +952,8 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
     (match variance with
      | Covariant -> Mode_arg.sub ~lower:mode1 ~upper:mode2
      | Contravariant -> Mode_arg.sub ~lower:mode2 ~upper:mode1
-     | Invariant | Bivariant -> Mode_arg.equate mode1 mode2)
+     | Invariant | Bivariant ->
+       if flip then Mode_arg.equate mode1 mode2 else Mode_arg.equate mode2 mode1)
     |> Result.map_error ~f:modes_error
   in
   (* [var], not bound yet, takes [ty]'s structure with modes and variables of

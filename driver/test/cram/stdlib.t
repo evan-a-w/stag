@@ -102,8 +102,8 @@ Errors are located in their files.
   16 |     | Cons * (_, rest) -> loop (Int.succc acc) rest
                                        ^^^^^^^^^
   Error: Unbound value Int.succc
-  File "prelude/prelude.stag", line 396, characters 11-25:
-  396 | let oops = Prim.Nope.nope
+  File "prelude/prelude.stag", line 397, characters 11-25:
+  397 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -121,8 +121,8 @@ Prims are only the prelude's.
   16 |     | Cons * (_, rest) -> loop (Int.succc acc) rest
                                        ^^^^^^^^^
   Error: Unbound value Int.succc
-  File "stag/prelude/prelude.stag", line 396, characters 11-25:
-  396 | let oops = Prim.Nope.nope
+  File "stag/prelude/prelude.stag", line 397, characters 11-25:
+  397 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]

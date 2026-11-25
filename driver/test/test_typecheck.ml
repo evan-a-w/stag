@@ -619,7 +619,7 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
          (Match (scrutinee (Lit (Int 1) : int))
           (cases
            (((Lit (Int 2) : int)
-             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+             (App (Var (Bound (Local opaque/14)) : "int -> <'_c>{}")
               (Lit (Int 1) : int) : <'_c>{}))))
           : <'_d>{}))
         : <'_d>{}))

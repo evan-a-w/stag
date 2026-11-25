@@ -213,7 +213,7 @@ let captures (s : string) = let f @ static = fun v -> s in f
 let built u = let s @ static = String.append "a" "b" in s
 |};
   [%expect
-    {| This is gc, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:31-52), then it is bound by an annotated let (at t.stag:2:22-28), but must be at most static, because it is annotated static (at t.stag:2:22-28) |}]
+    {| This is gc, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:2:31-52), then it is bound by an annotated let (at t.stag:2:22-28), but must be at most static, because it is annotated static (at t.stag:2:22-28) |}]
 ;;
 
 let%expect_test "declared function types default to gc" =
@@ -225,7 +225,7 @@ let r = { f = fun s -> s }
 let bad u = r.f (ext "a")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:16-25), then it is passed to a function (at t.stag:5:12-25), but must be at most gc, because a function type fixes it, then a function is used at a type with other modes |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:16-25), then it is passed to a function (at t.stag:5:12-25), but must be at most gc, because a function type fixes it, as a function is used at a type with other modes |}];
   provenance
     {|
 type t = { f : string @ external -> string @ external }
@@ -309,7 +309,7 @@ let s = Int.to_string 1
 let use u = let y @ static = s in y
 |};
   [%expect
-    {| This is gc, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:8-23), then s is used (at t.stag:3:29-30), then it is bound by an annotated let (at t.stag:3:20-26), but must be at most static, because it is annotated static (at t.stag:3:20-26) |}]
+    {| This is gc, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:2:8-23), then s is used (at t.stag:3:29-30), then it is bound by an annotated let (at t.stag:3:20-26), but must be at most static, because it is annotated static (at t.stag:3:20-26) |}]
 ;;
 
 let%expect_test "global_ fields and exclave_ keep provenance" =

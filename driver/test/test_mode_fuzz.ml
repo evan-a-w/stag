@@ -109,7 +109,7 @@ let%expect_test "a mode argument's fixed locality isn't compared" =
   [%expect
     {|
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : 'a @ const static -> ptr['a @@ const static] @ 'm0 -> 'a @ 'm1 with 'm1 <= regional
+    val s : 'a @ const static -> ptr['a @@ const static] @ _ -> 'a @ 'm0 with 'm0 <= regional
     |}]
 ;;
 

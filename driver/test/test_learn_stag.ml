@@ -685,7 +685,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 549, characters 10-34:
     549 | let bad = capped (Int.to_string 3)
                     ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at doc.stag:549:17-34), then it is passed to a function (at doc.stag:549:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:548:37-51), then a function is used at a type with other modes, then the function returns it (at doc.stag:548:63-64), then x is used (at doc.stag:548:63-64), then x is passed to the function (at doc.stag:548:54-64), then a function is used at a type with other modes
+    Error: This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at doc.stag:549:17-34), then it is passed to a function (at doc.stag:549:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:548:37-51), then a function is used at a type with other modes, then the function returns it (at doc.stag:548:63-64), then x is used (at doc.stag:548:63-64), then x is passed to the function (at doc.stag:548:54-64), then a function is used at a type with other modes
     === learn_stag.md:553
     File "doc.stag", line 560, characters 20-25:
     560 | let bad = cell.* <- exact
@@ -741,7 +741,7 @@ let%expect_test "learn_stag.md" =
     631 | let bad = widen p
                           ^
     Error: This expression has type ptr[string] but an expression was expected of type ptr[string @@ external]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes external and gc must be equal, because the types are unified
     === learn_stag.md:647
     module Doc : sig
       val id : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)

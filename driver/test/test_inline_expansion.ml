@@ -1195,7 +1195,7 @@ let%expect_test "a toplevel under [forget] of its name is printed by its path" =
   test
     {|
 let helper = 2
-let e = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+let e = Stag.Expr.Forget (Ptr.make (Cons (Box.make ("helper", Nil)), Stag.Code.erase .< helper >.))
 include%inline .~(value "f" e)
 end%inline
 |};
@@ -1207,7 +1207,7 @@ end%inline
     Error: This inline expansion is out of date
     --- a.stag corrected ---
     let helper = 2
-    let e = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+    let e = Stag.Expr.Forget (Ptr.make (Cons (Box.make ("helper", Nil)), Stag.Code.erase .< helper >.))
     include%inline .~(value "f" e)
       let f = forget helper in A.helper
     end%inline
@@ -1215,7 +1215,7 @@ end%inline
   test
     {|
 let helper = 2
-let e = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+let e = Stag.Expr.Forget (Ptr.make (Cons (Box.make ("helper", Nil)), Stag.Code.erase .< helper >.))
 include%inline .~(value "f" e)
   let f = forget helper in A.helper
 end%inline
@@ -1261,7 +1261,7 @@ let%expect_test "a [forget] in an antiquote of a generated struct quote" =
   test
     {|
 let helper = Stag.Expr.string "s"
-let hidden = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+let hidden = Stag.Expr.Forget (Ptr.make (Cons (Box.make ("helper", Nil)), Stag.Code.erase .< helper >.))
 include%inline .~(.< struct
   let x = .< struct
     let z = .~(.~hidden)
@@ -1280,7 +1280,7 @@ end%inline
     Error: This inline expansion is out of date
     --- a.stag corrected ---
     let helper = Stag.Expr.string "s"
-    let hidden = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+    let hidden = Stag.Expr.Forget (Ptr.make (Cons (Box.make ("helper", Nil)), Stag.Code.erase .< helper >.))
     include%inline .~(.< struct
       let x = .< struct
         let z = .~(.~hidden)
