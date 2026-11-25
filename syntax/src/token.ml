@@ -181,6 +181,7 @@ let ends_atom : t -> bool = function
   | Stack_
   | Exclave_
   | Global_
+  | Forget
   | Let_expect_test
   | Let_bench
   | In

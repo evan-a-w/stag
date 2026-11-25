@@ -671,10 +671,10 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 534, characters 10-34:
     534 | let bad = capped (Int.to_string 3)
                     ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at doc.stag:512:17-34), then it is passed to a function (at doc.stag:512:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:511:37-51), then the function types are unified, then the function returns it (at doc.stag:511:63-64), then x is used (at doc.stag:511:63-64), then x is passed to the function (at doc.stag:511:54-64), then the function types are unified
-    === learn_stag.md:516
-    File "doc.stag", line 523, characters 20-25:
-    523 | let bad = cell.* <- exact
+    Error: This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at doc.stag:534:17-34), then it is passed to a function (at doc.stag:534:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:533:37-51), then the function types are unified, then the function returns it (at doc.stag:533:63-64), then x is used (at doc.stag:533:63-64), then x is passed to the function (at doc.stag:533:54-64), then the function types are unified
+    === learn_stag.md:538
+    File "doc.stag", line 545, characters 20-25:
+    545 | let bad = cell.* <- exact
                               ^^^^^
     Error: This is external, because it is annotated external (at doc.stag:542:12-20), then Doc.exact is used (at doc.stag:545:20-25), then it is stored into a cell, which holds only what fits its modality (at doc.stag:545:20-25), but must be at most gc, because Doc.cell is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default)
     === learn_stag.md:549

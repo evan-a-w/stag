@@ -295,14 +295,14 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
     -- evaluated
     (not_mentioned
      (Code
-      (App (Var (Persistent (Local g/34)) : "unit -> int") (Lit Unit : unit) :
+      (App (Var (Persistent (Local g/25)) : "unit -> int") (Lit Unit : unit) :
        int)
-      ((g/34 <fun>))))
+      ((g/25 <fun>))))
     (only_data
      (Code
-      (App (Var (Persistent (Local g/35)) : "unit -> int") (Lit Unit : unit) :
+      (App (Var (Persistent (Local g/26)) : "unit -> int") (Lit Unit : unit) :
        int)
-      ((g/35 <fun>))))
+      ((g/26 <fun>))))
     (at_runtime 0)
     |}]
 ;;

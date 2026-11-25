@@ -135,6 +135,7 @@ val generalize : t list -> rank:int -> unit
 
 (** Generic and unconstrained: a placeholder each instance copies afresh. *)
 val create_generic : Id_source.t -> t
+
 (** Makes a generic variable one of rank [rank] again, with its constraints, to
     refine a scheme in place before generalizing it anew. Not allowed under
     [atomically]. *)

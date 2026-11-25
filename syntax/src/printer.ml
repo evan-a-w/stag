@@ -217,14 +217,8 @@ let bare_at at e = Level.compare (level e) at >= 0
 
 let rec extends_right e =
   match (unwrap e).txt with
-  | Let _
-  | Seq _
-  | Let_mut _
-  | Match _
-  | Fun _
-  | Stack _
-  | Exclave _
-  | Forget _ -> true
+  | Let _ | Seq _ | Let_mut _ | Match _ | Fun _ | Stack _ | Exclave _ | Forget _
+    -> true
   | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;

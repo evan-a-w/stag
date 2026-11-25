@@ -125,9 +125,9 @@ let forgotten = forget s in .~c
     (captured (String 3))
     (k
      (Code
-      (Fun (args (s/21))
+      (Fun (args (s/20))
        (annots
-        ((s/21 ((ty ((Con (<string> @ t.stag:6:20-26) ()) @ t.stag:6:20-26))))))
+        ((s/20 ((ty ((Con (<string> @ t.stag:6:20-26) ()) @ t.stag:6:20-26))))))
        (body (Var (Persistent (Toplevel s/4)) : string)) : "string -> string")))
     (in_quote (String 3))
     (forgotten (String 3))
