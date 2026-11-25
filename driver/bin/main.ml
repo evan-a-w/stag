@@ -64,12 +64,7 @@ let warn_stale files driver =
 ;;
 
 let check ?output config files =
-  match
-    Pipeline.check
-      ?output
-      config
-      (Pipeline.parse_files files)
-  with
+  match Pipeline.check ?output config (Pipeline.parse_files files) with
   | Error diagnostic ->
     report [] diagnostic;
     exit 1
@@ -129,9 +124,7 @@ let check_with_prelude_sources ~limits ~sources ~program =
     if not (List.is_empty program)
     then (
       let files = read_files program in
-      let driver =
-        check { prelude = Checkout checkout; limits } files
-      in
+      let driver = check { prelude = Checkout checkout; limits } files in
       warn_stale files driver;
       print_string (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
@@ -173,7 +166,8 @@ let check_command =
 let run_command =
   Command.basic
     ~summary:"Typecheck and evaluate the program of the files"
-    ~readme:(fun () -> Pipeline_config.limits_readme ~phases:"compile time and evaluation")
+    ~readme:(fun () ->
+      Pipeline_config.limits_readme ~phases:"compile time and evaluation")
     (let%map_open.Command paths = files_param
      and limits = Pipeline_config.limits_param () in
      fun () ->
@@ -193,7 +187,8 @@ let test_command =
        without writing any file, eg. for a dune rule diffing it with FILE. "
       ^ "Stale inline expansions ([include%inline] and [module%inline]) are \
          corrected likewise. "
-      ^ Pipeline_config.limits_readme ~phases:"compile time, evaluation and each test")
+      ^ Pipeline_config.limits_readme
+          ~phases:"compile time, evaluation and each test")
     (let%map_open.Command paths = files_param
      and limits = Pipeline_config.limits_param ()
      and mode =

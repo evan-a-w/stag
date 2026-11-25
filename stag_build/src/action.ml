@@ -277,7 +277,8 @@ let bench ~limits project options ~filters ~phases =
       Interpreter.set_output (Driver.interpreter driver) ignore;
       match
         let%bind.Result () =
-          Driver.eval ~limits driver |> Result.map_error ~f:Diagnostic.of_runtime_error
+          Driver.eval ~limits driver
+          |> Result.map_error ~f:Diagnostic.of_runtime_error
         in
         Bench_runner.benches ~files:(files target) driver
       with

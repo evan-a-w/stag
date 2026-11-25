@@ -14,7 +14,9 @@ module Outcome = struct
 
   let print_summary ?target ?(promoted = false) t =
     Out_channel.flush stdout;
-    let prefix = Option.value_map target ~default:"" ~f:(fun name -> name ^ ": ") in
+    let prefix =
+      Option.value_map target ~default:"" ~f:(fun name -> name ^ ": ")
+    in
     if t.stale > 0
     then
       eprintf
@@ -59,9 +61,7 @@ let run ~limits ~report ~write ~files driver =
       false
   in
   let results =
-    if evaluated
-    then Expect_test_runner.run ~limits ~files:paths driver
-    else []
+    if evaluated then Expect_test_runner.run ~limits ~files:paths driver else []
   in
   List.iter results ~f:(fun result ->
     List.iter (Diagnostic.of_test_result result) ~f:report);
@@ -86,7 +86,9 @@ let run ~limits ~report ~write ~files driver =
         Option.is_some result.error
         || not (List.is_empty result.different_outputs))
   ; stale = List.length expansions
-  ; corrected = List.count written ~f:(fun written -> Result.equal Bool.equal Unit.equal written (Ok true))
+  ; corrected =
+      List.count written ~f:(fun written ->
+        Result.equal Bool.equal Unit.equal written (Ok true))
   ; write_failed = List.exists written ~f:Result.is_error
   }
 ;;

@@ -221,7 +221,10 @@ let record_reference t (kind : Name_reference.Kind.t) name ~loc =
     | Constructor | Field -> t.declared_members
   in
   Option.iter (Hashtbl.find declared name) ~f:(fun declaration ->
-    Hashtbl.set t.references ~key:loc ~data:{ Name_reference.kind; name; declaration })
+    Hashtbl.set
+      t.references
+      ~key:loc
+      ~data:{ Name_reference.kind; name; declaration })
 ;;
 
 let references t =

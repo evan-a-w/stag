@@ -610,9 +610,9 @@ let%expect_test "semantic tokens of a source of the prelude" =
       |}])
 ;;
 
-let%expect_test "stag, stag-build and the server agree on the prelude a program \
-                 in a checkout sees, and a project's stanzas are inputs of its \
-                 checks"
+let%expect_test "stag, stag-build and the server agree on the prelude a \
+                 program in a checkout sees, and a project's stanzas are \
+                 inputs of its checks"
   =
   let main = "let x = Int.add only_in_checkout Lib.V.v\n" in
   Client.with_server
@@ -636,7 +636,8 @@ let%expect_test "stag, stag-build and the server agree on the prelude a program 
           print_s
             [%sexp
               (file : string)
-              , (Pipeline_config.Prelude_choice.of_paths [ Client.path client file ]
+              , (Pipeline_config.Prelude_choice.of_paths
+                   [ Client.path client file ]
                  |> function
                  | Pipeline_config.Prelude_choice.Embedded -> "embedded"
                  | Checkout _ -> "checkout"
@@ -666,17 +667,18 @@ let%expect_test "stag, stag-build and the server agree on the prelude a program 
       build ();
       [%expect
         {|
-        app/main.stag:1:33-1:38: Error: Unbound module Lib
-        built: false
+        File "app/main.stag", line 1, characters 33-36:
+        Error: Unbound module Lib
         |}];
       Client.did_open client "stag/proj/app/main.stag";
       Client.did_open client "elsewhere/b.stag";
       [%expect
         {|
         diagnostics stag/proj/app/main.stag (version 1):
-          0:32-0:37 error: Unbound module Lib
+          0:33-0:36 error: Unbound module Lib
         diagnostics elsewhere/b.stag (version 1):
           0:16-0:32 error: Unbound value only_in_checkout
+          0:33-0:36 error: Unbound module Lib
         |}];
       let checked =
         Stag_lsp.Checker.check
@@ -686,9 +688,28 @@ let%expect_test "stag, stag-build and the server agree on the prelude a program 
       in
       List.iter checked.depends_on ~f:(fun path ->
         print_endline (Client.relativize client path));
-      [%expect {| |}];
+      [%expect
+        {|
+        stag/proj/stag-project
+        stag/proj/app/stag
+        stag/proj/lib/stag
+        stag/prelude/prelude.stag
+        stag/core/bool.stag
+        stag/core/char.stag
+        stag/core/int.stag
+        stag/core/list.stag
+        stag/core/option.stag
+        stag/core/result.stag
+        stag/core/sexp.stag
+        stag/core/sexp_derive.stag
+        stag/core/sexp_parser.stag
+        stag/core/sexp_printer.stag
+        stag/core/string.stag
+        |}];
       let stanza = "(executable (name app) (libraries lib))" in
-      Out_channel.write_all (Client.path client "stag/proj/app/stag") ~data:stanza;
+      Out_channel.write_all
+        (Client.path client "stag/proj/app/stag")
+        ~data:stanza;
       build ();
-      [%expect {| |}])
+      [%expect {| checks |}])
 ;;

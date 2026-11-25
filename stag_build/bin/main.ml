@@ -93,7 +93,8 @@ let bench_command ~fake_clock =
      and phases =
        flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
      in
-     fun () -> exit_unless (Action.bench ~limits (load ()) options ~filters ~phases))
+     fun () ->
+       exit_unless (Action.bench ~limits (load ()) options ~filters ~phases))
 ;;
 
 let fmt_command =

@@ -31,8 +31,7 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   |> Map.map ~f:List.rev
 ;;
 
-(* [program] is the program's modules, if they parsed, and what checked of
-   them. *)
+(* [program] is the program's modules, if they parsed, and what checked of them. *)
 let of_checked
   ?prelude
   ?(of_prelude = false)
@@ -45,12 +44,7 @@ let of_checked
   { Result.diagnostics = diagnostics_by_file ~path ~absolute ~files diagnostics
   ; index =
       Option.map program ~f:(fun (groups, (checked : Typecheck.Checked.t)) ->
-        Index.create
-          ?prelude
-          ~of_prelude
-          ~groups
-          ~checked
-          ()
+        Index.create ?prelude ~of_prelude ~groups ~checked ()
         |> Index.relocate ~f:absolute)
   ; depends_on = []
   }
@@ -136,8 +130,8 @@ let check_program
       let result =
         match Stdlib_checkout.prelude ~contents checkout with
         | Error diagnostic ->
-          (* The prelude's error is reported in its source, and the program
-             left unchecked, which is said in it. *)
+          (* The prelude's error is reported in its source, and the program left
+             unchecked, which is said in it. *)
           of_checked
             ~path
             ~absolute
@@ -203,7 +197,8 @@ let standalone ?stdlib ~limits ~contents ~depends_on path =
     ~absolute:Fn.id
     ~files:[ path ]
     ~depends_on
-    (Pipeline.parse_files [ { Source_file.path; contents = read ~contents path } ])
+    (Pipeline.parse_files
+       [ { Source_file.path; contents = read ~contents path } ])
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =

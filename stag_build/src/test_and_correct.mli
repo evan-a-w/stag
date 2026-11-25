@@ -18,8 +18,8 @@ module Outcome : sig
     }
   [@@deriving sexp_of]
 
-  (** Prints, to stderr, how many tests failed and expansions are stale, if
-      any, prefixed by [target], saying they are promoted if [promoted]. *)
+  (** Prints, to stderr, how many tests failed and expansions are stale, if any,
+      prefixed by [target], saying they are promoted if [promoted]. *)
   val print_summary : ?target:string -> ?promoted:bool -> t -> unit
 
   (** It evaluated, its errors are none, its corrections were written and, if
@@ -35,7 +35,10 @@ end
 val run
   :  limits:Limits.t
   -> report:(Diagnostic.t -> unit)
-  -> write:(Source_file.t -> corrected:string option -> (unit, Diagnostic.t) Result.t)
+  -> write:
+       (Source_file.t
+        -> corrected:string option
+        -> (unit, Diagnostic.t) Result.t)
   -> files:Source_file.t list
   -> Driver.t
   -> Outcome.t

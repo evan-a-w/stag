@@ -55,7 +55,8 @@ let paths project target =
   List.concat_map
     (Project.closure project target @ [ target ])
     ~f:(fun (target : Project.Target.t) ->
-      List.map target.files ~f:(fun source -> Project.root project ^/ source.path))
+      List.map target.files ~f:(fun source ->
+        Project.root project ^/ source.path))
 ;;
 
 let config ~limits project target =

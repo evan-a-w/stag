@@ -43,8 +43,8 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   -let%expect_test "x" = print_int (Int.add M.x Gen.Gen.base)
   +let%expect_test "x" = print_int (Int.add M.x Gen.Gen.base);
   +[%expect {| 11 |}]
-  t: 1 of 1 test(s) failed
   t: 1 inline expansion(s) out of date
+  t: 1 of 1 test(s) failed
   [1]
   $ find _stag -name '*.corrected' | sort
   _stag/gen/gen.stag.corrected
@@ -99,8 +99,8 @@ A changed generator makes the expansions using it stale.
    let%expect_test "x" = print_int (Int.add M.x Gen.Gen.base);
   -[%expect {| 11 |}]
   +[%expect {| 22 |}]
-  t: 1 of 1 test(s) failed
   t: 1 inline expansion(s) out of date
+  t: 1 of 1 test(s) failed
   [1]
   $ stag-build promote
   Promoting _stag/gen/gen.stag.corrected to gen/gen.stag.
