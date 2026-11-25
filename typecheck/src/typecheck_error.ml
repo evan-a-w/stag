@@ -365,6 +365,7 @@ let unification_message (error : Unification_error.t) ~show_type =
          record or variant, whose entries can't be [mut]"
         (row assigned)
         name
+    | Bound_var error -> mode_message error
   in
   message ^ Type.Printer.where printer
 ;;

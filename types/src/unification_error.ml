@@ -25,6 +25,7 @@ type t =
   | Row_mismatch of Type.row * Type.row * Row_mismatch_reason.t
   | Occurs_check_failed of Type.arg
   | Assigned_in_record of string * Type.row
+  | Bound_var of Mode.Error.t
 [@@deriving sexp_of]
 
 let snapshot t =
@@ -40,4 +41,5 @@ let snapshot t =
     Occurs_check_failed (Type.Snapshot.arg snapshot arg)
   | Assigned_in_record (name, row) ->
     Assigned_in_record (name, Type.Snapshot.row snapshot row)
+  | Bound_var _ -> t
 ;;

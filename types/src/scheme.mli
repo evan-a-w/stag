@@ -37,3 +37,8 @@ val reopen
   -> rank:Type.rank
   -> Type.ty list
   -> (unit, Unification_error.t) Result.t
+
+(** Runs the [Watcher.generalize] of the variables [generalize] would
+    generalize, with the same arguments: before it, and before anything that
+    depends on the constraints they may add. *)
+val generalize_watchers : rank:Type.rank -> Type.ty list -> Mode.Error.t list

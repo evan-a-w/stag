@@ -15,7 +15,7 @@ type ('a, 'bound) var =
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
   ; mutable in_record : bool
-  ; mutable join : bool
+  ; mutable watchers : 'a Watcher.t list
   }
 
 and ty =
@@ -95,7 +95,7 @@ module Var = struct
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     ; mutable in_record : bool
-    ; mutable join : bool
+    ; mutable watchers : 'a Watcher.t list
     }
 
   let create id state =
@@ -105,7 +105,7 @@ module Var = struct
     ; in_bounds_of = []
     ; kept = []
     ; in_record = false
-    ; join = false
+    ; watchers = []
     }
   ;;
 

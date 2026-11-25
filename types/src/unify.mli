@@ -78,6 +78,11 @@ val present_entry
   -> rank:Type.rank
   -> (Type.ty, Unification_error.t) Result.t
 
+(** Like [Fresh.var], for a type that values are used at by variance (a scheme's
+    instance, a match's result): [sub_ty] relates what is used at it by variance
+    even while either is unknown, so it becomes their join. *)
+val join_var : Fresh.t -> rank:Type.rank -> (Type.ty, Nothing.t) Type.Var.t
+
 (** [lower <= upper]: what has type [lower] may be used where [upper] is
     expected. Their structures are unified as by [unify_ty], but the modes in
     them are related by variance: a function's argument contravariantly, its

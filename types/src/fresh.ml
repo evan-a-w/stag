@@ -29,12 +29,6 @@ let id t =
 
 let var t ~rank = Type.Var.create (id t) (Unbound rank)
 
-let join_var t ~rank =
-  let var = var t ~rank in
-  var.join <- true;
-  var
-;;
-
 let mark_in_record row =
   Option.iter (Type.tail_var row) ~f:(fun (var : _ Type.Var.t) ->
     var.in_record <- true)

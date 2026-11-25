@@ -301,6 +301,73 @@ let poison ty =
     ty
 ;;
 
+(* [lower <= upper] between type variables not bound yet ([sub_ty]): the two are
+   to have the same structure, with their modes related by variance, once either
+   is bound. Kept on both by a watcher, which then relates them as [sub_ty]
+   would have, or makes them equal if neither is bound when one is generalized. *)
+module Sub_edge = struct
+  type t =
+    { lower : Type.ty
+    ; upper : Type.ty
+    ; mutable settled : bool
+    }
+
+  let key : t list ref Type_equal.Id.t =
+    Type_equal.Id.create ~name:"sub_edges" sexp_of_opaque
+  ;;
+
+  let is_join (var : _ Type.Var.t) =
+    Option.is_some (Watcher.find var.watchers key)
+  ;;
+
+  let unsettled (var : _ Type.Var.t) =
+    match Watcher.find var.watchers key with
+    | None -> []
+    | Some edges -> List.filter !edges ~f:(fun edge -> not edge.settled)
+  ;;
+
+  let unbound_var ty =
+    match Type.canonical_ty ty with
+    | TVar ({ state = Unbound _; _ } as var) -> Some var
+    | _ -> None
+  ;;
+
+  (* The variables other than [var] whose structure is to be [var]'s, through
+     edges not yet settled. *)
+  let related (var : (Type.ty, Nothing.t) Type.Var.t) =
+    let seen = Int.Hash_set.create () in
+    Hash_set.add seen var.id;
+    let rec go acc = function
+      | [] -> acc
+      | (var : (Type.ty, Nothing.t) Type.Var.t) :: rest ->
+        let next =
+          List.concat_map (unsettled var) ~f:(fun edge ->
+            List.filter_map [ edge.lower; edge.upper ] ~f:(fun ty ->
+              match unbound_var ty with
+              | Some other
+                when Hash_set.strict_add seen other.id
+                     |> Hash_set.Ok_or_duplicate.is_ok -> Some other
+              | Some _ | None -> None))
+        in
+        go (next @ acc) (next @ rest)
+    in
+    go [] [ var ]
+  ;;
+end
+
+let occurs (var : _ Type.Var.t) ty =
+  Type.iter_ty
+    { ty =
+        (fun ~guarded:_ (var' : _ Type.Var.t) ->
+          if var'.id = var.id then Error () else Ok ())
+    ; row = (fun ~guarded:_ _ -> Ok ())
+    ; presence = (fun ~guarded:_ _ -> Ok ())
+    ; mode = (fun _ -> Ok ())
+    }
+    ty
+  |> Result.is_error
+;;
+
 let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
   match ty1, ty2 with
   | ( Type.TVar { id = id1; state = Link _; _ }
@@ -361,7 +428,8 @@ and unify_structure state ~ty1 ~ty2 =
     else unify_row' state ~row1 ~row2
   | TVar var1, TVar var2 when phys_equal var1 var2 -> Ok ()
   | TVar var, ty | ty, TVar var ->
-    let%map.Result () =
+    let%bind.Result () = equate_related state var ty in
+    let%bind.Result () =
       adjust_binding
         state.State.fresh
         (fun f -> Type.iter_ty f ty)
@@ -371,8 +439,21 @@ and unify_structure state ~ty1 ~ty2 =
         ~occurs:(ATy (TVar var))
         (ATy ty)
     in
-    var.state <- Link ty
+    var.state <- Link ty;
+    Watcher.bind var.watchers ty
+    |> Result.map_error ~f:(fun error -> Unification_error.Bound_var error)
   | _ -> Error (Type_mismatch (ty1, ty2, Structural_mismatch))
+
+(* What is to have [var]'s structure ([Sub_edge.related]) and is in [ty] is made
+   equal to [var], as copying [ty]'s structure to it would not end: [var] is
+   then in [ty], which the occurs check sees. *)
+and equate_related state var ty =
+  match Type.canonical_ty ty with
+  | TVar _ -> Ok ()
+  | _ ->
+    List.filter (Sub_edge.related var) ~f:(fun other -> occurs other ty)
+    |> List.fold_result ~init:() ~f:(fun () other ->
+      unify_ty' state ~ty1:(TVar other) ~ty2:(TVar var))
 
 and bind_rvar state (var : _ Type.Var.t) row =
   let%bind.Result () =
@@ -386,6 +467,10 @@ and bind_rvar state (var : _ Type.Var.t) row =
       (ARow row)
   in
   var.state <- Link row;
+  let%bind.Result () =
+    Watcher.bind var.watchers row
+    |> Result.map_error ~f:(fun error -> Unification_error.Bound_var error)
+  in
   let%bind.Result () =
     if var.in_record then in_record' state row ~whole:row else Ok ()
   in
@@ -679,16 +764,17 @@ let modes_error ty1 ty2 error =
   Unification_error.Type_mismatch (ty1, ty2, Modes error)
 ;;
 
-(* [ty]'s structure with a new variable of [rank] at each mode that [sub_ty]
-   relates by variance, rather than equates: a type every value of [ty]'s
-   structure may be used at, if its modes allow. [None] if [ty] has no such
-   modes. Cycles are kept as they are, and what is shared through links is
-   copied once. *)
+(* [ty]'s structure with a new variable of [rank] at each mode and type variable
+   that [sub_ty] relates by variance, rather than equates: a type every value of
+   [ty]'s structure may be used at, if its modes allow. [None] if [ty] has no
+   such places. Cycles are kept as they are, and what is shared (through links,
+   or a variable) is copied once. *)
 let fresh_modes_copy fresh ~rank ty =
   let ids = Fresh.modes fresh in
   let var () = Mode.Var.create ids ~rank in
   let in_progress = Int.Hash_set.create () in
   let copies = Int.Table.create () in
+  let variables = Int.Table.create () in
   let rec copy (ty : Type.ty) : Type.ty option =
     match ty with
     | TVar { id; state = Link target; _ } ->
@@ -707,7 +793,11 @@ let fresh_modes_copy fresh ~rank ty =
          Hash_set.remove in_progress id;
          Hashtbl.set copies ~key:id ~data:copied;
          copied)
-    | TVar _ | TRecord _ | TVariant _ -> None
+    | TVar { id; state = Unbound _; _ } ->
+      Some
+        (Hashtbl.find_or_add variables id ~default:(fun () ->
+           Type.TVar (Fresh.var fresh ~rank)))
+    | TVar { state = Generic; _ } | TRecord _ | TVariant _ -> None
     | TCon (name, args) ->
       let variances =
         match Fresh.variances fresh name with
@@ -753,27 +843,36 @@ let fresh_modes_copy fresh ~rank ty =
   if Type.is_error ty then None else copy ty
 ;;
 
-let rec sub_ty' state sub ~flip ~lower ~upper
+(* Relates by variance even while a side is unknown if [join], or either side is
+   a join variable ([join_var]): then within it too. *)
+let rec sub_ty' state sub ~join ~flip ~lower ~upper
   : (unit, Unification_error.t) Result.t
   =
+  let is_join : Type.ty -> bool = function
+    | TVar var -> Sub_edge.is_join var
+    | _ -> false
+  in
+  let join = join || is_join lower || is_join upper in
   match lower, upper with
   | ( Type.TVar { id = id1; state = Link _; _ }
     , Type.TVar { id = id2; state = Link _; _ } )
     when Sub_state.assume sub id1 id2 -> Ok ()
   | Type.TVar { state = Link _; _ }, Type.TVar { state = Link _; _ } ->
-    sub_structure state sub ~flip ~lower ~upper
+    sub_structure state sub ~join ~flip ~lower ~upper
   | _ when Sub_state.seen sub lower upper -> Ok ()
-  | _ -> sub_structure state sub ~flip ~lower ~upper
+  | _ -> sub_structure state sub ~join ~flip ~lower ~upper
 
 (* Errors name the expected type first, which is [upper] unless [flip]: in a
    contravariant position, the expected type's part is [lower]. *)
-and sub_structure state sub ~flip ~lower ~upper =
+and sub_structure state sub ~join ~flip ~lower ~upper =
   let ty1 = Type.canonical_ty lower in
   let ty2 = Type.canonical_ty upper in
   let expected, actual = if flip then ty1, ty2 else ty2, ty1 in
   let modes_error error = modes_error expected actual error in
-  let co ~lower ~upper = sub_ty' state sub ~flip ~lower ~upper in
-  let contra ~lower ~upper = sub_ty' state sub ~flip:(not flip) ~lower ~upper in
+  let co ~lower ~upper = sub_ty' state sub ~join ~flip ~lower ~upper in
+  let contra ~lower ~upper =
+    sub_ty' state sub ~join ~flip:(not flip) ~lower ~upper
+  in
   (* Exact unification, naming the expected type first. *)
   let unify_ty ~lower ~upper =
     if flip
@@ -787,30 +886,32 @@ and sub_structure state sub ~flip ~lower ~upper =
      | Invariant | Bivariant -> Mode_arg.equate mode1 mode2)
     |> Result.map_error ~f:modes_error
   in
-  (* A join variable (see [Fresh.join_var]) is made the join of what is used at
-     it, not equal to the first: [ty] at a new copy of its modes, which [var]
-     becomes. *)
-  let join_at ~(var : Type.ty) ~rank ty ~sub =
-    match fresh_modes_copy state.fresh ~rank ty with
+  (* [var], not bound yet, takes [ty]'s structure with modes and variables of
+     its own, which [ty]'s are related to by variance: [ty]'s structure equal,
+     unless it has nothing to relate, or has [var]'s structure in it. *)
+  let bind_copy (var : (Type.ty, Nothing.t) Type.Var.t) ty =
+    let has_var =
+      List.exists (var :: Sub_edge.related var) ~f:(fun var -> occurs var ty)
+    in
+    match
+      if has_var
+      then None
+      else fresh_modes_copy state.fresh ~rank:(Type.Var.rank_exn var) ty
+    with
     | None -> unify_ty ~lower:ty1 ~upper:ty2
     | Some copy ->
-      let%bind.Result () = unify_ty' state ~ty1:var ~ty2:copy in
-      sub copy
+      let%bind.Result () = unify_ty' state ~ty1:(TVar var) ~ty2:copy in
+      co ~lower:ty1 ~upper:ty2
   in
   match ty1, ty2 with
   | _ when phys_equal ty1 ty2 -> Ok ()
-  (* A variable used at a join variable, or the reverse, is made the join
-     variable, which stays one: what is used at it later is joined, whichever
-     came first. *)
-  | TVar { state = Unbound _; join = true; _ }, TVar { join = false; _ } ->
-    unify_ty' state ~ty1:ty2 ~ty2:ty1
-  | TVar { join = false; _ }, TVar { state = Unbound _; join = true; _ } ->
-    unify_ty' state ~ty1 ~ty2
+  | TVar var1, TVar var2 when phys_equal var1 var2 -> Ok ()
+  | ( TVar ({ state = Unbound _; _ } as var1)
+    , TVar ({ state = Unbound _; _ } as var2) )
+    when join -> Ok (add_edge state.fresh ~lower:ty1 ~upper:ty2 [ var1; var2 ])
   | TVar _, TVar _ -> unify_ty ~lower:ty1 ~upper:ty2
-  | _, TVar { state = Unbound rank; join = true; _ } ->
-    join_at ~var:ty2 ~rank ty1 ~sub:(fun copy -> co ~lower:ty1 ~upper:copy)
-  | TVar { state = Unbound rank; join = true; _ }, _ ->
-    join_at ~var:ty1 ~rank ty2 ~sub:(fun copy -> co ~lower:copy ~upper:ty2)
+  | TVar ({ state = Unbound _; _ } as var), _ when join -> bind_copy var ty2
+  | _, TVar ({ state = Unbound _; _ } as var) when join -> bind_copy var ty1
   | TCon (name1, args1), TCon (name2, args2)
     when String.equal name1 name2 && List.length args1 = List.length args2 ->
     let variances =
@@ -847,10 +948,75 @@ and sub_structure state sub ~flip ~lower ~upper =
     then unify_row' state ~row1 ~row2
     else unify_row' state ~row1:row2 ~row2:row1
   | _ -> unify_ty ~lower:ty1 ~upper:ty2
+
+(* Kept on [vars], the two sides: settled as [sub_ty] once either is bound. *)
+and add_edge fresh ~lower ~upper vars =
+  let edge = { Sub_edge.lower; upper; settled = false } in
+  List.iter vars ~f:(fun var ->
+    let edges = join_edges fresh var in
+    edges := edge :: List.filter !edges ~f:(fun edge -> not edge.settled))
+
+(* [var]'s edges, given the watcher keeping them if it has none yet, which makes
+   it a join variable. Once [var] is generalized while still unbound, all that
+   is to have its structure is made equal to it: as no use has told them apart,
+   its scheme has one type variable for them, as [unify_ty] would have made it. *)
+and join_edges fresh (var : (Type.ty, Nothing.t) Type.Var.t) =
+  match Watcher.find var.watchers Sub_edge.key with
+  | Some edges -> edges
+  | None ->
+    let edges = ref [] in
+    let only_modes result =
+      Result.map_error result ~f:(fun (error : Unification_error.t) ->
+        match error with
+        | Type_mismatch (_, _, Modes error) | Bound_var error -> error
+        | error ->
+          (* What is related has the same structure, so only modes differ. *)
+          raise_s
+            [%message
+              "Unify: settling a variable's use failed other than by modes"
+                (error : Unification_error.t)])
+    in
+    var.watchers
+    <- Watcher.create
+         Sub_edge.key
+         edges
+         ~bind:(fun edges (_ : Type.ty) ->
+           List.fold_result !edges ~init:() ~f:(fun () (edge : Sub_edge.t) ->
+             if edge.settled
+             then Ok ()
+             else (
+               edge.settled <- true;
+               sub_ty'
+                 (State.create fresh)
+                 (Sub_state.create ())
+                 ~join:true
+                 ~flip:false
+                 ~lower:edge.lower
+                 ~upper:edge.upper))
+           |> only_modes)
+         ~instantiate:(fun (_ : Sub_edge.t list ref) -> None)
+         ~generalize:(fun (_ : Sub_edge.t list ref) ->
+           List.fold_result (Sub_edge.related var) ~init:() ~f:(fun () other ->
+             unify_ty' (State.create fresh) ~ty1:(TVar other) ~ty2:(TVar var))
+           |> only_modes)
+       :: var.watchers;
+    edges
+;;
+
+let join_var fresh ~rank =
+  let var = Fresh.var fresh ~rank in
+  ignore (join_edges fresh var : Sub_edge.t list ref);
+  var
 ;;
 
 let sub_ty fresh ~lower ~upper =
-  sub_ty' (State.create fresh) (Sub_state.create ()) ~flip:false ~lower ~upper
+  sub_ty'
+    (State.create fresh)
+    (Sub_state.create ())
+    ~join:false
+    ~flip:false
+    ~lower
+    ~upper
 ;;
 
 let lower_ty ~rank ty =

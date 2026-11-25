@@ -674,7 +674,7 @@ module Scope = struct
   ;;
 
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
-  let join_ty ids t = Type.TVar (Fresh.join_var ids ~rank:t.rank)
+  let join_ty ids t = Type.TVar (Unify.join_var ids ~rank:t.rank)
   let fresh_row ids t = Type.RVar (Fresh.var ids ~rank:t.rank)
   let fresh_presence ids t = Type.PVar (Fresh.var ids ~rank:t.rank)
   let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
@@ -2157,6 +2157,16 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
       in
       ignore (unify_use t program use ~ty : bool));
     let uses = remaining @ List.rev !added in
+    let errors =
+      Scheme.generalize_watchers
+        ~rank:0
+        (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty))
+    in
+    (match finished with
+     | use :: _ ->
+       List.iter errors ~f:(fun error ->
+         Program_env.report_use program use (Bound_var error))
+     | [] -> ());
     Scheme.generalize
       t
       ~rank:0
@@ -2300,6 +2310,18 @@ let finish_scc
         raise_s
           [%message "finish_scc: member not checked" (member : Toplevel.t)])
   in
+  if generalize
+  then (
+    List.iter2_exn members tys ~f:(fun member ty ->
+      List.iter (Scheme.generalize_watchers ~rank:0 [ ty ]) ~f:(fun error ->
+        Program_env.report
+          program
+          (Module_scope.within
+             member.module_
+             (Typecheck_error.create ~loc:member.expr.loc (Mode_error error)))));
+    List.iter others ~f:(fun (use : Quoted_use.t) ->
+      List.iter (Scheme.generalize_watchers ~rank:0 [ use.ty ]) ~f:(fun error ->
+        Program_env.report_use program use (Bound_var error))));
   let awaiting =
     if generalize
     then (
@@ -3096,7 +3118,12 @@ and expr_type
     let args = List.map arg_types ~f:fst in
     let generalized = generalizes scope mode ~is_function ~loc in
     if generalized
-    then Scheme.generalize t ~rank:scope.rank [ ty ]
+    then (
+      List.iter
+        (Scheme.generalize_watchers ~rank:scope.rank [ ty ])
+        ~f:(fun error ->
+          ignore (Scope.mode_holds scope ~loc (Error error) : bool));
+      Scheme.generalize t ~rank:scope.rank [ ty ])
     else Unify.lower_ty ~rank:scope.rank ty;
     let in_ =
       Env.with_bindings

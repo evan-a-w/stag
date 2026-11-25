@@ -29,6 +29,9 @@ type t =
   | Assigned_in_record of string * Type.row
   (** The row has the name [assigned], but is also a record's or variant's,
       whose entries can't be. *)
+  | Bound_var of Mode.Error.t
+  (** What a mode constraint needs once a type variable is bound
+      ([Watcher.bind]). *)
 [@@deriving sexp_of]
 
 (** With its types as they are now ([Type.Snapshot]). *)

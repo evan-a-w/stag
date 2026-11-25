@@ -21,9 +21,7 @@ type ('a, 'bound) var =
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
   ; mutable in_record : bool
-  ; mutable join : bool
-  (** Of a type variable: made the join of what is used at it, by
-      [Unify.sub_ty], rather than equal to it ([Fresh.join_var]). *)
+  ; mutable watchers : 'a Watcher.t list
   }
 
 and ty =
@@ -121,7 +119,7 @@ module Var : sig
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     ; mutable in_record : bool
-    ; mutable join : bool
+    ; mutable watchers : 'a Watcher.t list
     }
 
   val create : id -> 'a state -> ('a, _) t

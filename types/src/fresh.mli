@@ -19,11 +19,6 @@ val modes : t -> Mode.Id_source.t
 (** An [Unbound] variable with a fresh id. *)
 val var : t -> rank:Type.rank -> (_, _) Type.Var.t
 
-(** Like [var], for a type that values are used at by variance (a scheme's
-    instance, a match's result): it becomes their join, a type with modes of its
-    own each is used at, rather than the first's type. *)
-val join_var : t -> rank:Type.rank -> (Type.ty, _) Type.Var.t
-
 (** A record or variant with a fresh id. Its row's variable gets [in_record]:
     its entries must not be [assigned] already ([Unify.in_record] checks that). *)
 val record : t -> Type.row -> Type.ty
