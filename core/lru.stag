@@ -13,7 +13,7 @@
 type link['k, 'v, 'p : mode] = Nil | Entry of ptr[entry['k, 'v, 'p] @@ 'p]
 
 type entry['k, 'v, 'p : mode] = {
-  key : 'k;
+  key : 'k @@ gc;
   value : 'v;
   prev : link['k, 'v, 'p];
   next : link['k, 'v, 'p];
@@ -22,9 +22,9 @@ type entry['k, 'v, 'p : mode] = {
 type t['k, 'v, 'p : mode] = {
   capacity : int;
   compare : 'k -> 'k -> int;
-  index : ptr[Map.t['k, ptr[entry['k, 'v, 'p] @@ 'p], gc]];
-  first : ptr[link['k, 'v, 'p]];
-  last : ptr[link['k, 'v, 'p]];
+  index : ptr[Map.t['k, ptr[entry['k, 'v, 'p] @@ 'p], 'p] @@ 'p];
+  first : ptr[link['k, 'v, 'p] @@ 'p];
+  last : ptr[link['k, 'v, 'p] @@ 'p];
   size : ptr[int];
 }
 

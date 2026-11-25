@@ -267,8 +267,8 @@ let%expect_test "the prelude's signature" =
       end
       module Lru : sig
         type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
-        type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a -> 'a -> int; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], gc]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        type entry['a, 'b, 'm0 : mode] = { key : 'a @@ gc; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a -> 'a -> int; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
         val create : int -> ('a -> 'a -> int) -> t['a, 'b, 'm0]
         val length : t['a, 'b, 'm0] -> int
         module Internal : sig
@@ -283,7 +283,7 @@ let%expect_test "the prelude's signature" =
       end
       module Map : sig
         type t['a, 'b, 'm0 : mode] = Empty | Node of box[node['a, 'b, 'm0]]
-        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
+        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a @@ gc; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
         val empty : t['a, 'b, 'm0]
         val is_empty : t['a, 'b, 'm0] -> bool
         val height : t['a, 'b, 'm0] -> int
@@ -293,6 +293,8 @@ let%expect_test "the prelude's signature" =
           val bal : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
           val onto : t['a, 'b, 'm0] -> list['a * 'b] -> list['a * 'b]
           val remove_min : t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+          val min_key : t['a, 'b, 'm0] -> option['a]
+          val min_value : t['a, 'b, 'm0] -> option['b]
           val merge : t['a, 'b, 'm0] -> t['a, 'b, 'm1] -> t['a, 'b, 'm1]
         end
         val singleton : 'a -> 'b -> t['a, 'b, 'm0]

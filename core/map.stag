@@ -12,7 +12,7 @@ type t['k, 'v, 'p : mode] = Empty | Node of box[node['k, 'v, 'p]]
 
 type node['k, 'v, 'p : mode] = {
   left : t['k, 'v, 'p];
-  key : 'k;
+  key : 'k @@ gc;
   value : 'v @@ 'p;
   right : t['k, 'v, 'p];
   height : int;
@@ -93,6 +93,20 @@ module Internal = struct
     | Node *{left = l; key = k; value = v; right = r} ->
       exclave_ bal (remove_min l) k v r
 
+  (* The least key and its value, separately: a pair of them would be as
+     external as the value. *)
+  let min_key t =
+    match t with
+    | Empty -> None
+    | Node *{left = Empty; key = k} -> Some k
+    | Node *{left = l} -> min_key l
+
+  let min_value t =
+    match t with
+    | Empty -> None
+    | Node *{left = Empty; value = v} -> Some v
+    | Node *{left = l} -> min_value l
+
   (* The bindings of [l], then of [r], all of whose keys are greater. *)
   let merge l r =
     match (l, r) with
@@ -100,8 +114,11 @@ module Internal = struct
     | _, Empty -> l
     | _ ->
       exclave_
-        match min_binding r with
-        | Some (k, v) -> bal l k v (remove_min r)
+        match min_key r with
+        | Some k ->
+          (match min_value r with
+           | Some v -> bal l k v (remove_min r)
+           | None -> l)
         | None -> l
 end
 
