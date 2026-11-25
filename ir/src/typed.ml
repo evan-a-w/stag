@@ -410,6 +410,34 @@ module Bench = struct
   [@@deriving sexp_of]
 end
 
+module Allocation = struct
+  module Kind = struct
+    type t =
+      | Closure
+      | Code
+      | Pointer
+      | Box
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Placement = struct
+    type t =
+      | Heap
+      | Region
+      | Caller_region
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  type t =
+    { toplevel : Ident.t
+    ; loc : Loc.t
+    ; kind : Kind.t
+    ; if_global : Placement.t
+    ; if_local : Placement.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Program = struct
   type t =
     { sccs : Scc.t list
@@ -417,10 +445,18 @@ module Program = struct
     ; benches : Bench.t list
     ; declaration_splices : Expr.t list
     ; ident_info : Ident_info.t Ident.Map.t
+    ; allocations : Allocation.t list
     }
   [@@deriving sexp_of]
 
-  let exprs { sccs; expect_tests; benches; declaration_splices; ident_info = _ }
+  let exprs
+    { sccs
+    ; expect_tests
+    ; benches
+    ; declaration_splices
+    ; ident_info = _
+    ; allocations = _
+    }
     =
     List.concat_map sccs ~f:(fun (scc : Scc.t) ->
       List.map scc.members ~f:(fun (member : Toplevel.t) -> member.body))

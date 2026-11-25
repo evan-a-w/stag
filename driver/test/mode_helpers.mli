@@ -16,3 +16,7 @@ val signature : string -> (string, string list) Result.t
 val round_trip : string -> show:[ `Signature | `Copies | `Quiet ] -> unit
 
 val checked : string -> (Signature.Item.t list, string list) Result.t
+
+(** Prints the signature of [source], as [signature], then where each allocation
+    of its toplevels is made (see [Typed.Allocation]), or its errors. *)
+val allocations : string -> unit

@@ -16,6 +16,14 @@ val id : t -> int
 val lower : t -> Const.t
 val upper : t -> Const.t
 val is_generic : t -> bool
+
+(** What [read] gives once the constraints [f] adds hold, which are then undone:
+    [None] if they can't hold. *)
+val assuming
+  :  (unit -> (unit, Mode_error.t) Result.t)
+  -> read:(unit -> 'a)
+  -> 'a option
+
 val lower_rank : t -> rank:int -> unit
 
 (** The lower bound [t] would have on [axis] if the variables [raised] (by [id])

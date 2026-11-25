@@ -6,7 +6,7 @@ module Generated = struct
   type t =
     { splice : Loc.t
     ; declaration : string
-    ; generated : Syntax.Toplevel.t [@sexp.opaque]
+    ; generated : Syntax.Toplevel.t
     }
   [@@deriving sexp_of]
 
@@ -93,6 +93,9 @@ module Toplevel = struct
           ; held : Binding.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
+          ; sites : Mode_rules.Site.t Queue.t
+          (** Its allocation sites. *)
+          ; result : Mode.Var.t option (** A function's. *)
           }
       | Done of
           { entry : Env.Entry.t
@@ -241,6 +244,7 @@ module Program_env = struct
     (** The ids of the modes of parameters: what they are is decided by each use
         of their function, so is not known while it is checked. *)
     ; mutable deferred_uses : Deferred_use.t list
+    ; allocations : Typed.Allocation.t Queue.t
     }
 
   let report ?frame t error =
@@ -379,6 +383,9 @@ module Scope = struct
     ; params : Type.ty list
     (** The types of the parameters of the functions being checked, whose modes
         are decided by each use of their function. *)
+    ; allocations : Mode_rules.Site.t Queue.t option
+    (** Of the toplevel being checked: its allocation sites, as its run time
+        code is checked. *)
     }
 
   and quote =
@@ -503,6 +510,10 @@ module Scope = struct
       ~rank:t.rank
       ~holds:(mode_holds t)
       ~crossing:(crossing t)
+      ~allocated:
+        (match t.allocations, t.quote with
+         | Some sites, None when t.level = 0 -> Queue.enqueue sites
+         | _ -> ignore)
   ;;
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
@@ -1794,7 +1805,8 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
                   member.module_
                   (Typecheck_error.create ~loc (Mode_error error)));
              false)
-         ~crossing:(fun _ -> Mode.Crossing.none))
+         ~crossing:(fun _ -> Mode.Crossing.none)
+         ~allocated:ignore)
       (init_mode member)
       ~loc:member.expr.loc
       ~why:(why member.ident.name)
@@ -1821,6 +1833,21 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
       Toplevel.is_function member
       || const member ~why:(sprintf "%s is generalized"))
   in
+  (* Before generalizing, while its result may still be constrained. *)
+  List.iter members ~f:(fun member ->
+    match member.state with
+    | In_progress { sites; result; _ } ->
+      Mode_rules.placements (Queue.to_list sites) ~result
+      |> List.iter ~f:(fun ((site : Mode_rules.Site.t), if_global, if_local) ->
+        Queue.enqueue
+          program.allocations
+          { Typed.Allocation.toplevel = member.ident
+          ; loc = site.loc
+          ; kind = site.kind
+          ; if_global
+          ; if_local
+          })
+    | Unchecked | Done _ -> ());
   if generalize
   then
     Scheme.generalize
@@ -2157,6 +2184,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
   let rank = 1 in
+  let sites = Queue.create () in
   let scope =
     { Scope.program
     ; level = 0
@@ -2171,6 +2199,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; syntax_splice = None
     ; locks = []
     ; params = []
+    ; allocations = Some sites
     }
   in
   let modes = Scope.modes scope in
@@ -2214,6 +2243,9 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
          ; held = rules.held
          ; body = None
          ; recursive = false
+         ; sites
+         ; result =
+             Option.some_if (Toplevel.is_function toplevel) fn.res_mode
          };
     let body =
       match
@@ -2584,12 +2616,16 @@ and expr_type
           result_matches := result_matches_expected ();
           check_expr t scope ~at ~expr:x ~ty:a)
     in
+    let allocates kind = Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode in
     (match f.desc with
-     | Var (Intrinsic (Ptr_make | Box_make)) -> Mode_rules.Alloc.pointer at
+     | Var (Intrinsic Ptr_make) -> allocates Pointer
+     | Var (Intrinsic Box_make) -> allocates Box
      | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Ptr.make")
-            || String.equal ident.name (Prelude_path.canonical "Box.make") ->
-       Mode_rules.Alloc.pointer at
+       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
+       allocates Pointer
+     | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
+       when String.equal ident.name (Prelude_path.canonical "Box.make") ->
+       allocates Box
      | _ -> ());
     if !result_matches
     then node (App (f, x)) b
@@ -4072,6 +4108,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; syntax_splice = None
   ; locks = []
   ; params = []
+  ; allocations = None
   }
 ;;
 
@@ -4598,6 +4635,7 @@ let program_env
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     ; declaration_splices = Queue.create ()
+    ; allocations = Queue.create ()
     ; unusable_in_quotes = String.Table.create ()
     ; unfinished = Stack.create ()
     ; reports = []
@@ -4698,6 +4736,7 @@ let check_module t (program_env : Program_env.t) module_
     ; benches
     ; declaration_splices = Queue.to_list program_env.declaration_splices
     ; ident_info = program_env.ident_info
+    ; allocations = Queue.to_list program_env.allocations
     }
   in
   let errors =

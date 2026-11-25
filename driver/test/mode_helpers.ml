@@ -19,6 +19,50 @@ let signature source =
   Result.map (checked source) ~f:(Signature.to_string_hum ~modes:true)
 ;;
 
+let allocations source =
+  let stamps = Stamp_counter.create () in
+  let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
+  Interpreter.set_limits interpreter limits;
+  let typecheck = Typecheck.create ~stamps ~interpreter () in
+  let prelude = program ~prelude:true "" in
+  match Typecheck.typecheck typecheck ~program:(program source) with
+  | Error { errors; partial = _ } ->
+    List.iter errors ~f:(fun error ->
+      print_endline (Typecheck_error.message error))
+  | Ok checked ->
+    print_string
+      (Signature.to_string_hum
+         ~modes:true
+         (List.drop checked.signature (List.length prelude)));
+    List.iter
+      checked.program.allocations
+      ~f:(fun (allocation : Typed.Allocation.t) ->
+        if String.equal (Loc.file_name allocation.loc) file
+        then (
+          let placement = function
+            | Typed.Allocation.Placement.Heap -> "heap"
+            | Region -> "region"
+            | Caller_region -> "caller's region"
+          in
+          let where =
+            if Typed.Allocation.Placement.equal
+                 allocation.if_global
+                 allocation.if_local
+            then placement allocation.if_global
+            else
+              sprintf
+                "%s if global, %s if local"
+                (placement allocation.if_global)
+                (placement allocation.if_local)
+          in
+          printf
+            !"%s %{Sexp} in %s: %s\n"
+            (Loc.to_string allocation.loc)
+            (Typed.Allocation.Kind.sexp_of_t allocation.kind)
+            allocation.toplevel.name
+            where))
+;;
+
 (* The modes of a type's arrows' sides (not their [curry]s, which aren't
    printed) and mode arguments, in order. *)
 module Positions = struct

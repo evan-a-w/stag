@@ -1,14 +1,28 @@
 open! Import
 
+module Site = struct
+  type t =
+    { loc : Loc.t
+    ; kind : Typed.Allocation.Kind.t
+    ; mode : Mode.Var.t
+    ; tail : bool
+    }
+  [@@deriving sexp_of]
+end
+
 module Ctx = struct
   type t =
     { modes : Mode.Id_source.t
     ; rank : int
     ; holds : loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool
     ; crossing : Type.ty -> Mode.Crossing.t
+    ; allocated : Site.t -> unit
     }
 
-  let create ~modes ~rank ~holds ~crossing = { modes; rank; holds; crossing }
+  let create ~modes ~rank ~holds ~crossing ~allocated =
+    { modes; rank; holds; crossing; allocated }
+  ;;
+
   let fresh t = Mode.Var.create t.modes ~rank:t.rank
   let add t ~loc result = ignore (t.holds ~loc result : bool)
 end
@@ -409,24 +423,29 @@ module Alloc = struct
     mode
   ;;
 
-  let closure ctx expected ~loc f =
+  let record (ctx : Ctx.t) (expected : Expected.t) ~loc ~kind mode =
     site expected;
+    ctx.allocated { Site.loc; kind; mode; tail = Expected.is_tail expected }
+  ;;
+
+  let closure ctx expected ~loc f =
     let why = "the closure is made" in
     let closure = allocated ctx ~loc ~why in
+    record ctx expected ~loc ~kind:Closure closure;
     let result = f closure in
     joins ctx expected closure ~loc ~why;
     result
   ;;
 
   let code ctx expected ~loc =
-    site expected;
     let why = "the code is built" in
     let code = allocated ctx ~loc ~why in
+    record ctx expected ~loc ~kind:Code code;
     joins ctx expected code ~loc ~why;
     code
   ;;
 
-  let pointer = site
+  let pointer ctx expected ~loc ~kind mode = record ctx expected ~loc ~kind mode
 
   let stack ctx expected ~loc f =
     let allocates = ref false in
@@ -1081,4 +1100,40 @@ let default_mode_arg var (position : Mode_arg_position.t option) ~name =
       ; Mode.Var.at_most_const var held reason
       ]
     |> Mode.Error.ok_exn)
+;;
+
+let placement (site : Site.t) : Typed.Allocation.Placement.t =
+  match (Mode.Var.upper site.mode).locality with
+  | Local -> Region
+  | Regional -> if site.tail then Caller_region else Heap
+  | Global -> Heap
+;;
+
+let placements sites ~result =
+  let read () = List.map sites ~f:placement in
+  let assuming constrain =
+    match result with
+    | None -> None
+    | Some result ->
+      Mode.Var.assuming
+        (fun () ->
+          constrain result (Mode.Reason.create "the result is used so"))
+        ~read
+  in
+  let if_local =
+    match
+      assuming (fun result -> Mode.Var.at_least result Locality Local)
+    with
+    | Some placements -> placements
+    | None -> read ()
+  in
+  let if_global =
+    match
+      assuming (fun result -> Mode.Var.at_most result Locality Global)
+    with
+    | Some placements -> placements
+    | None -> if_local
+  in
+  List.zip_exn sites (List.zip_exn if_global if_local)
+  |> List.map ~f:(fun (site, (if_global, if_local)) -> site, if_global, if_local)
 ;;

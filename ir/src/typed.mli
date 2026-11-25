@@ -324,6 +324,41 @@ module Bench : sig
   [@@deriving sexp_of]
 end
 
+(** An allocation in run time code, and where a compiler makes it: a function
+    whose allocations are made differently when its result is [global] than when
+    it is [local] is compiled once for each. *)
+module Allocation : sig
+  module Kind : sig
+    type t =
+      | Closure
+      | Code
+      | Pointer (** [Ptr.make] *)
+      | Box (** [Box.make] *)
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Placement : sig
+    type t =
+      | Heap
+      | Region (** The region current when it is made. *)
+      | Caller_region
+      (** Returned by its function (or [region_]): made once the region has
+          ended, in the one around it, as under [exclave_]. *)
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  type t =
+    { toplevel : Ident.t (** The toplevel whose code makes it. *)
+    ; loc : Loc.t
+    ; kind : Kind.t
+    ; if_global : Placement.t
+    (** Where it is made in calls of the toplevel, a function, whose result
+        is used at [global]. Of a non-function, the same as [if_local]. *)
+    ; if_local : Placement.t (** Where its result is used at [local]. *)
+    }
+  [@@deriving sexp_of]
+end
+
 module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
@@ -332,6 +367,7 @@ module Program : sig
     ; declaration_splices : Expr.t list
     (** The expression of each declaration splice that ran, at level -1. *)
     ; ident_info : Ident_info.t Ident.Map.t
+    ; allocations : Allocation.t list (** In program order. *)
     }
   [@@deriving sexp_of]
 

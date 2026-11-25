@@ -57,6 +57,18 @@ let get t =
 
 let lower t = get t Graph.lower
 let upper t = get t Graph.upper
+
+let assuming f ~read =
+  match
+    Undo.atomically (fun () ->
+      match f () with
+      | Ok () -> Error (`Read (read ()))
+      | Error (_ : Mode_error.t) -> Error `Failed)
+  with
+  | Ok (_ : Nothing.t) -> .
+  | Error (`Read read) -> Some read
+  | Error `Failed -> None
+;;
 let is_generic t = Graph.is_generic t.stage
 let lower_rank t ~rank = List.iter (nodes t) ~f:(Graph.lower_rank ~rank)
 

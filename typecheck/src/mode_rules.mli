@@ -4,15 +4,29 @@ open! Import
     it is expected at, and relates that to the mode its value is part of (or is
     only evaluated for). *)
 
+(** An allocation site, of the mode given. [tail] if what it makes is the value
+    of the function (or [region_]) it is in. *)
+module Site : sig
+  type t =
+    { loc : Loc.t
+    ; kind : Typed.Allocation.Kind.t
+    ; mode : Mode.Var.t
+    ; tail : bool
+    }
+  [@@deriving sexp_of]
+end
+
 module Ctx : sig
   type t
 
-  (** [holds] reports a constraint that doesn't hold, returning whether it did. *)
+  (** [holds] reports a constraint that doesn't hold, returning whether it did.
+      [allocated] is told of each allocation site checked. *)
   val create
     :  modes:Mode.Id_source.t
     -> rank:int
     -> holds:(loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool)
     -> crossing:(Type.ty -> Mode.Crossing.t)
+    -> allocated:(Site.t -> unit)
     -> t
 end
 
@@ -156,8 +170,14 @@ module Alloc : sig
   (** A quote: the mode of its code. *)
   val code : Ctx.t -> Expected.t -> loc:Loc.t -> Mode.Var.t
 
-  (** A pointer, whose mode is the value's. *)
-  val pointer : Expected.t -> unit
+  (** A [Ptr.make] or [Box.make] application, of the mode given. *)
+  val pointer
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> kind:Typed.Allocation.Kind.t
+    -> Mode.Var.t
+    -> unit
 
   (** [stack_ e]: [Error] if [e] allocates nothing. *)
   val stack
@@ -352,3 +372,12 @@ val default_mode_arg
   -> Mode_arg_position.t option
   -> name:string
   -> unit
+
+(** Where each site is made, when [result] (a function's) is used at [global],
+    and at [local]. An allocation is made as locally as its mode allows: in the
+    current region if [local], in the caller's if [regional] and returned (ended
+    as by [exclave_]), else on the heap. *)
+val placements
+  :  Site.t list
+  -> result:Mode.Var.t option
+  -> (Site.t * Typed.Allocation.Placement.t * Typed.Allocation.Placement.t) list
