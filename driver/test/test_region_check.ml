@@ -1,5 +1,7 @@
 open! Import
 
+let allocations_of source = Mode_helpers.allocations source
+
 let run ?override source ~entry =
   print_s
     [%sexp (Region_check.run ?override source ~entry : Region_check.Outcome.t)]
@@ -119,5 +121,59 @@ let usem (u : unit) = keepf.* <- many 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 
     (Returned (value 1) (on_heap 3) (in_regions 17))
     (Use_after_free
      "a reference, from a toplevel, of the Partial_application at t.stag:6:230-232, made in the region of a call of toplevel usem, after it ended")
+    |}]
+;;
+
+let%expect_test "a let's instances each place its allocations" =
+  let source =
+    {|
+let sum (b : box[int]) = match b with *n -> n
+let keep : ptr[box[int]] = Ptr.make (Box.make 0)
+let f (u : unit) =
+  let g (y : int) = Box.make y in
+  let b @ local = g 1 in
+  keep.* <- g 2;
+  sum b [@nontail]
+|}
+  in
+  allocations_of source;
+  run source ~entry:"f";
+  [%expect
+    {|
+    val sum : box[int] @ _ -> int @ _
+    val keep : ptr[box[int]]
+    val f : unit @ _ -> int @ _
+    t.stag:3:27-48 Pointer in keep: heap
+    t.stag:3:36-48 Box in keep: heap
+    t.stag:5:2-8:18 Closure in f: region
+    t.stag:5:20-30 Box in f.g: heap, caller's region if res is local
+    (Returned (value 1) (on_heap 3) (in_regions 2))
+    |}]
+;;
+
+let%expect_test "a recursive group, its result used locally" =
+  run
+    ~entry:"c"
+    {|
+let b (n : int) = match Int.equal n 0 with true -> Box.make n | false -> a (Int.sub n 1)
+let a (n : int) = match Int.equal n 0 with true -> Box.make n | false -> b (Int.sub n 1)
+let c (u : unit) = let x @ local = a 3 in match x with *n -> n
+|};
+  [%expect {| (Returned (value 0) (on_heap 1) (in_regions 0)) |}]
+;;
+
+let%expect_test "a recursive group's argument stored globally" =
+  run
+    ~entry:"c2"
+    {|
+let keep : ptr[box[int]] = Ptr.make (Box.make 0)
+let b2 (x : box[int]) (n : int) = match Int.equal n 0 with true -> keep.* <- x | false -> a2 x (Int.sub n 1)
+let a2 (x : box[int]) (n : int) = b2 x n
+let c2 (u : unit) = let x @ local = stack_ (Box.make 1) in a2 x 3 [@nontail]
+|};
+  [%expect
+    {|
+    (Rejected
+     ("This is local, because it is allocated by [stack_] (at t.stag:5:36-55), then it is part of the value (at t.stag:5:36-55), then it is bound by an annotated let (at t.stag:5:28-33), then x is used (at t.stag:5:62-63), then it is passed to a function (at t.stag:5:59-63), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:77-78), then x is used (at t.stag:3:77-78), then x is passed to the function (at t.stag:3:34-108), then a function is used at a type with other modes, then it is passed to a function (at t.stag:4:34-38), then x is used (at t.stag:4:37-38), then x is passed to the function (at t.stag:4:34-40), then a function is used at a type with other modes"))
     |}]
 ;;

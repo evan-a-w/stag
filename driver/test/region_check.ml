@@ -257,27 +257,32 @@ let prim_of_lit : Syntax.Lit.t -> Prim.Value.t = function
 
 let local = Mode.Locality.index Local
 
-(* How local [side] is in the instance using it: as local as it may be, given
-   the instances it is used from. *)
-let value (instance : Instance.t) (side : Arrow_modes.Side.t) =
-  match side with
-  | Fixed const -> Mode.Locality.index const.locality
-  | Var var ->
-    let node = Mode.Var.node var Locality in
-    let reason = Mode.Reason.create "the instance has it" in
-    (match
-       Mode.Var.assuming
-         (fun () ->
-           Map.data instance.pins
-           |> List.map ~f:(fun (node, value) ->
-             Result.bind
-               (Mode.Var.Node.at_least node value reason)
-               ~f:(fun () -> Mode.Var.Node.at_most node value reason))
-           |> Result.all_unit)
-         ~read:(fun () -> Mode.Var.Node.upper node)
-     with
-     | Some value -> value
-     | None -> failwith "the instances used from can't all hold")
+(* The bounds of [node] with [pins] holding. *)
+let bounds pins node =
+  let reason = Mode.Reason.create "the instance has it" in
+  match
+    Mode.Var.assuming
+      (fun () ->
+        Map.data pins
+        |> List.map ~f:(fun (node, value) ->
+          Result.bind (Mode.Var.Node.at_least node value reason) ~f:(fun () ->
+            Mode.Var.Node.at_most node value reason))
+        |> Result.all_unit)
+      ~read:(fun () -> Mode.Var.Node.lower node, Mode.Var.Node.upper node)
+  with
+  | Some value -> value
+  | None ->
+    raise_s
+      [%message
+        "the instances used from can't all hold"
+          ~pins:
+            (Map.data pins
+             |> List.map ~f:(fun (node, value) ->
+               ( Mode.Var.Node.var_id node
+               , value
+               , Mode.Var.Node.lower node
+               , Mode.Var.Node.upper node ))
+             : (int * int * int * int) list)]
 ;;
 
 (* The mode variables of [scheme], each with what it is at in [ty], an instance
@@ -350,24 +355,31 @@ let instance_vars ~scheme ~ty =
    variables as local as it may be there. *)
 let instantiate t (instance : Instance.t) ~owner ~scheme ~ty =
   let key = owner_key owner in
+  (* Each variable of the scheme as local as both its own bounds, given those
+     chosen so far, and how it is used allow. *)
   let pins =
     List.fold
       (instance_vars ~scheme ~ty)
       ~init:instance.pins
       ~f:(fun pins (var, var') ->
         let node = Mode.Var.node var Locality in
+        let lower, upper = bounds pins node in
+        let used = snd (bounds instance.pins (Mode.Var.node var' Locality)) in
         Map.set
           pins
           ~key:(Mode.Var.Node.var_id node)
-          ~data:(node, value instance (Var var')))
+          ~data:(node, Int.max lower (Int.min used upper)))
   in
   let sides = Hashtbl.find t.sides key |> Option.value ~default:[] in
   { Instance.pins
   ; local =
       List.filter_map sides ~f:(fun side ->
-        if value instance (side_of ty side) >= local
-        then Some (key, side)
-        else None)
+        let value =
+          match side_of scheme side with
+          | Fixed const -> Mode.Locality.index const.locality
+          | Var var -> snd (bounds pins (Mode.Var.node var Locality))
+        in
+        if value >= local then Some (key, side) else None)
       @ instance.local
   }
 ;;

@@ -454,9 +454,12 @@ bounds. A function is compiled once per distinct assignment of its relevant
 variables, so instances differing only in irrelevant modes share code.
 
 Allocation locality is the main code-relevant mode. Each allocation site
-(`Typed.Allocation`) belongs to an owner, a toplevel or a generalised
-`let`-bound function, and is either placed the same in every instance of
-its owner or follows one side of the owner's type (its result, a curried
+(`Typed.Allocation`) belongs to an owner: a toplevel, or a generalised
+`let` (a function's body, or every site of a value, which the
+monomorphiser copies per instance, so its sites are too). It is either
+placed the same in every instance of its owner or follows one side of the
+type of its owner or of an owner around it (`f.g`'s site may follow `f`'s
+`arg.arg`), the side's owner being named (its result, a curried
 closure's result `res.res`, a higher-order parameter's argument `arg.arg`,
 …): made as `placement` when that side is global, and as `if_local` when
 it is local. An owner is compiled once per assignment of locality to the
@@ -480,6 +483,31 @@ keeps each definition's body mode constraints and re-solves them per
 instance, rather than relying on scheme instantiation; the recorded
 placements are what that solving gives for the owner's least instance and
 for each followed side raised to `local`.
+
+Placements are read once a toplevel's whole component is checked, before
+it is generalised: earlier, at a `let`, the code after it could still
+constrain what the site's locality is bounded by. Every site's upward
+closure in the constraint graph (the variables its locality is bounded by)
+is then made of the sides and other mode variables of its owners' types,
+which instances choose; variables that code outside the component may yet
+constrain (of a lower rank) or generic ones; and variables internal to the
+component, all of whose constraints are present. All but the internal ones
+are pinned at their least, so the placement read is the least any instance
+gives: a site is only placed in a region when no instance, and no code yet
+to be checked, can make it less local, and otherwise on the heap. A side
+followed is then unpinned and raised to `local`, the others staying
+pinned, and the site follows it if that gives another placement. Sides are
+found through every type an owner's type reaches: tuples, records and
+variants (nominal and structural), code, boxes and type parameters.
+
+`Region_check` (in the tests) is an oracle for all this: an interpreter
+making each allocation where the record says, in each instance as local as
+its uses allow given the instances it is used from, that fails on a use of
+an allocation after its region ends, or one left reachable from a
+toplevel. Random programs it runs, using allocations through closures,
+higher-order parameters, generalised `let`s and containers of closures, at
+`global` and at `local`, never do; with placements that ignore their
+instance, many do.
 
 ## Pipeline
 

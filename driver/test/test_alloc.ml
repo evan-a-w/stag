@@ -526,3 +526,20 @@ let many (a1 : int) (a2 : int) (a3 : int) (a4 : int) (a5 : int) (a6 : int) (a7 :
     t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res is local
     |}]
 ;;
+
+let%expect_test "a recursive group's sites are in program order" =
+  allocations
+    {|
+let b (n : int) = match Int.equal n 0 with true -> Box.make n | false -> a (Int.sub n 1)
+let a (n : int) = match Int.equal n 0 with true -> Box.make n | false -> b (Int.sub n 1)
+let c (u : unit) = let x @ local = a 3 in match x with *n -> n
+|};
+  [%expect
+    {|
+    val b : int @ 'm0 -> box[int] @ 'm1 with portable <= 'm0 and gc <= 'm1 and 'm1 <= global
+    val a : int @ 'm0 -> box[int] @ 'm1 with portable <= 'm0 and gc <= 'm1 and 'm1 <= global
+    val c : unit @ _ -> int @ _
+    t.stag:2:51-61 Box in b: heap
+    t.stag:3:51-61 Box in a: heap
+    |}]
+;;

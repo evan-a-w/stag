@@ -397,7 +397,8 @@ module Allocation : sig
   module Follows : sig
     type t =
       { owner : Owner.t
-      ; side : Side.t (** In [owner]'s type. *)
+      ; side : Side.t
+      (** In [owner]'s type: of the site's owner, or one around it. *)
       ; if_local : Placement.t
       }
     [@@deriving sexp_of]
@@ -409,8 +410,9 @@ module Allocation : sig
     ; kind : Kind.t
     ; placement : Placement.t
     (** Where it is made in every instance of its owner: as locally as its least
-        instance, with every mode of the owner's type as low as it may be,
-        allows. *)
+        instance, with every mode of its owners' types as low as it may be,
+        allows, or on the heap where anything it is bounded by may yet be
+        constrained by code outside its component. *)
     ; follows : Follows.t option
     (** Where it is made instead in the instances where that side is [local]
         (with every other side, for all it relies on, at its least). A site that
