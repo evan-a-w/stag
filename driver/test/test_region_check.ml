@@ -331,6 +331,7 @@ let main (u : unit) = Int.add (sum (boxed 1)) (Int.add (plus () 2) (partly 3))
     (Use_after_free
      "a reference, from the result of a call of toplevel plus, of the Partial_application at t.stag:7:22-31, made in the region of a call of toplevel plus, after it ended")
     |}]
+;;
 
 (* What a tail call returns is made in the caller's region of the function
    making it: [via]'s Box, by [wrap], a search's part of a local argument, and a
@@ -372,9 +373,9 @@ let use (u : unit) =
     t.stag:6:35-45 Box in count: heap, caller's region if res.res is local
     t.stag:8:2-68 Partial_application in pick: heap, caller's region if res is local
     t.stag:12:33-45 Box in use: region
-    (Returned (value 12) (on_heap 0) (in_regions 10))
+    (Returned (value 12) (on_heap 0) (in_regions 3))
     (Use_after_free
-     "a match of the Box at t.stag:3:21-31, made in the region of a call of toplevel via, after it ended")
+     "a reference, from the result of a call of toplevel via, of the Box at t.stag:3:21-31, made in the region of a call of toplevel via, after it ended")
     |}]
 ;;
 
@@ -406,10 +407,10 @@ let built (u : unit) = match M.find cmp (build 5) 4 with Some v -> v | None -> 0
     run ("module M = struct\n" ^ map ^ "\nend\n" ^ uses) ~entry);
   [%expect
     {|
-    (Returned (value 20) (on_heap 0) (in_regions 68))
-    (Returned (value 1) (on_heap 1) (in_regions 40))
-    (Returned (value 60) (on_heap 0) (in_regions 34))
-    (Returned (value 16) (on_heap 16) (in_regions 140))
+    (Returned (value 20) (on_heap 0) (in_regions 7))
+    (Returned (value 1) (on_heap 1) (in_regions 3))
+    (Returned (value 60) (on_heap 0) (in_regions 3))
+    (Returned (value 16) (on_heap 16) (in_regions 0))
     |}]
 ;;
 
@@ -436,5 +437,5 @@ let in_region (u : unit) =
      ^ "\nend\n"
      ^ uses)
     ~entry:"in_region";
-  [%expect {| (Returned (value 30) (on_heap 21) (in_regions 102)) |}]
+  [%expect {| (Returned (value 30) (on_heap 11) (in_regions 4)) |}]
 ;;
