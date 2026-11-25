@@ -184,14 +184,80 @@ let%expect_test "a toplevel already evaluated can't be queued again" =
       print_s
         [%sexp
           (Or_error.try_with (fun () ->
-             Interpreter.add_scc
-               interpreter
-               { members = [ member ]; recursive = false })
+             Interpreter.add_scc interpreter { members = [ member ] })
            : unit Or_error.t)]));
   [%expect
     {|
     (Ok ())
     (Error ("Treewalk.add_scc: toplevel already evaluated" (ident x/4)))
     (Error ("Treewalk.add_scc: toplevel already evaluated" (ident y/5)))
+    |}]
+;;
+
+let%expect_test "toplevels are evaluated in program order, those used before \
+                 their turn on demand"
+  =
+  run
+    ~show:[]
+    {|
+let a = print_endline "a"; b
+let b = print_endline "b"
+let mut c = print_endline "c"
+module M = struct
+  let d = print_endline "d"; e
+end
+let e = print_endline "e"
+let f = print_endline "f"
+|};
+  [%expect {|
+    a
+    b
+    c
+    d
+    e
+    f
+    |}]
+;;
+
+let%expect_test "prelude toplevels are evaluated on demand, but in order when \
+                 the prelude is the program"
+  =
+  let prelude =
+    force Prelude.toplevels
+    @ parse_exn
+        ~file:"extra.stag"
+        {|
+let p1 = print_endline "p1"
+let p2 = print_endline "p2"; p1
+let p3 = print_endline "p3"
+|}
+  in
+  let eval = function
+    | Error error ->
+      print_s
+        [%sexp ((error : Typecheck.Failed.t).errors : Typecheck_error.t list)]
+    | Ok driver ->
+      print_s [%sexp (Driver.eval ~limits driver : unit Or_error.t)]
+  in
+  eval
+    (Driver.check
+       ~limits
+       ~prelude
+       (parse_exn {|
+let a = print_endline "a"
+let b = p2
+|}));
+  [%expect {|
+    a
+    p2
+    p1
+    (Ok ())
+    |}];
+  eval (Driver.check_prelude ~limits prelude);
+  [%expect {|
+    p1
+    p2
+    p3
+    (Ok ())
     |}]
 ;;

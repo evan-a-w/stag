@@ -375,11 +375,7 @@ module Toplevel = struct
 end
 
 module Scc = struct
-  type t =
-    { members : Toplevel.t list
-    ; recursive : bool
-    }
-  [@@deriving sexp_of]
+  type t = { members : Toplevel.t list } [@@deriving sexp_of]
 end
 
 module Ident_info = struct
@@ -412,8 +408,21 @@ module Bench = struct
 end
 
 module Program = struct
+  module Item = struct
+    type t =
+      | Toplevel of Ident.t
+      | Module of string * t list
+    [@@deriving sexp_of]
+
+    let rec toplevels = function
+      | Toplevel ident -> [ ident ]
+      | Module (_, items) -> List.concat_map items ~f:toplevels
+    ;;
+  end
+
   type t =
     { sccs : Scc.t list
+    ; items : Item.t list
     ; expect_tests : Expect_test.t list
     ; benches : Bench.t list
     ; declaration_splices : Expr.t list
@@ -421,7 +430,14 @@ module Program = struct
     }
   [@@deriving sexp_of]
 
-  let exprs { sccs; expect_tests; benches; declaration_splices; ident_info = _ }
+  let exprs
+    { sccs
+    ; items = _
+    ; expect_tests
+    ; benches
+    ; declaration_splices
+    ; ident_info = _
+    }
     =
     List.concat_map sccs ~f:(fun (scc : Scc.t) ->
       List.map scc.members ~f:(fun (member : Toplevel.t) -> member.body))

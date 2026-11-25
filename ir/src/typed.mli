@@ -285,15 +285,9 @@ end
 
 (** A strongly connected component of toplevels, in the order they were reached.
     Components may be larger than needed, as references to functions from within
-    quotes count. [recursive] if the members need a recursive binding: a member
-    refers to a member by a [Bound] or [Persistent] variable, or by an
-    [Implicit] substitution. *)
+    quotes count. *)
 module Scc : sig
-  type t =
-    { members : Toplevel.t list
-    ; recursive : bool
-    }
-  [@@deriving sexp_of]
+  type t = { members : Toplevel.t list } [@@deriving sexp_of]
 end
 
 module Ident_info : sig
@@ -328,8 +322,22 @@ module Bench : sig
 end
 
 module Program : sig
+  module Item : sig
+    type t =
+      | Toplevel of Ident.t
+      | Module of string * t list
+    [@@deriving sexp_of]
+
+    (** In order. *)
+    val toplevels : t -> Ident.t list
+  end
+
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
+    ; items : Item.t list
+    (** The toplevel bindings and modules of the program, in program order, with
+        what a splice or include generated in its place: the order toplevels
+        are evaluated in, but for [Driver] ordering files by dependency. *)
     ; expect_tests : Expect_test.t list (** In program order. *)
     ; benches : Bench.t list (** In program order. *)
     ; declaration_splices : Expr.t list

@@ -85,5 +85,7 @@ val interpreter : t -> Interpreter.t
     refer to, and each strongly connected component of files comes after those
     it depends on, else in the order given, with its files in the order given. A
     toplevel used before its turn, eg. by one earlier, is evaluated then, on
-    demand, and not again. Those used at compile time were evaluated then. *)
+    demand, and not again. Those used at compile time were evaluated then. The
+    prelude's toplevels are evaluated on demand only, but for [check_prelude]'s,
+    which are its program. Nothing else is evaluated. *)
 val eval : ?limits:Limits.t -> t -> unit Or_error.t

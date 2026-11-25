@@ -1765,19 +1765,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
     |> List.sort ~compare:(Comparable.lift Int.compare ~f:fst)
     |> List.map ~f:snd
   in
-  let idents =
-    Typed.Ident.Set.of_list
-      (List.map members ~f:(fun (member : Typed.Toplevel.t) -> member.ident))
-  in
-  let scc =
-    { Typed.Scc.members
-    ; recursive =
-        List.exists members ~f:(fun member ->
-          Typed.Expr.refers_to member.body ~f:(function
-            | Toplevel ident -> Set.mem idents ident
-            | Local _ -> false))
-    }
-  in
+  let scc = { Typed.Scc.members } in
   Queue.enqueue program.sccs scc;
   Interpreter.add_scc program.interpreter scc
 ;;
@@ -4199,6 +4187,31 @@ let no_splices splice : (_, Module_scope.Force_error.t) Result.t =
              (Error.of_string "the prelude cannot have declaration splices"))))
 ;;
 
+let rec items (program_env : Program_env.t) module_ =
+  List.filter_map
+    (Module_scope.declarations module_)
+    ~f:(fun (toplevel : Syntax.Toplevel.t) : Typed.Program.Item.t option ->
+      match toplevel.txt with
+      | Let ({ txt = name; loc = _ }, _, _, _)
+      | Let_mut ({ txt = name; loc = _ }, _, _)
+      | External { name = { txt = name; loc = _ }; _ } ->
+        Program_env.find_toplevel
+          program_env
+          (Module_scope.canonical_name module_ name)
+        |> Option.map ~f:(fun (toplevel : Toplevel.t) ->
+          Typed.Program.Item.Toplevel toplevel.ident)
+      | Module ({ txt = name; loc = _ }, _)
+      | Module_splice ({ txt = name; loc = _ }, _, _) ->
+        Some
+          (Module (name, items program_env (Module_scope.enter module_ name)))
+      | Type _
+      | Exception _
+      | Malformed_exception _
+      | Expect_test _
+      | Bench _
+      | Include _ -> None)
+;;
+
 let invalid_prelude error =
   raise_s [%message "The prelude is invalid" (error : Typecheck_error.t)]
 ;;
@@ -4405,6 +4418,7 @@ let check_module t (program_env : Program_env.t) module_
   let expect_tests, benches = List.partition_map checked ~f:Fn.id in
   let program =
     { Typed.Program.sccs = Queue.to_list program_env.sccs
+    ; items = items program_env module_
     ; expect_tests
     ; benches
     ; declaration_splices = Queue.to_list program_env.declaration_splices

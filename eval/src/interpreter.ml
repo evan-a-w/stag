@@ -40,7 +40,6 @@ let run (T ((module I), t)) expr ~level ~reflect =
 ;;
 
 let global_info (T ((module I), t)) ~ident = I.global_info t ~ident
-let eval (T ((module I), t)) = I.eval t
 
 let run_expect_test (T ((module I), t)) test ~on_expect =
   I.run_expect_test t test ~on_expect

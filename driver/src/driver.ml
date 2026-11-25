@@ -19,6 +19,8 @@ type t =
   }
 [@@deriving fields ~getters]
 
+let toplevels items = List.concat_map items ~f:Typed.Program.Item.toplevels
+
 let create_typecheck
   ?(interpreter = Stag_treewalk.interpreter)
   ?compile_time_c_calls
@@ -53,7 +55,7 @@ let check
       ()
   in
   let%map.Result checked = Typecheck.typecheck typecheck ~program in
-  { checked; interpreter; eval_order = [] }
+  { checked; interpreter; eval_order = toplevels checked.program.items }
 ;;
 
 module Module_group = struct
@@ -88,70 +90,60 @@ module Module_group = struct
   ;;
 end
 
-(* Pairs of toplevels, by canonical name, where the first refers to the second. *)
+(* The toplevels each toplevel refers to. *)
 let references (program : Typed.Program.t) =
-  List.concat_map program.sccs ~f:(fun scc ->
-    List.concat_map scc.members ~f:(fun member ->
+  let references = Typed.Ident.Table.create () in
+  List.iter program.sccs ~f:(fun scc ->
+    List.iter scc.members ~f:(fun member ->
       let to_ = Queue.create () in
       ignore
         (Typed.Expr.refers_to member.body ~f:(function
            | Toplevel ident ->
-             Queue.enqueue to_ ident.name;
+             Queue.enqueue to_ ident;
              false
            | Local _ -> false)
          : bool);
-      Queue.to_list to_ |> List.map ~f:(fun to_ -> member.ident.name, to_)))
+      Hashtbl.set references ~key:member.ident ~data:(Queue.to_list to_)));
+  references
 ;;
 
 (* The members of a group depend on those their toplevels refer to. Components
    of members come after those they depend on, and otherwise in [members] order,
    as do members within a component. *)
-let group_order ~prefix ~references (members : Module_group.t list) =
-  let index = String.Table.create () in
-  List.iteri members ~f:(fun i member ->
-    Hashtbl.set index ~key:(Module_group.name member) ~data:i);
-  let member_of name =
-    let%bind.Option rest = String.chop_prefix name ~prefix in
-    let%bind.Option member, _ = String.lsplit2 rest ~on:'.' in
-    Hashtbl.find index member
-  in
-  let deps = Array.create ~len:(List.length members) Int.Set.empty in
-  List.iter references ~f:(fun (from, to_) ->
-    match member_of from, member_of to_ with
-    | Some from, Some to_ when from <> to_ ->
-      deps.(from) <- Set.add deps.(from) to_
-    | _ -> ());
+let rec group_order
+  ~references
+  (items : Typed.Program.Item.t list)
+  (members : Module_group.t list)
+  =
   let members = Array.of_list members in
-  Scc.topological_components ~successors:(Array.map deps ~f:Set.to_list)
-  |> List.concat
-  |> List.map ~f:(Array.get members)
-;;
-
-(* The toplevels of each item, in program order, named canonically. *)
-let rec toplevel_names ~prefix (items : Signature.t) =
-  List.concat_map items ~f:(fun (item : Signature.Item.t) ->
-    match item with
-    | Value { name; _ } -> [ prefix ^ name ]
-    | Type _ | Exception _ -> []
-    | Module { name; items } ->
-      toplevel_names ~prefix:(prefix ^ name ^ ".") items)
-;;
-
-let rec eval_order ~prefix ~references ~(items : Signature.t) members =
-  group_order ~prefix ~references members
-  |> List.concat_map ~f:(fun (member : Module_group.t) ->
-    let name = Module_group.name member in
-    let items =
+  let member_items =
+    Array.map members ~f:(fun member ->
+      let name = Module_group.name member in
       List.find_map items ~f:(function
-        | Module { name = name'; items } when String.equal name name' ->
-          Some items
-        | Module _ | Value _ | Type _ | Exception _ -> None)
-      |> Option.value ~default:[]
-    in
-    let prefix = prefix ^ name ^ "." in
-    match member with
-    | File _ -> toplevel_names ~prefix items
-    | Group (_, members) -> eval_order ~prefix ~references ~items members)
+        | Module (name', items) when String.equal name name' -> Some items
+        | Module _ | Toplevel _ -> None)
+      |> Option.value ~default:[])
+  in
+  let member_toplevels = Array.map member_items ~f:toplevels in
+  let member_of = Typed.Ident.Table.create () in
+  Array.iteri member_toplevels ~f:(fun i toplevels ->
+    List.iter toplevels ~f:(fun ident ->
+      Hashtbl.set member_of ~key:ident ~data:i));
+  let deps =
+    Array.mapi member_toplevels ~f:(fun i toplevels ->
+      List.concat_map toplevels ~f:(fun ident ->
+        Hashtbl.find references ident |> Option.value ~default:[])
+      |> List.filter_map ~f:(Hashtbl.find member_of)
+      |> List.filter ~f:(fun j -> j <> i)
+      |> Int.Set.of_list
+      |> Set.to_list)
+  in
+  Scc.topological_components ~successors:deps
+  |> List.concat
+  |> List.concat_map ~f:(fun i ->
+    match members.(i) with
+    | File _ -> member_toplevels.(i)
+    | Group (_, members) -> group_order ~references member_items.(i) members)
 ;;
 
 let check_modules
@@ -176,29 +168,19 @@ let check_modules
       typecheck
       ~program:(List.map groups ~f:Module_group.to_toplevel)
   in
-  let idents =
-    List.concat_map checked.program.sccs ~f:(fun scc ->
-      List.map scc.members ~f:(fun member -> member.ident.name, member.ident))
-    |> String.Map.of_alist_exn
-  in
   let eval_order =
-    eval_order
-      ~prefix:""
+    group_order
       ~references:(references checked.program)
-      ~items:checked.signature
+      checked.program.items
       groups
-    |> List.map ~f:(Map.find_exn idents)
   in
   { checked; interpreter; eval_order }
 ;;
 
 let eval ?(limits = Limits.unlimited) t =
   Interpreter.set_limits t.interpreter limits;
-  let%bind.Or_error () =
-    List.fold_result t.eval_order ~init:() ~f:(fun () ident ->
-      Interpreter.eval_toplevel t.interpreter ~ident)
-  in
-  Interpreter.eval t.interpreter
+  List.fold_result t.eval_order ~init:() ~f:(fun () ident ->
+    Interpreter.eval_toplevel t.interpreter ~ident)
 ;;
 
 let check_files
@@ -241,5 +223,5 @@ let check_prelude ?interpreter ?(limits = Limits.unlimited) ?output prelude =
     create_typecheck ?interpreter ~limits ~output ~prelude ()
   in
   let%map.Result checked = Typecheck.check_prelude typecheck in
-  { checked; interpreter; eval_order = [] }
+  { checked; interpreter; eval_order = toplevels checked.program.items }
 ;;

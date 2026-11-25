@@ -35,7 +35,6 @@ val run
   -> Value.t Or_error.t
 
 val global_info : t -> ident:Typed.Ident.t -> Typed.Ident_info.t option
-val eval : t -> unit Or_error.t
 
 val run_expect_test
   :  t
