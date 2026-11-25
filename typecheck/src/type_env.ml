@@ -451,6 +451,12 @@ module Vars = struct
     fixed t default ~reason:"its type is written without a mode" ~loc
   ;;
 
+  let param_locality_reason ~loc =
+    Mode.Reason.create
+      ~loc
+      "it is a mode parameter on an arrow in a declaration, which is global"
+  ;;
+
   let mode_side t ({ txt; loc } : Syntax.Mode_expr.t) ~default
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
@@ -460,9 +466,21 @@ module Vars = struct
         Arrow_modes.Side.Var var)
     | Params params, Var name ->
       (match Map.find params name with
-       | Some (AMode _) -> error ~loc (Mode_parameter_on_arrow name)
-       | Some (ATy _ | ARow _) | None ->
-         error ~loc (Mode_variable_in_declaration name))
+       | Some (AMode (Fixed { stage; provenance })) ->
+         Ok (Arrow_modes.Side.Fixed { stage; provenance; locality = Global })
+       | Some (AMode (Var var)) ->
+         (* A mode argument has no locality: the arrow's is the default. *)
+         let%map.Result () =
+           if Mode.Var.is_generic var
+           then Ok ()
+           else
+             Mode.Var.at_most var Locality Global (param_locality_reason ~loc)
+             |> Result.map_error ~f:(fun error ->
+               Typecheck_error.create ~loc (Mode_error error))
+         in
+         Arrow_modes.Side.Var var
+       | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
+       | None -> error ~loc (Mode_variable_in_declaration name))
     | (Annotation _ | Params _), Atoms atoms ->
       let%map.Result const = Mode_atoms.declared atoms ~default ~loc in
       fixed
@@ -725,6 +743,63 @@ let result_floor (side : Arrow_modes.Side.t) ~loc =
     |> Result.map_error ~f:(fun (_ : Mode.Error.t) -> never_const)
 ;;
 
+(* A mode argument is at least what its parameter's uses need of it, as a
+   function's result is never [const]. *)
+let mode_args_at_floors (decl : Decl.t) args ~loc =
+  if not (Lazy.is_val decl.params)
+  then Ok ()
+  else
+    List.zip_exn (force decl.params) args
+    |> List.fold_result ~init:() ~f:(fun () (param, (arg : Type.arg)) ->
+      match param, arg with
+      | Type.AMode (Var param), AMode arg ->
+        let floor = Mode.Var.lower param in
+        (match arg with
+         | Fixed const ->
+           if Mode.Axis.Stage.compare const.stage floor.stage >= 0
+              && Mode.Axis.Provenance.compare const.provenance floor.provenance
+                 >= 0
+           then Ok ()
+           else
+             Error
+               (Typecheck_error.create
+                  ~loc
+                  (Invalid_mode
+                     (sprintf
+                        "this mode argument of %s must be at least %s"
+                        decl.name
+                        (List.filter_opt
+                           [ Option.some_if
+                               (not
+                                  (Mode.Axis.Stage.equal
+                                     floor.stage
+                                     Mode.Axis.Stage.min))
+                               (Mode.Axis.Stage.sexp_of_t floor.stage)
+                           ; Option.some_if
+                               (not
+                                  (Mode.Axis.Provenance.equal
+                                     floor.provenance
+                                     Mode.Axis.Provenance.min))
+                               (Mode.Axis.Provenance.sexp_of_t floor.provenance)
+                           ]
+                         |> List.map
+                              ~f:(Fn.compose String.lowercase Sexp.to_string)
+                         |> String.concat ~sep:" "))))
+         | Var var ->
+           let reason =
+             Mode.Reason.create
+               ~loc
+               (sprintf "it is a mode argument of %s" decl.name)
+           in
+           (let%bind.Result () =
+              Mode.Var.at_least var Stage floor.stage reason
+            in
+            Mode.Var.at_least var Provenance floor.provenance reason)
+           |> Result.map_error ~f:(fun error ->
+             Typecheck_error.create ~loc (Mode_error error)))
+      | _ -> Ok ())
+;;
+
 (* Each elaborates to the type and the syntax with each type it names by its
    canonical name ([Resolved]), so that it names the same types wherever it is. *)
 let rec elaborate'
@@ -953,6 +1028,7 @@ and elaborate_con
       , Ptr_sugar.resugar sugar args_syntax )
   in
   let%bind.Result kind = definition decl ~loc in
+  let%bind.Result () = mode_args_at_floors decl args ~loc in
   let%map.Result ty =
     match (kind : Type_decl.Kind.t) with
     | Variant _ | Record _ | Abstract | Splice _ | Malformed _ ->
@@ -1090,7 +1166,14 @@ let declare
          match param.txt with
          | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
          | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))
-         | Mode _ -> AMode (Var (Mode.Var.create_generic (Fresh.modes t.fresh)))))
+         | Mode _ ->
+           AMode
+             (Var
+                (Mode.Var.create_generic
+                   ~at_most:
+                     ( { Mode.Const.max with locality = Global }
+                     , Vars.param_locality_reason ~loc:param.loc )
+                   (Fresh.modes t.fresh)))))
   in
   if not lazily then ignore (force params : Type.arg list);
   Hashtbl.set t.declared_types ~key:name ~data:decl.name.loc;

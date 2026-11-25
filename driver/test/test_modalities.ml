@@ -704,12 +704,6 @@ let read = let z @ const = b.v in z
     |}]
 ;;
 
-let%expect_test "a mode parameter isn't an arrow's mode" =
-  check {|type t['p : mode] = { f : string @ 'p -> string }|};
-  [%expect
-    {| The mode parameter 'p can't be the mode of an arrow: a declaration's arrows have fixed modes, and its mode parameters are only arguments of types and modalities, as in [ptr[string @@ 'p]] |}]
-;;
-
 let%expect_test "printing: a variable only of mode arguments shares an equal \
                  arrow variable's name"
   =

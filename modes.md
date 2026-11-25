@@ -313,6 +313,12 @@ free there on locality, keeps its name in both places.
 An arrow's side fixed to a constant (by a declaration, as a record field's
 `string -> string`) prints only its atoms other than the default, as
 annotations and declarations alike read unwritten axes as the default.
+A declared arrow's side may instead name one of the declaration's mode
+parameters (`type cmp['k, 'p : mode] = { compare : 'k @ 'p -> 'k @ 'p -> int }`):
+its stage and provenance are the argument's, its locality `global` (the
+parameter is bounded so). The parameter gets the side's variance: an
+argument's is contravariant, a result's covariant; as a result is never
+`const`, the parameter is then at least `portable`.
 
 `release(locality('a)) <= locality('b)` is not a default between a
 parameter and its result: most curried and higher-order functions don't have

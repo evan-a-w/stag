@@ -772,10 +772,13 @@ let%expect_test "learn_stag.md" =
       type cell['a, 'm0 : mode] = { value : 'a @@ 'm0 }
       val gc_cell : cell[string, gc]
       val read_cell : cell['a, 'm0] -> 'a
+      type sorter['a, 'm0 : mode] = { cmp : 'a @ 'm0 -> ('a @ 'm0 -> int) @ 'm0 }
+      val by_length : sorter[string, external]
     end
     Doc.gc_cell = {Doc.value = "x"}
     Doc.read_cell = <fun>
-    === learn_stag.md:688
+    Doc.by_length = {Doc.cmp = <fun>}
+    === learn_stag.md:694
     module Doc : sig
       val apply : (string -> int) -> int
       val local_ok : int
@@ -787,18 +790,18 @@ let%expect_test "learn_stag.md" =
     Doc.local_ok = 1
     Doc.fs = Cons (Box.make (<fun>, Nil))
     Doc.widen = <fun>
-    === learn_stag.md:697
-    File "doc.stag", line 699, characters 45-51:
-    699 | let bad = apply (fun (s : string) -> let g @ global = s in String.length g)
-                                                       ^^^^^^
-    Error: This is regional, because it is annotated local (at doc.stag:698:24-29), then a function is used at a type with other modes, then s is passed to the function (at doc.stag:699:16-75), then s is used (at doc.stag:699:54-55), then it is bound by an annotated let (at doc.stag:699:45-51), but must be at most global, because it is annotated global (at doc.stag:699:45-51)
     === learn_stag.md:703
-    File "doc.stag", line 706, characters 16-17:
-    706 | let bad = widen p
+    File "doc.stag", line 705, characters 45-51:
+    705 | let bad = apply (fun (s : string) -> let g @ global = s in String.length g)
+                                                       ^^^^^^
+    Error: This is regional, because it is annotated local (at doc.stag:704:24-29), then a function is used at a type with other modes, then s is passed to the function (at doc.stag:705:16-75), then s is used (at doc.stag:705:54-55), then it is bound by an annotated let (at doc.stag:705:45-51), but must be at most global, because it is annotated global (at doc.stag:705:45-51)
+    === learn_stag.md:709
+    File "doc.stag", line 712, characters 16-17:
+    712 | let bad = widen p
                           ^
     Error: This expression has type ptr[string] but an expression was expected of type ptr[string @@ external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
-    === learn_stag.md:722
+    === learn_stag.md:728
     module Doc : sig
       val id : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
       type r = { x : string @@ gc; y : string }
@@ -814,7 +817,7 @@ let%expect_test "learn_stag.md" =
     Doc.mk = <fun>
     Doc.same = <fun>
     Doc.static_if = <fun>
-    === learn_stag.md:757
+    === learn_stag.md:763
     module Doc : sig
       val m : Core.Map.t[int, string, portable]
       val wide : Core.Map.t[int, string, external]
@@ -835,22 +838,22 @@ let%expect_test "learn_stag.md" =
     Doc.static_keywords = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = "in"; value = 2; right = Core.Map.Empty; height = 1}); key = "let"; value = 1; right = Core.Map.Empty; height = 2})
     Doc.cache = {Core.Lru.capacity = 2; compare = <fun>; index = Ptr.make (Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = Ptr.make {Core.Lru.key = 2; value = "b"; prev = Core.Lru.Entry (Ptr.make {Core.Lru.key = 3; value = "c"; prev = Core.Lru.Nil; next = Core.Lru.Entry <cycle>}); next = C...
     Doc.used = None
-    === learn_stag.md:780
-    File "doc.stag", line 782, characters 54-59:
-    782 | let as_external : Core.Lru.t[int, string, external] = cache
+    === learn_stag.md:786
+    File "doc.stag", line 788, characters 54-59:
+    788 | let as_external : Core.Lru.t[int, string, external] = cache
                                                                 ^^^^^
     Error: This expression has type Core.Lru.t[int, string, gc] but an expression was expected of type Core.Lru.t[int, string, external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
-    === learn_stag.md:791
+    === learn_stag.md:797
     module Doc : sig
       val labs : int -> int
       val a : int
     end
     Doc.labs = <fun>
     Doc.a = 42
-    === learn_stag.md:796
-    File "doc.stag", line 797, characters 18-31:
-    797 | external strlen : string -> int = "strlen"
+    === learn_stag.md:802
+    File "doc.stag", line 803, characters 18-31:
+    803 | external strlen : string -> int = "strlen"
                             ^^^^^^^^^^^^^
     Error: The external strlen has no C signature: string would be passed to C as a pointer, which is not supported yet
     |}]

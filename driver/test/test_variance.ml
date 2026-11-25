@@ -770,3 +770,81 @@ let%expect_test "a quote's use of a toplevel being checked is by variance" =
     val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and release(locality('m1)) <= locality('m4) and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
     |}]
 ;;
+
+let%expect_test "a mode parameter on a declared arrow" =
+  (* An argument's is contravariant, a result's covariant. *)
+  check
+    (ext
+     ^ {|
+type takes['p : mode] = { f : string @ 'p -> int }
+type gives['p : mode] = { g : unit -> string @ 'p }
+let takes_ok (x : takes[external]) : takes[gc] = x
+let gives_ok (x : gives[gc]) : gives[external] = x
+let length = { f = fun (s @ external) -> String.length s }
+let used : takes[external] = length
+let n = length.f (ext "a")
+|}
+    );
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    type takes['m0 : mode] = { f : string @ 'm0 -> int }
+    type gives['m0 : mode] = { g : unit -> string @ 'm0 }
+    val takes_ok : takes[external] @ 'm0 -> takes[gc] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val gives_ok : gives[gc] @ 'm0 -> gives[external] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val length : takes[_]
+    val used : takes[external]
+    val n : int
+    |}];
+  check
+    {|
+type takes['p : mode] = { f : string @ 'p -> int }
+let takes_bad (x : takes[gc]) : takes[external] = x
+|};
+  [%expect
+    {|
+    This expression has type takes[gc] but an expression was expected of type takes[external]
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
+    |}];
+  check
+    {|
+type gives['p : mode] = { g : unit -> string @ 'p }
+let gives_bad (x : gives[external]) : gives[gc] = x
+|};
+  [%expect
+    {|
+    This expression has type gives[external] but an expression was expected of type gives[gc]
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
+    |}];
+  (* What the field's function is given must fit its argument's mode. *)
+  check
+    (ext
+     ^ {|
+type takes['p : mode] = { f : string @ 'p -> int }
+let call (x : takes[gc]) = x.f (ext "a")
+|}
+    );
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:31-40), then it is passed to a function (at t.stag:5:27-40), but must be at most gc, because the types are unified, then a function is used at a type with other modes |}];
+  (* A mode parameter has no locality: the arrow's is the default, global. *)
+  check
+    {|
+type takes['p : mode] = { f : string @ 'p -> int }
+let call (x : takes[gc]) (s @ local) = x.f s
+|};
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:3:30-35), then s is passed to the function (at t.stag:3:39-44), then s is used (at t.stag:3:43-44), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:39-44), but must be at most global, because it is a mode parameter on an arrow in a declaration, which is global (at t.stag:2:11-20), then a function is used at a type with other modes |}];
+  round_trip
+    {|
+type cmp['k, 'p : mode] = { compare : 'k @ 'p -> 'k @ 'p -> int }
+type alias['p : mode] = string @ 'p -> string @ 'p
+let apply (c : cmp[string, external]) (f : alias[gc]) = c.compare (f "a") "b"
+|}
+    ~show:`Signature;
+  [%expect
+    {|
+    type cmp['a, 'm0 : mode] = { compare : 'a @ 'm0 -> 'a @ 'm0 -> int }
+    type alias['m0 : mode] = string @ 'm0 -> string @ 'm0
+    val apply : cmp[string, external] @ 'm0 -> ((string -> string) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    |}]
+;;

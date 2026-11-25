@@ -139,7 +139,6 @@ module Kind = struct
     | Locality_in_mode_argument
     | Relative_locality_modality
     | Mode_variable_in_declaration of string
-    | Mode_parameter_on_arrow of string
     | Anonymous_mode_in_constraint
     | Invalid_mode of string
     | Invalid_external of
@@ -665,13 +664,6 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "The mode variable '%s is not allowed in a declaration unless it is a \
        parameter declared ['%s : mode]: its arrows have fixed modes"
-      var
-      var
-  | Mode_parameter_on_arrow var ->
-    sprintf
-      "The mode parameter '%s can't be the mode of an arrow: a declaration's \
-       arrows have fixed modes, and its mode parameters are only arguments of \
-       types and modalities, as in [ptr[string @@ '%s]]"
       var
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why

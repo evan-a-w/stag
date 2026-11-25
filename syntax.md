@@ -496,6 +496,9 @@ take none. A declaration's mode parameters are declared `'p : mode`, and are
 on stage and provenance only (a locality atom in a mode argument is an
 error); a type argument of several atoms is a mode, and one of one atom or
 a variable is read as a mode or a type by the declaration's parameter. A
+declared arrow's side may name a mode parameter (`{compare : 'k @ 'p -> int}`)
+for its stage and provenance; its locality is `global`, as an unwritten
+side's. No other mode variable is allowed in a declaration. A
 name in an annotation is a mode variable or a type variable, not both.
 
 An annotation's type may end with constraints between mode variables, or

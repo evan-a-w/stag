@@ -672,6 +672,12 @@ itself is `ptr['a, 'p : mode]`, with `ptr[t @@ m]` sugar for `ptr[t, m]`.
 type cell['a, 'p : mode] = { value : 'a @@ 'p }
 let gc_cell : cell[string, gc] = { value = "x" }
 let read_cell (c : cell['a, 'p]) = c.value
+
+(* A declared arrow may take and give values of a mode parameter. The closure
+   of [cmp a] holds [a], so is of ['p] too. *)
+type sorter['k, 'p : mode] = { cmp : 'k @ 'p -> ('k @ 'p -> int) @ 'p }
+let by_length : sorter[string, external] =
+  { cmp = fun a b -> Int.sub (String.length a) (String.length b) }
 ```
 
 ### Variance

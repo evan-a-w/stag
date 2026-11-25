@@ -119,12 +119,13 @@ val generalize : t list -> rank:int -> unit
 val reopen : t -> rank:int -> unit
 
 (** New generic nodes, one per axis (found by axis in the result and in
-    [edges]), constrained only by [edges] [(lo, m, hi, reason)] between them,
-    which must not tighten their bounds. Nothing else refers to them yet, so
-    this is allowed under [atomically]: an enclosing one being undone leaves
-    them as they are. *)
+    [edges]), constrained only by [uppers] [(axis, point, reason)] and [edges]
+    [(lo, m, hi, reason)] between them, which must not tighten their bounds.
+    Nothing else refers to them yet, so this is allowed under [atomically]: an
+    enclosing one being undone leaves them as they are. *)
 val create_generic
-  :  var_id:int
+  :  ?uppers:(Axis.Any.t * int * Reason.t) list
+  -> var_id:int
   -> Axis.Any.t list
   -> edges:((Axis.Any.t -> t) -> (t * Morphism.t * t * Reason.t) list)
   -> Axis.Any.t

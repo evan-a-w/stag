@@ -651,3 +651,24 @@ let d = .~(let k = id (fun p -> let y = (p, "s") in .< y >.) in print_endline "r
   [%expect
     {| The quote can't embed y, as it may not be portable. Bind it as (y @ portable) to embed it, or write [forget y in ...] to make y a free variable of the quote |}]
 ;;
+
+let%expect_test "mode arguments are at least their parameter's floor" =
+  modes
+    {|
+type c['p : mode] = { k : unit -> int @ 'p }
+let z (r : c[const]) = r
+|};
+  modes
+    {|
+type c['p : mode] = { k : unit -> int @ 'p }
+let z (r : c[portable]) = r
+let w (r : c['m]) = r
+|};
+  [%expect
+    {|
+    This mode is invalid: this mode argument of c must be at least portable
+    type c['m0 : mode] = { k : unit -> int @ 'm0 }
+    val z : c[portable] -> c[portable]
+    val w : c['m0] -> c['m0]
+    |}]
+;;
