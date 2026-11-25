@@ -612,8 +612,8 @@ and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
   | Free name -> unsupported "free %s" name
   | Intrinsic _ -> unsupported "an intrinsic not applied"
 
-(* [prim] given [applied] (latest first) then [args]: a closure made at
-   [site] while too few. *)
+(* [prim] given [applied] (latest first) then [args]: a closure made at [site]
+   while too few. *)
 and apply_prim t ctx prim applied args ~site =
   let rec take applied = function
     | [] -> applied, []
@@ -625,12 +625,7 @@ and apply_prim t ctx prim applied args ~site =
   if List.length applied < Prim.arity prim
   then
     Obj
-      (make
-         t
-         ctx
-         Partial_application
-         site
-         (Prim_partial (prim, applied, site)))
+      (make t ctx Partial_application site (Prim_partial (prim, applied, site)))
   else (
     let values =
       List.rev_map applied ~f:(function
@@ -692,8 +687,11 @@ and call t ctx obj closure args ~tail =
       escapes arg ~what:"a reference, from an argument of a tail call,");
   let region = Region.create (sprintf "the region of a call of %s" obj.site) in
   let env =
-    List.fold2_exn closure.params args ~init:closure.env ~f:(fun env param arg ->
-      Map.set env ~key:param ~data:(ref (Value arg)))
+    List.fold2_exn
+      closure.params
+      args
+      ~init:closure.env
+      ~f:(fun env param arg -> Map.set env ~key:param ~data:(ref (Value arg)))
   in
   let result =
     eval

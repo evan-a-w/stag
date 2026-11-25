@@ -1,12 +1,15 @@
 open! Import
 
-(* Random functions passing allocations through closures, higher-order
-   parameters, generalized [let]s, tuples, records and variants holding
-   closures, cells captured by closures, partial applications, [region_],
-   [exclave_] and [stack_], and stores to globals; run by [Region_check] from
-   callers using what they give at [global] and at [local], and passing them
-   closures that keep what they are given. None uses an allocation after its
-   region ends. *)
+(* Random programs passing allocations through closures, curried and partially
+   applied functions (of toplevels, of closures they return, and of a curried
+   parameter), higher-order parameters, toplevels calling each other and
+   recursing, generalized [let]s, tuples, records and variants holding closures
+   (also returned from toplevels), cells holding and captured by closures,
+   [region_], [exclave_] (also of a [let]) and [stack_], tail calls returning
+   allocations (also of recursive builders and searches), and stores to globals;
+   run by [Region_check] from callers using what they give at [global] and at
+   [local], and passing them closures that keep what they are given. None uses
+   an allocation after its region ends. *)
 
 let header =
   {|
@@ -14,13 +17,35 @@ let keep : ptr[box[int]] = Ptr.make (Box.make 0)
 let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
 let sum (b : box[int]) = match b with *n -> n
 let mk2 (a : int) (b : int) = Box.make (Int.add a b)
+let wrap (x : int) = Box.make x
+let via (x : int) = wrap x
+let count (n : int) (x : int) =
+  match Int.equal n 0 with true -> Box.make x | false -> count (Int.sub n 1) (Int.add x 1)
+let pick (n : int) (b : box[int]) =
+  match Int.equal n 0 with true -> b | false -> pick (Int.sub n 1) b
+let ev (n : int) = match Int.equal n 0 with true -> Box.make 1 | false -> od (Int.sub n 1)
+let od (n : int) = match Int.equal n 0 with true -> Box.make 0 | false -> ev (Int.sub n 1)
+let h (y : int) = Box.make y
+let k (j : int -> box[int]) = sum (j 1)
+let m (a : int) (b : int) = Box.make (Int.add a b)
 |}
 ;;
 
 module Gen = struct
+  (* What a generated toplevel gives, given an [int]. *)
+  module Shape = struct
+    type t =
+      | Curried (** [int -> int -> box[int]] *)
+      | Returns_closure (** [int -> int -> box[int]], its body a function *)
+      | Pair (** [int -> (int -> box[int]) * int] *)
+      | Variant (** [int -> [`C of int -> box[int]]] *)
+      | Recursive (** [int -> box[int]], recursing *)
+  end
+
   type t =
     { random : Random.State.t
     ; mutable fresh : int
+    ; mutable helpers : (string * Shape.t) list
     }
 
   let pick t choices =
@@ -41,9 +66,20 @@ module Gen = struct
 
   (* A closure of type [int -> box[int]]. *)
   and closure t ~ints depth =
-    match if depth <= 0 then 0 else Random.State.int t.random 4 with
-    | 0 -> "h"
+    match if depth <= 0 then 0 else Random.State.int t.random 6 with
+    | 0 -> pick t [ "h"; "keepc.*" ]
     | 1 -> sprintf "(mk2 %s)" (int t ~ints (depth - 1))
+    | 2 -> sprintf "(m %s)" (int t ~ints (depth - 1))
+    | 3 ->
+      (match
+         List.filter t.helpers ~f:(fun (_, shape) ->
+           match shape with
+           | Curried | Returns_closure -> true
+           | Pair | Variant | Recursive -> false)
+       with
+       | [] -> "h"
+       | helpers ->
+         sprintf "(%s %s)" (fst (pick t helpers)) (int t ~ints (depth - 1)))
     | _ ->
       let y = name t "y" in
       sprintf
@@ -61,7 +97,7 @@ module Gen = struct
     match
       if depth <= 0
       then Random.State.int t.random 2
-      else Random.State.int t.random 17
+      else Random.State.int t.random 30
     with
     | 0 -> sprintf "Box.make %s" (pick t ints)
     | 1 -> sprintf "stack_ (Box.make %s)" (pick t ints)
@@ -138,6 +174,88 @@ module Gen = struct
       sprintf
         "Box.make (k (fun (z : int) -> %s))"
         (box t ~ints:("z" :: ints) (depth - 1) ~tail:true)
+    | 16 ->
+      sprintf "%s %s" (pick t [ "wrap"; "via"; "count 2"; "ev"; "od" ]) (int ())
+    | 17 -> sprintf "pick 2 %s" (sub ~tail:false ())
+    | 18 ->
+      let go = name t "go"
+      and n = name t "n" in
+      sprintf
+        "(let %s (%s : int) = match Int.equal %s 0 with true -> %s | false -> \
+         %s (Int.sub %s 1) in %s 2)"
+        go
+        n
+        n
+        (box t ~ints:(n :: ints) (depth - 1) ~tail:true)
+        go
+        n
+        go
+    | 19 -> sprintf "m %s %s" (int ()) (int ())
+    | 20 ->
+      let p = name t "p" in
+      sprintf "(let %s = m %s in %s %s)" p (int ()) p (int ())
+    | 21 | 22 | 23 ->
+      (match t.helpers with
+       | [] -> sub ()
+       | helpers ->
+         let helper, (shape : Shape.t) = pick t helpers in
+         (match shape with
+          | Curried | Returns_closure ->
+            if Random.State.bool t.random
+            then sprintf "%s %s %s" helper (int ()) (int ())
+            else (
+              let p = name t "p" in
+              sprintf "(let %s = %s %s in %s %s)" p helper (int ()) p (int ()))
+          | Pair ->
+            let c = name t "c"
+            and n = name t "n" in
+            sprintf
+              "(match %s %s with (%s, %s) -> %s (Int.add %s %s))"
+              helper
+              (int ())
+              c
+              n
+              c
+              n
+              (int ())
+          | Variant ->
+            let c = name t "c" in
+            sprintf
+              "(match %s %s with `C %s -> %s %s)"
+              helper
+              (int ())
+              c
+              c
+              (int ())
+          | Recursive -> sprintf "%s 2" helper))
+    | 24 ->
+      let c = name t "c" in
+      sprintf
+        "(let mut %s = (fun (y : int) -> Box.make y) in %s <- %s; %s %s)"
+        c
+        c
+        (closure ())
+        c
+        (int ())
+    | 25 ->
+      if tail
+      then (
+        let b = name t "b" in
+        sprintf
+          "exclave_ (let %s = %s in Box.make (sum %s))"
+          b
+          (sub ~tail:false ())
+          b)
+      else sub ()
+    | 26 ->
+      let p = name t "p" in
+      sprintf
+        "(let %s = (fun (a : int) (b : int) -> Box.make (Int.add a b)) %s in \
+         %s %s)"
+        p
+        (int ())
+        p
+        (int ())
     | _ ->
       let n = name t "n" in
       sprintf
@@ -147,34 +265,85 @@ module Gen = struct
         n
   ;;
 
+  (* A toplevel [f] may use, itself using those before it and the header's [h],
+     [k] and [m]. *)
+  let helper t =
+    let name = name t "t" in
+    let shape : Shape.t =
+      pick t Shape.[ Curried; Returns_closure; Pair; Variant; Recursive ]
+    in
+    let box ints = box t ~ints 3 ~tail:true in
+    let source =
+      match shape with
+      | Curried ->
+        sprintf "let %s (a : int) (b : int) = %s\n" name (box [ "a"; "b" ])
+      | Returns_closure ->
+        sprintf
+          "let %s (a : int) = fun (b : int) -> %s\n"
+          name
+          (box [ "a"; "b" ])
+      | Pair ->
+        sprintf
+          "let %s (a : int) = ((fun (b : int) -> %s), a)\n"
+          name
+          (box [ "a"; "b" ])
+      | Variant ->
+        sprintf
+          "let %s (a : int) = `C (fun (b : int) -> %s)\n"
+          name
+          (box [ "a"; "b" ])
+      | Recursive ->
+        sprintf
+          "let %s (n : int) = match Int.equal n 0 with true -> %s | false -> \
+           %s (Int.sub n 1)\n"
+          name
+          (box [ "n" ])
+          name
+    in
+    t.helpers <- (name, shape) :: t.helpers;
+    source
+  ;;
+
   let program random =
-    let t = { random; fresh = 0 } in
-    sprintf "let f h k (x : int) = %s\n" (box t ~ints:[ "x" ] 4 ~tail:true)
+    let t = { random; fresh = 0; helpers = [] } in
+    let helpers =
+      List.init (Random.State.int random 3) ~f:(fun _ -> helper t)
+      |> String.concat
+    in
+    helpers
+    ^ sprintf "let f h k m (x : int) = %s\n" (box t ~ints:[ "x" ] 4 ~tail:true)
   ;;
 end
 
 (* Callers of [f], each its own entry. *)
 let uses =
+  let m = "(fun (a : int) -> fun (b : int) -> Box.make (Int.add a b))" in
   [ ( "g"
     , "let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) \
-       (fun j -> sum (j 1)) 1 in sum r" )
+       (fun j -> sum (j 1)) "
+      ^ m
+      ^ " 1 in sum r" )
   ; ( "l"
     , "let l (u : unit) = let r @ local = f (fun (y : int) -> Box.make y) (fun \
-       j -> sum (j 1)) 1 in sum r [@nontail]" )
+       j -> sum (j 1)) mk2 1 in sum r [@nontail]" )
   ; ( "s"
     , "let s (u : unit) = let r @ local = f (fun (y : int) -> let b = Box.make \
-       y in keep.* <- b; b) (fun j -> keepc.* <- j; 0) 1 in sum r [@nontail]" )
+       y in keep.* <- b; b) (fun j -> keepc.* <- j; 0) (fun (a : int) -> \
+       keepc.* <- mk2 a; fun (b : int) -> Box.make b) 1 in sum r [@nontail]" )
   ; ( "p"
     , "let p (u : unit) = let r = f (mk2 1) (fun j -> sum (stack_ (Box.make \
-       (sum (j 2))))) 2 in keep.* <- r; sum keep.*" )
+       (sum (j 2))))) "
+      ^ m
+      ^ " 2 in keep.* <- r; sum keep.*" )
   ; ( "t"
     , "let t (u : unit) = let r @ local = f (fun (y : int) -> exclave_ \
-       Box.make y) (fun j -> let b @ local = j 1 in sum b [@nontail]) 1 in sum \
-       r [@nontail]" )
+       Box.make y) (fun j -> let b @ local = j 1 in sum b [@nontail]) (fun (a \
+       : int) -> exclave_ fun (b : int) -> exclave_ Box.make (Int.add a b)) 1 \
+       in sum r [@nontail]" )
   ]
 ;;
 
-let fuzz ?override ~seed ~runs () =
+let fuzz ?override ?tail_calls_end_regions ~seed ~runs () =
   let random = Random.State.make [| seed |] in
   let outcomes = String.Table.create () in
   let count key = Hashtbl.incr outcomes key in
@@ -184,7 +353,9 @@ let fuzz ?override ~seed ~runs () =
     let body = Gen.program random in
     List.iter uses ~f:(fun (entry, use) ->
       let source = header ^ body ^ use ^ "\n" in
-      match Region_check.run ?override source ~entry with
+      match
+        Region_check.run ?override ?tail_calls_end_regions source ~entry
+      with
       | Rejected _ -> count "rejected"
       | Returned { in_regions; _ } ->
         regions := !regions + in_regions;
@@ -202,10 +373,17 @@ let fuzz ?override ~seed ~runs () =
 ;;
 
 let%expect_test "no allocation is used after its region ends" =
-  let failures, outcomes, regions = fuzz ~seed:7 ~runs:300 () in
-  Queue.iter failures ~f:print_endline;
-  print_s [%message (outcomes : (string * int) list) (regions : int)];
-  [%expect {| ((outcomes ((ran 920) (rejected 580))) (regions 2983)) |}]
+  List.iter [ 7; 8; 9 ] ~f:(fun seed ->
+    let failures, outcomes, regions = fuzz ~seed ~runs:300 () in
+    Queue.iter failures ~f:print_endline;
+    print_s
+      [%message (seed : int) (outcomes : (string * int) list) (regions : int)]);
+  [%expect
+    {|
+    ((seed 7) (outcomes ((ran 872) (rejected 628))) (regions 3602))
+    ((seed 8) (outcomes ((ran 859) (rejected 641))) (regions 3818))
+    ((seed 9) (outcomes ((ran 911) (rejected 589))) (regions 4165))
+    |}]
 ;;
 
 (* The same programs, with what follows a side made as if the side were always
@@ -222,14 +400,38 @@ let%expect_test "with placements that ignore their instance, some are" =
   print_endline (Option.value_exn (Queue.peek failures));
   [%expect
     {|
-    (outcomes ((ran 527) (rejected 580) ("use after free" 393)))
+    (outcomes ((ran 519) (rejected 628) ("use after free" 353)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
     let sum (b : box[int]) = match b with *n -> n
     let mk2 (a : int) (b : int) = Box.make (Int.add a b)
-    let f h k (x : int) = ((keepc.* <- (mk2 x); (h x)))
-    let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) 1 in sum r
-    a reference, from a toplevel, to the Partial_application at t.stag:5:30-52, made in the region of a call of toplevel f, which ends first
+    let wrap (x : int) = Box.make x
+    let via (x : int) = wrap x
+    let count (n : int) (x : int) =
+      match Int.equal n 0 with true -> Box.make x | false -> count (Int.sub n 1) (Int.add x 1)
+    let pick (n : int) (b : box[int]) =
+      match Int.equal n 0 with true -> b | false -> pick (Int.sub n 1) b
+    let ev (n : int) = match Int.equal n 0 with true -> Box.make 1 | false -> od (Int.sub n 1)
+    let od (n : int) = match Int.equal n 0 with true -> Box.make 0 | false -> ev (Int.sub n 1)
+    let h (y : int) = Box.make y
+    let k (j : int -> box[int]) = sum (j 1)
+    let m (a : int) (b : int) = Box.make (Int.add a b)
+    let t1 (a : int) (b : int) = ((match `A (m (Int.add a b)) with `A g2 -> g2 (Int.add b b)))
+    let f h k m (x : int) = (Box.make (k (fun (z : int) -> ((t1 (Int.add z x)) 1))))
+    let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) (fun (a : int) -> fun (b : int) -> Box.make (Int.add a b)) 1 in sum r
+    a call of the Partial_application at t.stag:16:28-50, made in the region of a call of toplevel t1, after it ended
     |}]
+;;
+
+(* The same programs, run as if a tail call didn't end the region of the
+   function making it: what the callee makes in its caller's region is then
+   freed when that function returns. *)
+let%expect_test "with tail calls not ending their region" =
+  let failures, outcomes, _ =
+    fuzz ~tail_calls_end_regions:false ~seed:7 ~runs:300 ()
+  in
+  print_s [%message (outcomes : (string * int) list)];
+  Option.iter (Queue.peek failures) ~f:print_endline;
+  [%expect {| (outcomes ((ran 872) (rejected 628))) |}]
 ;;

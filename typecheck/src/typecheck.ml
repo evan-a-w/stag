@@ -1963,8 +1963,7 @@ let rec prim_head (expr : Typed.Expr.t) =
   match expr.desc with
   | Var (Prim prim) -> Some (prim, expr, 0)
   | App (f, _) ->
-    Option.map (prim_head f) ~f:(fun (prim, head, args) ->
-      prim, head, args + 1)
+    Option.map (prim_head f) ~f:(fun (prim, head, args) -> prim, head, args + 1)
   | _ -> None
 ;;
 

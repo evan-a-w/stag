@@ -31,9 +31,7 @@ let add t site ~frame = t.sites <- (site, frame) :: t.sites
 let retract t ~loc ~kind =
   t.sites
   <- List.filter t.sites ~f:(fun ((site : Mode_rules.Site.t), _) ->
-       not
-         (Loc.equal site.loc loc
-          && Typed.Allocation.Kind.equal site.kind kind))
+       not (Loc.equal site.loc loc && Typed.Allocation.Kind.equal site.kind kind))
 ;;
 
 let frame t ~parent ~name ~loc ~ty =

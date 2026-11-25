@@ -244,7 +244,8 @@ let main (u : unit) = Int.add (g ()) x
   allocations_of (reviewed ^ source);
   run (reviewed ^ source) ~entry:"main";
   run (reviewed ^ source) ~entry:"main" ~override:(forcing Box Region);
-  [%expect {|
+  [%expect
+    {|
     val keep : ptr[box[int]]
     val sum : box[int] @ _ -> int @ _
     val g : unit @ '_m0 -> int @ '_m1
@@ -277,7 +278,8 @@ let main (u : unit) =
   in
   allocations_of (reviewed ^ source);
   run (reviewed ^ source) ~entry:"main";
-  [%expect {|
+  [%expect
+    {|
     val keep : ptr[box[int]]
     val sum : box[int] @ _ -> int @ _
     val adder : int @ 'm0 -> (int @ _ -> box[int] @ 'm2) @ 'm1 with 'm0 <= 'm1 and gc <= 'm2 and gc <= 'm1
@@ -310,7 +312,8 @@ let main (u : unit) = Int.add (sum (boxed 1)) (Int.add (plus () 2) (partly 3))
     (reviewed ^ source)
     ~entry:"main"
     ~override:(forcing Partial_application Region);
-  [%expect {|
+  [%expect
+    {|
     val keep : ptr[box[int]]
     val sum : box[int] @ _ -> int @ _
     val apply : (int -> box[int]) @ 'm0 -> (int @ _ -> box[int] @ 'm2) @ 'm1 with 'm0 <= 'm1 and nonportable gc <= 'm2 and gc <= 'm1

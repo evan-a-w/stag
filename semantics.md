@@ -474,8 +474,16 @@ its instance and its internal variables at their greatest solution (the
 one the placements are read under), fix each callee side the callee's
 sites follow. A caller that is itself polymorphic in its result passes its
 own choice on, so the choice is made transitively from the outermost
-instance. A primitive used as a value (`Box.make` passed to `apply`) is an
-instance like any other, allocating as its instance's result says.
+instance. A primitive, `Box.make` or `Ptr.make` used as a value
+(`Box.make` passed to `apply`, `let g = Int.add n`) is a site where it is
+named, on the heap: where it is applied isn't known. A prim applied to too
+few arguments where it is named (`Int.add 1`) is a site where it is
+applied, placed like any other allocation. A function given all its
+arguments at once (`three 1 2 3`) makes no closure in between.
+
+A toplevel's initializer (`let x = …`, not a function) runs in a region of
+its own, ended when it finishes: a site of it placed `region` is made there,
+and `caller's region` is the heap.
 
 A scheme only copies the mode variables it keeps, not the internal ones of
 the body (such as an allocation site's locality). So the monomorphiser
@@ -502,12 +510,20 @@ variants (nominal and structural), code, boxes and type parameters.
 
 `Region_check` (in the tests) is an oracle for all this: an interpreter
 making each allocation where the record says, in each instance as local as
-its uses allow given the instances it is used from, that fails on a use of
-an allocation after its region ends, or one left reachable from a
-toplevel. Random programs it runs, using allocations through closures,
-higher-order parameters, generalised `let`s and containers of closures, at
-`global` and at `local`, never do; with placements that ignore their
-instance, many do.
+its uses allow given the instances it is used from. It fails on any use of
+an allocation after its region ends (a call, read, match or store, a call
+in tail position once its caller's region has ended, a closure's read of
+what it captures), on an allocation that ended being stored, captured, or
+returned from a call or a `region_`, and, at each store and whenever a
+region ends, on anything reachable from a toplevel that isn't on the heap.
+An allocation on the heap that the typechecker has as local may point into
+a region: nothing reaches it after the region ends but the GC, which
+ignores addresses outside the heap. Random programs it runs, using
+allocations through closures, curried and partially applied functions,
+higher-order parameters, calls between and recursion of toplevels,
+generalised `let`s, containers and cells of closures, `region_`, `exclave_`
+and tail calls, at `global` and at `local`, never do; with placements that
+ignore their instance, many do.
 
 ## Pipeline
 
