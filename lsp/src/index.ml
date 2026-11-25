@@ -388,6 +388,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
    | Annotated _ | Marked _ -> ()
    | Lit _
    | Store _
+   | Seq _
    | App _
    | Splice _
    | Toplevel_splice _

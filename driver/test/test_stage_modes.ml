@@ -428,36 +428,36 @@ let k : int -> <int -> int>{..'r} = .~g
     -- evaluated at compile time
     (q
      (Code
-      (Let (ident h/17) (args (a/16)) (generalized true)
+      (Let (ident h/16) (args (a/15)) (generalized true)
        (body (Var (Free x) : 'a))
        (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
        "<'b>{h : 'b; ..'c}")))
     (g
      (Code
-      (Fun (args (y/18))
+      (Fun (args (y/17))
        (annots
-        ((y/18 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
+        ((y/17 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
        (body
-        (Let (ident h/19) (args (a/20)) (generalized true)
-         (body (Var (Bound (Local y/18)) : 'a))
+        (Let (ident h/18) (args (a/19)) (generalized true)
+         (body (Var (Bound (Local y/17)) : 'a))
          (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
          "<'b>{h : 'b; ..'c}"))
        : "int -> <'d>{h : 'd; ..'e}")))
     -- evaluated
     (q
      (Code
-      (Let (ident h/17) (args (a/16)) (generalized true)
+      (Let (ident h/16) (args (a/15)) (generalized true)
        (body (Var (Free x) : 'a))
        (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
        "<'b>{h : 'b; ..'c}")))
     (g
      (Code
-      (Fun (args (y/18))
+      (Fun (args (y/17))
        (annots
-        ((y/18 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
+        ((y/17 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
        (body
-        (Let (ident h/19) (args (a/20)) (generalized true)
-         (body (Var (Bound (Local y/18)) : 'a))
+        (Let (ident h/18) (args (a/19)) (generalized true)
+         (body (Var (Bound (Local y/17)) : 'a))
          (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
          "<'b>{h : 'b; ..'c}"))
        : "int -> <'d>{h : 'd; ..'e}")))

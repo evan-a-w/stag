@@ -282,9 +282,9 @@ let embedded = embedding 7
     (embedding <fun>)
     (embedded
      (Code
-      (App (Var (Persistent (Local h/21)) : "unit -> int") (Lit Unit : unit) :
+      (App (Var (Persistent (Local h/20)) : "unit -> int") (Lit Unit : unit) :
        int)
-      ((h/21 <fun>))))
+      ((h/20 <fun>))))
     |}]
 ;;
 
@@ -309,20 +309,20 @@ let in_quote = .<.~(.~(.<.<1>.>.))>.
        (Quote (Tuple ((Var (Free x) : 'a) (Var (Free x) : 'a)) : "'a * 'a") :
         "<'a * 'a>{x : immut 'a}"))
       (expansion
-       (Tuple ((Var (Bound (Local x/17)) : 'a) (Var (Bound (Local x/17)) : 'a)) :
+       (Tuple ((Var (Bound (Local x/16)) : 'a) (Var (Bound (Local x/16)) : 'a)) :
         "'a * 'a"))
       : "'a * 'a"))
     (explicit/6
      (Toplevel_splice
       (code
        (Quote
-        (Let (ident z/19) (args ()) (generalized false)
-         (body (Var (Free x) : 'a)) (in_ (Var (Bound (Local z/19)) : 'a)) : 'a)
+        (Let (ident z/18) (args ()) (generalized false)
+         (body (Var (Free x) : 'a)) (in_ (Var (Bound (Local z/18)) : 'a)) : 'a)
         : "<'a>{x : immut 'a}"))
       (expansion
-       (Let (ident z/20) (args ()) (generalized false)
-        (body (Var (Bound (Local y/18)) : 'a))
-        (in_ (Var (Bound (Local z/20)) : 'a)) : 'a))
+       (Let (ident z/19) (args ()) (generalized false)
+        (body (Var (Bound (Local y/17)) : 'a))
+        (in_ (Var (Bound (Local z/19)) : 'a)) : 'a))
       : 'a))
     (in_quote/7
      (Quote

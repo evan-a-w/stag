@@ -56,10 +56,10 @@ let generated = wrap .<1>.
         (Quote (Lit (Int 1) : int) : "<int>{y?'_a : immut int; ..'_b}") :
         "<int * int>{}"))
       (expansion
-       (Let (ident y/18) (args ()) (generalized true) (body (Lit (Int 1) : int))
+       (Let (ident y/17) (args ()) (generalized true) (body (Lit (Int 1) : int))
         (in_
          (Tuple
-          ((Var (Bound (Local y/18)) : int) (Var (Bound (Local y/18)) : int)) :
+          ((Var (Bound (Local y/17)) : int) (Var (Bound (Local y/17)) : int)) :
           "int * int"))
         : "int * int"))
       : "int * int" (where "..'_b <= {}")))
@@ -70,9 +70,9 @@ let generated = wrap .<1>.
     (wrapped (Tuple 1 1))
     (generated
      (Code
-      (Let (ident y/17) (args ()) (generalized false) (body (Lit (Int 1) : int))
+      (Let (ident y/16) (args ()) (generalized false) (body (Lit (Int 1) : int))
        (in_
-        (Tuple ((Var (Bound (Local y/17)) : 'a) (Var (Bound (Local y/17)) : 'a))
+        (Tuple ((Var (Bound (Local y/16)) : 'a) (Var (Bound (Local y/16)) : 'a))
          : "'a * 'a"))
        : "'a * 'a")))
     |}]
@@ -205,9 +205,8 @@ let spliced = .~(fails; .<1>.)
     ("Match failure: no case matches the value B" @ t.stag:3:12-31)
     ((Splice_evaluation_failed
       (code
-       (Let (ident _/15) (args ()) (generalized true)
-        (body (Var (Bound (Toplevel fails/4)) : int))
-        (in_ (Quote (Lit (Int 1) : int) : <int>{})) : <int>{}))
+       (Seq (Var (Bound (Toplevel fails/4)) : int)
+        (Quote (Lit (Int 1) : int) : <int>{}) : <int>{}))
       (error ("Match failure: no case matches the value B" @ t.stag:3:12-31)))
      @ t.stag:4:14-30)
     |}]
@@ -259,7 +258,7 @@ let applied = implicit false
         "<string * 'a>{n : immut string; x : immut 'a}"))
       (expansion
        (Tuple
-        ((Var (Bound (Toplevel n/4)) : string) (Var (Bound (Local x/19)) : 'a)) :
+        ((Var (Bound (Toplevel n/4)) : string) (Var (Bound (Local x/18)) : 'a)) :
         "string * 'a"))
       : "string * 'a"))
     (explicit/7
@@ -268,14 +267,14 @@ let applied = implicit false
        (Var (Bound (Toplevel code/5)) :
         "<bool * int>{n : immut bool; x : immut int}"))
       (expansion
-       (Let (ident n/20) (args ()) (generalized false)
+       (Let (ident n/19) (args ()) (generalized false)
         (body (Lit (Bool true) : bool))
         (in_
-         (Let (ident x/21) (args ()) (generalized false)
+         (Let (ident x/20) (args ()) (generalized false)
           (body (Lit (Int 1) : int))
           (in_
            (Tuple
-            ((Var (Bound (Local n/20)) : bool) (Var (Bound (Local x/21)) : int))
+            ((Var (Bound (Local n/19)) : bool) (Var (Bound (Local x/20)) : int))
             : "bool * int"))
           : "bool * int"))
         : "bool * int"))
@@ -347,25 +346,25 @@ let embeds = .~(let k x = (x, 1) in .<(k true, k 2)>.)
     (embeds/4
      (Toplevel_splice
       (code
-       (Let (ident k/15) (args (x/14)) (generalized true)
+       (Let (ident k/14) (args (x/13)) (generalized true)
         (body
-         (Tuple ((Var (Bound (Local x/14)) : 'a) (Lit (Int 1) : int)) :
+         (Tuple ((Var (Bound (Local x/13)) : 'a) (Lit (Int 1) : int)) :
           "'a * int"))
         (in_
          (Quote
           (Tuple
-           ((App (Var (Persistent (Local k/15)) : "bool -> bool * int")
+           ((App (Var (Persistent (Local k/14)) : "bool -> bool * int")
              (Lit (Bool true) : bool) : "bool * int")
-            (App (Var (Persistent (Local k/15)) : "int -> int * int")
+            (App (Var (Persistent (Local k/14)) : "int -> int * int")
              (Lit (Int 2) : int) : "int * int"))
            : "(bool * int) * (int * int)")
           : "<(bool * int) * (int * int)>{}"))
         : "<(bool * int) * (int * int)>{}"))
       (expansion
        (Tuple
-        ((App (Var (Persistent (Local k/16)) : "bool -> bool * int")
+        ((App (Var (Persistent (Local k/15)) : "bool -> bool * int")
           (Lit (Bool true) : bool) : "bool * int")
-         (App (Var (Persistent (Local k/16)) : "int -> int * int")
+         (App (Var (Persistent (Local k/15)) : "int -> int * int")
           (Lit (Int 2) : int) : "int * int"))
         : "(bool * int) * (int * int)"))
       : "(bool * int) * (int * int)"))
@@ -433,19 +432,19 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
     val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
     val used : int
     (f/4
-     (Match (scrutinee (Var (Bound (Local n/16)) : nat))
+     (Match (scrutinee (Var (Bound (Local n/15)) : nat))
       (cases
        (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
          (Lit (Int 0) : int))
         ((Construct ((type_name nat) (name S) (index 1))
-          ((Deref (Var m/17 : nat) : ptr[nat])) : nat)
+          ((Deref (Var m/16 : nat) : ptr[nat])) : nat)
          (Toplevel_splice
           (code
            (Var (Bound (Toplevel code/5)) :
             "<int>{f : immut nat -> int; m : immut nat}"))
           (expansion
            (App (Var (Bound (Toplevel f/4)) : "nat -> int")
-            (Var (Bound (Local m/17)) : nat) : int))
+            (Var (Bound (Local m/16)) : nat) : int))
           : int))))
       : int))
     -- evaluated at compile time
@@ -645,33 +644,33 @@ let twice = (.~id_code 1, .~id_code true)
         (Toplevel_splice
          (code (Var (Bound (Toplevel id_code/4)) : "<int -> int>{}"))
          (expansion
-          (Let (ident f/17) (args (x/18)) (generalized true)
-           (body (Var (Bound (Local x/18)) : 'a))
-           (in_ (Var (Bound (Local f/17)) : "int -> int")) : "int -> int"))
+          (Let (ident f/16) (args (x/17)) (generalized true)
+           (body (Var (Bound (Local x/17)) : 'a))
+           (in_ (Var (Bound (Local f/16)) : "int -> int")) : "int -> int"))
          : "int -> int")
         (Lit (Int 1) : int) : int)
        (App
         (Toplevel_splice
          (code (Var (Bound (Toplevel id_code/4)) : "<bool -> bool>{}"))
          (expansion
-          (Let (ident f/19) (args (x/20)) (generalized true)
-           (body (Var (Bound (Local x/20)) : 'b))
-           (in_ (Var (Bound (Local f/19)) : "bool -> bool")) : "bool -> bool"))
+          (Let (ident f/18) (args (x/19)) (generalized true)
+           (body (Var (Bound (Local x/19)) : 'b))
+           (in_ (Var (Bound (Local f/18)) : "bool -> bool")) : "bool -> bool"))
          : "bool -> bool")
         (Lit (Bool true) : bool) : bool))
       : "int * bool"))
     -- evaluated at compile time
     (id_code
      (Code
-      (Let (ident f/16) (args (x/15)) (generalized true)
-       (body (Var (Bound (Local x/15)) : 'a))
-       (in_ (Var (Bound (Local f/16)) : "'b -> 'b")) : "'b -> 'b")))
+      (Let (ident f/15) (args (x/14)) (generalized true)
+       (body (Var (Bound (Local x/14)) : 'a))
+       (in_ (Var (Bound (Local f/15)) : "'b -> 'b")) : "'b -> 'b")))
     -- evaluated
     (id_code
      (Code
-      (Let (ident f/16) (args (x/15)) (generalized true)
-       (body (Var (Bound (Local x/15)) : 'a))
-       (in_ (Var (Bound (Local f/16)) : "'b -> 'b")) : "'b -> 'b")))
+      (Let (ident f/15) (args (x/14)) (generalized true)
+       (body (Var (Bound (Local x/14)) : 'a))
+       (in_ (Var (Bound (Local f/15)) : "'b -> 'b")) : "'b -> 'b")))
     (twice (Tuple 1 true))
     |}]
 ;;
@@ -693,15 +692,15 @@ let spliced_app = .~(.<id id>.)
     -- evaluated at compile time
     (id_code
      (Code
-      (Let (ident f/18) (args (x/17)) (generalized true)
-       (body (Var (Bound (Local x/17)) : 'a))
-       (in_ (Var (Bound (Local f/18)) : "'b -> 'b")) : "'b -> 'b")))
+      (Let (ident f/17) (args (x/16)) (generalized true)
+       (body (Var (Bound (Local x/16)) : 'a))
+       (in_ (Var (Bound (Local f/17)) : "'b -> 'b")) : "'b -> 'b")))
     -- evaluated
     (id_code
      (Code
-      (Let (ident f/18) (args (x/17)) (generalized true)
-       (body (Var (Bound (Local x/17)) : 'a))
-       (in_ (Var (Bound (Local f/18)) : "'b -> 'b")) : "'b -> 'b")))
+      (Let (ident f/17) (args (x/16)) (generalized true)
+       (body (Var (Bound (Local x/16)) : 'a))
+       (in_ (Var (Bound (Local f/17)) : "'b -> 'b")) : "'b -> 'b")))
     (spliced_id <fun>)
     (used (Tuple 1 true))
     (spliced_app <fun>)
@@ -722,11 +721,9 @@ let deep = .~(.~(n; .< .<n>. >.))
       (code
        (Toplevel_splice
         (code
-         (Let (ident _/15) (args ()) (generalized true)
-          (body (Var (Bound (Toplevel n/4)) : int))
-          (in_
-           (Quote (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{}) :
-            <<int>{}>{}))
+         (Seq (Var (Bound (Toplevel n/4)) : int)
+          (Quote (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{}) :
+           <<int>{}>{})
           : <<int>{}>{}))
         (expansion (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{})) :
         <int>{}))

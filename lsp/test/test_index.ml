@@ -399,3 +399,46 @@ let l (x : int) = x
         8:11 no definition
         |}])
 ;;
+
+let%expect_test "a sequence binds nothing at its [;]" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|let f x = print_endline x; 1
+let g x = let _ = print_endline x in 1
+|}
+        )
+      ]
+    (fun client ->
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 0, 25; 1, 14 ];
+      [%expect
+        {|
+        0:25 0:24-0:25 ```stag x : string ```
+        0:25 -> a.stag 0:6-0:7
+        1:14 1:14-1:15 ```stag _ : unit ```
+        1:14 -> a.stag 1:14-1:15
+        |}];
+      Client.print_semantic_tokens client "a.stag";
+      [%expect
+        {|
+        0:0+3 Keyword "let"
+        0:4+1 Function (declaration) "f"
+        0:6+1 Parameter (declaration) "x"
+        0:8+1 Operator "="
+        0:10+13 Function "print_endline"
+        0:24+1 Variable "x"
+        0:27+1 Number "1"
+        1:0+3 Keyword "let"
+        1:4+1 Function (declaration) "g"
+        1:6+1 Parameter (declaration) "x"
+        1:8+1 Operator "="
+        1:10+3 Keyword "let"
+        1:16+1 Operator "="
+        1:18+13 Function "print_endline"
+        1:32+1 Variable "x"
+        1:34+2 Keyword "in"
+        1:37+1 Number "1"
+        |}])
+;;

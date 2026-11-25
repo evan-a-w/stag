@@ -41,8 +41,8 @@ let g a b =
   [%expect
     {|
     (g/5 (add/0 k/4))
-    (f/18 (a/15 add/0))
-    (h/21 (add/0 f/18 k/4))
+    (f/17 (a/14 add/0))
+    (h/20 (add/0 f/17 k/4))
     |}]
 ;;
 
@@ -60,7 +60,7 @@ let local n = let go x = go n in go
     (even/5 (odd/6))
     (odd/6 (even/5))
     (local/7 ())
-    (go/22 (go/22 n/20))
+    (go/21 (go/21 n/19))
     |}]
 ;;
 
@@ -76,9 +76,9 @@ let f p c =
   [%expect
     {|
     (f/4 (add/0))
-    (g/17 (add/0 c/15))
-    (h/20 (p/14))
-    (v/24 (c/15))
+    (g/16 (add/0 c/14))
+    (h/19 (p/13))
+    (v/23 (c/14))
     |}]
 ;;
 
@@ -91,7 +91,7 @@ let f r s x =
 |};
   [%expect {|
     (f/4 ())
-    (g/18 (r/14 s/15 x/16))
+    (g/17 (r/13 s/14 x/15))
     |}]
 ;;
 
@@ -107,15 +107,15 @@ let explicit c d = let e x = .<.~c.{y = .~d}>. in 0
   [%expect
     {|
     (q/4 (add/0))
-    (inner/20 (add/0 inner/20))
+    (inner/19 (add/0 inner/19))
     (h/5 ())
     (build/6 (add/0))
-    (mk/25 (add/0 c/23))
+    (mk/24 (add/0 c/22))
     (persistent/7 ())
-    (k/28 ())
-    (g/30 (k/28))
+    (k/27 ())
+    (g/29 (k/27))
     (explicit/8 ())
-    (e/34 (c/31 d/32))
+    (e/33 (c/30 d/31))
     |}]
 ;;
 
@@ -126,7 +126,7 @@ let f x = let g y = .~(.<add x y>.) in 0
 |};
   [%expect {|
     (f/5 (add/0))
-    (g/17 (add/0 x/15))
+    (g/16 (add/0 x/14))
     |}]
 ;;
 

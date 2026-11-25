@@ -29,7 +29,7 @@ let quoted_value = .~quoted
     (quoted
      (Code
       (Deref
-       (App (Var (Persistent (Toplevel prelude.Ptr.make/21)) : "int -> ptr[int]")
+       (App (Var (Persistent (Toplevel prelude.Ptr.make/20)) : "int -> ptr[int]")
         (Lit (Int 3) : int) : ptr[int])
        : int)))
     -- evaluated
@@ -42,7 +42,7 @@ let quoted_value = .~quoted
     (quoted
      (Code
       (Deref
-       (App (Var (Persistent (Toplevel prelude.Ptr.make/21)) : "int -> ptr[int]")
+       (App (Var (Persistent (Toplevel prelude.Ptr.make/20)) : "int -> ptr[int]")
         (Lit (Int 3) : int) : ptr[int])
        : int)))
     (quoted_value 3)

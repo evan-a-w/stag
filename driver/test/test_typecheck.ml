@@ -611,15 +611,15 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
      @ t.stag:3:39-53)
     ((Splice_evaluation_failed
       (code
-       (Let (ident opaque/15) (args (u/14)) (generalized true)
+       (Let (ident opaque/14) (args (u/13)) (generalized true)
         (body
-         (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
-          (Var (Bound (Local u/14)) : 'a) : 'b))
+         (App (Var (Bound (Local opaque/14)) : "'a -> 'b")
+          (Var (Bound (Local u/13)) : 'a) : 'b))
         (in_
          (Match (scrutinee (Lit (Int 1) : int))
           (cases
            (((Lit (Int 2) : int)
-             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+             (App (Var (Bound (Local opaque/14)) : "int -> <'_c>{}")
               (Lit (Int 1) : int) : <'_c>{}))))
           : <'_c>{}))
         : <'_c>{}))
