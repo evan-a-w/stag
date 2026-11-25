@@ -651,4 +651,3 @@ let d = .~(let k = id (fun p -> let y = (p, "s") in .< y >.) in print_endline "r
   [%expect
     {| The quote can't embed y, as it may not be portable. Bind it as (y @ portable) to embed it, or write [forget y in ...] to make y a free variable of the quote |}]
 ;;
-

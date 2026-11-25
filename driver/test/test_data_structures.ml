@@ -338,7 +338,6 @@ let fill_gc (u : unit) = Core.Lru.add gcs "a" "x"
      former), nor the reverse. *)
   List.iter
     ~f:(fun source -> check (ext ^ source))
-      (* Keys too: a cache of GC keys takes no C string as a key. *)
     [ {|
 let gcs : Core.Lru.t[string, string, gc] = Core.Lru.create 2 Core.String.compare
 let as_ext : Core.Lru.t[string, string, external] = gcs
@@ -347,6 +346,7 @@ let as_ext : Core.Lru.t[string, string, external] = gcs
 let gcs : Core.Lru.t[string, string, gc] = Core.Lru.create 2 Core.String.compare
 let fill (u : unit) = Core.Lru.add gcs "a" (ext "x")
 |}
+      (* Keys are GC values: a cache takes no C string as a key. *)
     ; {|
 let gcs : Core.Lru.t[string, string, gc] = Core.Lru.create 2 Core.String.compare
 let fill (u : unit) = Core.Lru.add gcs (ext "k") "x"
