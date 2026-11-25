@@ -53,6 +53,11 @@ end
 val rank : t -> int option
 
 val var_id : t -> int
+
+(** [t] and the nodes its edges [t <= m(hi)] lead to, transitively: those whose
+    upper bounds bound [t]'s. *)
+val above : t -> t list
+
 val axis : t -> Axis.Any.t
 
 (** The nodes that rise, with their least points, if each node given is raised

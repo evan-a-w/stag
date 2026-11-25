@@ -413,3 +413,116 @@ let h (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in stack_ (Box.mak
     t.stag:5:72-84 Box in h: caller's region
     |}]
 ;;
+
+let reviewed =
+  {|
+let keep : ptr[box[int]] = Ptr.make (Box.make 0)
+let sum (b : box[int]) = match b with *n -> n
+|}
+;;
+
+(* Placed once the toplevel is checked: a [let]'s sites may be constrained by
+   the code after it. *)
+let%expect_test "sites are placed once their toplevel is checked" =
+  allocations
+    (reviewed
+     ^ {|
+let keep2 : ptr[int -> int] = Ptr.make (fun (x : int) -> x)
+let f (u : unit) = let g = fun (y : int) -> y in keep2.* <- g
+let f2 (u : unit) = let g = fun (y : int) -> y in g
+let f3 (u : unit) = let g = (fun (y : int) -> y, fun (z : int) -> z) in g
+|}
+    );
+  [%expect
+    {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val keep2 : ptr[int -> int]
+    val f : unit @ _ -> unit @ _
+    val f2 : unit @ _ -> (int @ _ -> int @ _) @ _
+    val f3 : unit @ _ -> (int @ _ -> int * (int @ _ -> int @ _) @ _) @ _
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:30-59 Pointer in keep2: heap
+    t.stag:5:39-59 Closure in keep2: heap
+    t.stag:6:27-45 Closure in f.g: heap
+    t.stag:7:28-46 Closure in f2.g: heap
+    t.stag:8:28-68 Closure in f3.g: heap
+    t.stag:8:49-67 Closure in f3.g: heap, caller's region if res is local
+    |}]
+;;
+
+(* A site of a [let] may follow a side of the function around it. *)
+let%expect_test "sites follow the sides of the owners around them" =
+  allocations
+    (reviewed
+     ^ {|
+let f h = let g (y : int) = exclave_ h (Box.make y) in Int.add (g 1) 0
+let use (u : unit) = f (fun b -> keep.* <- b; 0)
+let f' h = let g = fun (y : int) -> exclave_ h (Box.make y) in Int.add (g 1) 0
+|}
+    );
+  [%expect
+    {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val f : (box[int] @ 'm0 -> int @ _) @ _ -> int @ _ with gc <= 'm0
+    val use : unit @ _ -> int @ _
+    val f' : (box[int] @ 'm0 -> int @ _) @ _ -> int @ _ with gc <= 'm0
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:10-70 Closure in f: region
+    t.stag:5:39-51 Box in f.g: heap, caller's region if f's arg.arg is local
+    t.stag:6:23-48 Closure in use: heap
+    t.stag:7:19-59 Closure in f': region
+    t.stag:7:47-59 Box in f': heap, caller's region if arg.arg is local
+    |}]
+;;
+
+let%expect_test "sides in records, variants and long curried types" =
+  allocations
+    (reviewed
+     ^ {|
+let v (u : unit) = `A (fun (y : int) -> Box.make y)
+let r (u : unit) = {`g = fun (y : int) -> Box.make y}
+let usev (u : unit) = match v () with `A g -> keep.* <- g 1
+let c (u : unit) = .< fun (y : int) -> y >.
+let many (a1 : int) (a2 : int) (a3 : int) (a4 : int) (a5 : int) (a6 : int) (a7 : int) (a8 : int) (a9 : int) (a10 : int) (a11 : int) (a12 : int) (a13 : int) (a14 : int) (a15 : int) (a16 : int) (a17 : int) (a18 : int) (a19 : int) = a1
+|}
+    );
+  [%expect
+    {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val v : unit @ _ -> [`A of int @ _ -> box[int] @ 'm0; ..'a] @ _ with gc <= 'm0
+    val r : unit @ _ -> {`g : int @ _ -> box[int] @ 'm0} @ _ with gc <= 'm0
+    val usev : unit @ _ -> unit @ _
+    val c : unit @ _ -> <int @ _ -> int @ _>{..'a} @ _
+    val many : int @ 'm0 -> (int @ 'm2 -> (int @ 'm4 -> (int @ 'm6 -> (int @ 'm8 -> (int @ 'm10 -> (int @ 'm12 -> (int @ 'm14 -> (int @ 'm16 -> (int @ 'm18 -> (int @ 'm20 -> (int @ 'm22 -> (int @ 'm24 -> (int @ 'm26 -> (int @ 'm28 -> (int @ 'm30 -> (int @ 'm32 -> (int @ 'm34 -> (int @ _ -> int @ _) @ 'm35) @ 'm33) @ 'm31) @ 'm29) @ 'm27) @ 'm25) @ 'm23) @ 'm21) @ 'm19) @ 'm17) @ 'm15) @ 'm13) @ 'm11) @ 'm9) @ 'm7) @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm35 and 'm0 <= 'm33 and 'm0 <= 'm31 and 'm0 <= 'm29 and 'm0 <= 'm27 and 'm0 <= 'm25 and 'm0 <= 'm23 and 'm0 <= 'm21 and 'm0 <= 'm19 and 'm0 <= 'm17 and 'm0 <= 'm15 and 'm0 <= 'm13 and 'm0 <= 'm11 and 'm0 <= 'm9 and 'm0 <= 'm7 and 'm0 <= 'm5 and 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm35 and 'm2 <= 'm33 and 'm2 <= 'm31 and 'm2 <= 'm29 and 'm2 <= 'm27 and 'm2 <= 'm25 and 'm2 <= 'm23 and 'm2 <= 'm21 and 'm2 <= 'm19 and 'm2 <= 'm17 and 'm2 <= 'm15 and 'm2 <= 'm13 and 'm2 <= 'm11 and 'm2 <= 'm9 and 'm2 <= 'm7 and 'm2 <= 'm5 and 'm2 <= 'm3 and 'm4 <= 'm35 and 'm4 <= 'm33 and 'm4 <= 'm31 and 'm4 <= 'm29 and 'm4 <= 'm27 and 'm4 <= 'm25 and 'm4 <= 'm23 and 'm4 <= 'm21 and 'm4 <= 'm19 and 'm4 <= 'm17 and 'm4 <= 'm15 and 'm4 <= 'm13 and 'm4 <= 'm11 and 'm4 <= 'm9 and 'm4 <= 'm7 and 'm4 <= 'm5 and 'm6 <= 'm35 and 'm6 <= 'm33 and 'm6 <= 'm31 and 'm6 <= 'm29 and 'm6 <= 'm27 and 'm6 <= 'm25 and 'm6 <= 'm23 and 'm6 <= 'm21 and 'm6 <= 'm19 and 'm6 <= 'm17 and 'm6 <= 'm15 and 'm6 <= 'm13 and 'm6 <= 'm11 and 'm6 <= 'm9 and 'm6 <= 'm7 and 'm8 <= 'm35 and 'm8 <= 'm33 and 'm8 <= 'm31 and 'm8 <= 'm29 and 'm8 <= 'm27 and 'm8 <= 'm25 and 'm8 <= 'm23 and 'm8 <= 'm21 and 'm8 <= 'm19 and 'm8 <= 'm17 and 'm8 <= 'm15 and 'm8 <= 'm13 and 'm8 <= 'm11 and 'm8 <= 'm9 and 'm10 <= 'm35 and 'm10 <= 'm33 and 'm10 <= 'm31 and 'm10 <= 'm29 and 'm10 <= 'm27 and 'm10 <= 'm25 and 'm10 <= 'm23 and 'm10 <= 'm21 and 'm10 <= 'm19 and 'm10 <= 'm17 and 'm10 <= 'm15 and 'm10 <= 'm13 and 'm10 <= 'm11 and 'm12 <= 'm35 and 'm12 <= 'm33 and 'm12 <= 'm31 and 'm12 <= 'm29 and 'm12 <= 'm27 and 'm12 <= 'm25 and 'm12 <= 'm23 and 'm12 <= 'm21 and 'm12 <= 'm19 and 'm12 <= 'm17 and 'm12 <= 'm15 and 'm12 <= 'm13 and 'm14 <= 'm35 and 'm14 <= 'm33 and 'm14 <= 'm31 and 'm14 <= 'm29 and 'm14 <= 'm27 and 'm14 <= 'm25 and 'm14 <= 'm23 and 'm14 <= 'm21 and 'm14 <= 'm19 and 'm14 <= 'm17 and 'm14 <= 'm15 and 'm16 <= 'm35 and 'm16 <= 'm33 and 'm16 <= 'm31 and 'm16 <= 'm29 and 'm16 <= 'm27 and 'm16 <= 'm25 and 'm16 <= 'm23 and 'm16 <= 'm21 and 'm16 <= 'm19 and 'm16 <= 'm17 and 'm18 <= 'm35 and 'm18 <= 'm33 and 'm18 <= 'm31 and 'm18 <= 'm29 and 'm18 <= 'm27 and 'm18 <= 'm25 and 'm18 <= 'm23 and 'm18 <= 'm21 and 'm18 <= 'm19 and 'm20 <= 'm35 and 'm20 <= 'm33 and 'm20 <= 'm31 and 'm20 <= 'm29 and 'm20 <= 'm27 and 'm20 <= 'm25 and 'm20 <= 'm23 and 'm20 <= 'm21 and 'm22 <= 'm35 and 'm22 <= 'm33 and 'm22 <= 'm31 and 'm22 <= 'm29 and 'm22 <= 'm27 and 'm22 <= 'm25 and 'm22 <= 'm23 and 'm24 <= 'm35 and 'm24 <= 'm33 and 'm24 <= 'm31 and 'm24 <= 'm29 and 'm24 <= 'm27 and 'm24 <= 'm25 and 'm26 <= 'm35 and 'm26 <= 'm33 and 'm26 <= 'm31 and 'm26 <= 'm29 and 'm26 <= 'm27 and 'm28 <= 'm35 and 'm28 <= 'm33 and 'm28 <= 'm31 and 'm28 <= 'm29 and 'm30 <= 'm35 and 'm30 <= 'm33 and 'm30 <= 'm31 and 'm32 <= 'm35 and 'm32 <= 'm33 and 'm34 <= 'm35 and gc <= 'm35 and gc <= 'm33 and gc <= 'm31 and gc <= 'm29 and gc <= 'm27 and gc <= 'm25 and gc <= 'm23 and gc <= 'm21 and gc <= 'm19 and gc <= 'm17 and gc <= 'm15 and gc <= 'm13 and gc <= 'm11 and gc <= 'm9 and gc <= 'm7 and gc <= 'm5 and gc <= 'm3 and gc <= 'm1
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:22-51 Closure in v: heap, caller's region if res is local
+    t.stag:5:40-50 Box in v: heap, caller's region if res.A.res is local
+    t.stag:6:25-52 Closure in r: heap, caller's region if res is local
+    t.stag:6:42-52 Box in r: heap, caller's region if res.g.res is local
+    t.stag:8:19-43 Code in c: heap, caller's region if res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res is local
+    t.stag:9:230-232 Partial_application in many: heap, caller's region if res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res.res is local
+    |}]
+;;

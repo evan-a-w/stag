@@ -247,6 +247,10 @@ module Node = struct
   let lower = Graph.lower
   let upper = Graph.upper
   let raised = Graph.raised
+  let rank = Graph.rank
+  let above = Graph.above
+  let at_most = Graph.at_most
+  let at_least = Graph.at_least
 end
 
 let node_any t (Axis.Any.T axis) = node t axis

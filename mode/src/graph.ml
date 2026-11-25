@@ -414,6 +414,21 @@ let rank t =
 
 let var_id t = t.var_id
 
+let above t =
+  let seen = Int.Hash_set.create () in
+  let found = Queue.create () in
+  let todo = Stack.singleton t in
+  while not (Stack.is_empty todo) do
+    let node = Stack.pop_exn todo in
+    if not (Hash_set.mem seen node.id)
+    then (
+      Hash_set.add seen node.id;
+      Queue.enqueue found node;
+      List.iter node.succ ~f:(fun edge -> Stack.push todo edge.hi))
+  done;
+  Queue.to_list found
+;;
+
 (* A generic node's constraints are those its scheme keeps, which imply the
    rest. *)
 let forward t =

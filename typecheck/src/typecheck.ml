@@ -384,6 +384,8 @@ module Scope = struct
     ; allocations : Allocation_sites.t option
     (** Of the toplevel being checked: its allocation sites, as its run time
         code is checked. *)
+    ; owner : Allocation_sites.Frame.t option
+    (** The innermost [let] whose function (or value) is being checked. *)
     }
 
   and quote =
@@ -522,6 +524,7 @@ module Scope = struct
            fun (site : Mode_rules.Site.t) ->
              Allocation_sites.add
                sites
+               ~frame:t.owner
                (match site.position with
                 | (Here | Returned) when exclaved ->
                   { site with position = Exclaved }
@@ -1843,14 +1846,13 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
       || const member ~why:(sprintf "%s is generalized"))
   in
   (* Before generalizing, while its result may still be constrained. *)
-  List.iter members ~f:(fun member ->
-    match member.state with
-    | In_progress { sites; ty; _ } ->
-      Allocation_sites.place sites ~since:0 ~ty ~local:None;
-      List.iter
-        (Allocation_sites.placed sites)
-        ~f:(Queue.enqueue program.allocations)
-    | Unchecked | Done _ -> ());
+  List.iter
+    (Allocation_sites.place
+       (List.filter_map members ~f:(fun member ->
+          match member.state with
+          | In_progress { sites; ty; _ } -> Some (sites, ty)
+          | Unchecked | Done _ -> None)))
+    ~f:(Queue.enqueue program.allocations);
   if generalize
   then
     Scheme.generalize
@@ -2203,6 +2205,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; locks = []
     ; params = []
     ; allocations = Some sites
+    ; owner = None
     }
   in
   let modes = Scope.modes scope in
@@ -2666,12 +2669,7 @@ and expr_type
     let inner = { scope with rank = scope.rank + 1 } in
     let is_function = not (List.is_empty args) in
     let name = Source.Binder.name binder in
-    let since =
-      ref
-        (if is_function
-         then None
-         else Option.map scope.allocations ~f:Allocation_sites.mark)
-    in
+    let frame = ref None in
     let (fn, ident, body, closure), mode =
       Mode_rules.evaluate
         modes
@@ -2693,6 +2691,19 @@ and expr_type
            let ident =
              Program_env.bind scope.program binder fn.ty ~level:scope.level
            in
+           (* Its function's sites, or its value's, are its own if it is
+              generalized. *)
+           frame
+           := Option.map scope.allocations ~f:(fun sites ->
+                Allocation_sites.frame
+                  sites
+                  ~parent:scope.owner
+                  ~name
+                  ~loc
+                  ~ty:fn.ty);
+           let own =
+             { inner with owner = Option.first_some !frame inner.owner }
+           in
            let defining mode ~f =
              Env.with_bindings
                scope.locals
@@ -2709,7 +2720,7 @@ and expr_type
                defining
                  (Mode_rules.Binding.defining modes inner_at ~name ~loc)
                  ~f:(fun () ->
-                   check_expr t inner ~at:inner_at ~expr:body ~ty:fn.res_ty)
+                   check_expr t own ~at:inner_at ~expr:body ~ty:fn.res_ty)
              in
              fn, ident, body, None
            | _ :: _ ->
@@ -2718,20 +2729,17 @@ and expr_type
                inner_at
                ~loc
                (fun closure ->
-                  since := Option.map scope.allocations ~f:Allocation_sites.mark;
                   let body =
                     defining (Mode_rules.Binding.closure closure) ~f:(fun () ->
-                      check_body t inner ~closure ~fn ~loc)
+                      check_body t own ~closure ~fn ~loc)
                   in
                   fn, ident, body, Some (Mode_rules.Binding.closure closure)))
     in
     let { Function_type.args = arg_types; annots; result_annot; ty; _ } = fn in
     let args = List.map arg_types ~f:fst in
     let generalized = generalizes scope mode ~is_function ~loc in
-    (match scope.allocations, !since with
-     | Some sites, Some since when generalized ->
-       Allocation_sites.place sites ~since ~ty:fn.ty ~local:(Some (name, loc))
-     | _ -> ());
+    if generalized
+    then Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
     if generalized
     then Scheme.generalize t ~rank:scope.rank [ ty ]
     else Unify.lower_ty ~rank:scope.rank ty;
@@ -4153,6 +4161,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; locks = []
   ; params = []
   ; allocations = None
+  ; owner = None
   }
 ;;
 

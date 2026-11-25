@@ -438,6 +438,8 @@ module Allocation = struct
         | Res
         | Component of int
         | Type_arg of int
+        | Field of string
+        | Code
       [@@deriving sexp_of, compare, equal]
     end
 
@@ -453,6 +455,8 @@ module Allocation = struct
         | Res -> "res"
         | Component i -> sprintf "component %d" (i + 1)
         | Type_arg i -> sprintf "type arg %d" (i + 1)
+        | Field name -> name
+        | Code -> "code"
       in
       String.concat
         ~sep:"."
@@ -467,14 +471,24 @@ module Allocation = struct
   module Owner = struct
     type t =
       { toplevel : Ident.t
-      ; local : (string * Loc.t) option
+      ; lets : (string * Loc.t) list
       }
     [@@deriving sexp_of]
+
+    let equal a b =
+      Ident.equal a.toplevel b.toplevel
+      && List.equal (fun (_, a) (_, b) -> Loc.equal a b) a.lets b.lets
+    ;;
+
+    let to_string { toplevel; lets } =
+      String.concat ~sep:"." (toplevel.name :: List.map lets ~f:fst)
+    ;;
   end
 
   module Follows = struct
     type t =
-      { side : Side.t
+      { owner : Owner.t
+      ; side : Side.t
       ; if_local : Placement.t
       }
     [@@deriving sexp_of]

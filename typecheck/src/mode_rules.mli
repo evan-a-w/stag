@@ -400,14 +400,8 @@ val default_mode_arg
   -> name:string
   -> unit
 
-(** Where each site is made in the instances of a function of type [ty]:
-    whatever their modes, and when a side of [ty] is [local]. A site is made as
-    locally as its mode allows, with the modes of [ty] fixed by the instance and
-    the others as high as they may be: in the current region if [local]; in the
-    caller's if [regional] and returned, or [local] under [exclave_] (whose
-    modes are the caller's) or made by the caller; else on the heap. *)
-val placements
-  :  Site.t list
-  -> ty:Type.ty
-  -> (Site.t * Typed.Allocation.Placement.t * Typed.Allocation.Follows.t option)
-       list
+(** Where a site is made, as locally as its mode's upper bound allows: in the
+    current region if [local]; in the caller's if [regional] and returned, or
+    [local] under [exclave_] (whose modes are the caller's) or made by the
+    caller; else on the heap. *)
+val placement : Site.t -> Typed.Allocation.Placement.t

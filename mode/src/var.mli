@@ -52,6 +52,18 @@ module Node : sig
       given is raised to its point: what the constraints imply of them then.
       [None] if one can't be. *)
   val raised : (t * int) list -> (t * int) list option
+
+  (** [None] once generic. *)
+  val rank : t -> int option
+
+  (** [t] and the nodes it is constrained to be below, transitively: those whose
+      upper bounds bound [t]'s. *)
+  val above : t -> t list
+
+  (** Only under [assuming]. *)
+  val at_most : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
+
+  val at_least : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
 end
 
 val node : t -> _ Axis.t -> Node.t

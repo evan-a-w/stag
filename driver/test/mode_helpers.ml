@@ -38,18 +38,17 @@ let placements source =
       let where =
         match allocation.follows with
         | None -> placement allocation.placement
-        | Some { side; if_local } ->
+        | Some { owner; side; if_local } ->
           sprintf
-            "%s, %s if %s is local"
+            "%s, %s if %s%s is local"
             (placement allocation.placement)
             (placement if_local)
+            (if Typed.Allocation.Owner.equal owner allocation.owner
+             then ""
+             else Typed.Allocation.Owner.to_string owner ^ "'s ")
             (Typed.Allocation.Side.to_string side)
       in
-      let owner =
-        match allocation.owner.local with
-        | None -> allocation.owner.toplevel.name
-        | Some (name, _) -> sprintf "%s.%s" allocation.owner.toplevel.name name
-      in
+      let owner = Typed.Allocation.Owner.to_string allocation.owner in
       ( allocation.loc
       , sprintf
           !"%{Sexp} in %s: %s"

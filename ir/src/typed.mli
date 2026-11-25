@@ -361,6 +361,8 @@ module Allocation : sig
         | Res
         | Component of int (** Of a tuple, from 0. *)
         | Type_arg of int (** Of a type constructor, from 0. *)
+        | Field of string (** Of a structural record, or a variant's tag. *)
+        | Code (** What the code computes. *)
       [@@deriving sexp_of, compare, equal]
     end
 
@@ -376,20 +378,26 @@ module Allocation : sig
 
   (** The function whose instances decide where it is made: a toplevel, or a
       function bound by a [let] in it (generalized, so with instances of its
-      own), by name and location. *)
+      own), by the name and location of each [let] down to it. *)
   module Owner : sig
     type t =
       { toplevel : Ident.t
-      ; local : (string * Loc.t) option
+      ; lets : (string * Loc.t) list (** Outermost first. *)
       }
     [@@deriving sexp_of]
+
+    val equal : t -> t -> bool
+
+    (** As [f.g]. *)
+    val to_string : t -> string
   end
 
-  (** An allocation made more locally in the instances of its owner where a side
-      of the owner's type is [local]. *)
+  (** An allocation made more locally in the instances of an owner (its own, or
+      one around it) where a side of that owner's type is [local]. *)
   module Follows : sig
     type t =
-      { side : Side.t (** In the owner's type. *)
+      { owner : Owner.t
+      ; side : Side.t (** In [owner]'s type. *)
       ; if_local : Placement.t
       }
     [@@deriving sexp_of]
