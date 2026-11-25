@@ -94,5 +94,5 @@ let%expect_test "random [with] clauses read back exactly" =
   print_s
     [%message
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
-  [%expect {| ((!accepted 355) (!rejected 45) (wrong 0)) |}]
+  [%expect {| ((!accepted 392) (!rejected 8) (wrong 0)) |}]
 ;;

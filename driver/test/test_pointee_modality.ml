@@ -289,7 +289,7 @@ let%expect_test "only provenance, only on [ptr]'s argument" =
 let f (p : ptr[string @@ local]) = p
 |};
   [%expect
-    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters relate only stage and provenance |}];
   provenance {|
 let f (p : ptr[string @@ portable]) = p
 |};

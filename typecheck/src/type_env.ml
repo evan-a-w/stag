@@ -227,8 +227,6 @@ module Annotation_vars = struct
     ; tys : Type.ty String.Table.t
     ; rows : Type.row String.Table.t
     ; modes : Mode.Var.t String.Table.t
-    ; located : String.Hash_set.t
-    ; mode_args : String.Hash_set.t
     }
 
   let create fresh ~rank =
@@ -237,8 +235,6 @@ module Annotation_vars = struct
     ; tys = String.Table.create ()
     ; rows = String.Table.create ()
     ; modes = String.Table.create ()
-    ; located = String.Hash_set.create ()
-    ; mode_args = String.Hash_set.create ()
     }
   ;;
 
@@ -275,26 +271,13 @@ module Annotation_vars = struct
 
   let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
 
-  (* [`Mode_arg] for a mode argument, which has no locality, [`Located] where it
-     has, and [`Related] in a constraint, which relates its axes. *)
-  let var t name ~loc ~(use : [ `Located | `Mode_arg | `Related ]) =
-    (match use with
-     | `Located -> Hash_set.add t.located name
-     | `Mode_arg -> Hash_set.add t.mode_args name
-     | `Related -> ());
+  let mode t name ~loc =
     only_kind
       name
       ~loc
       ~in_:t.modes
       ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
       ~default:(fun () -> fresh_mode t)
-  ;;
-
-  (* A variable only of mode arguments has no locality. *)
-  let mode t name ~loc = var t name ~loc ~use:`Located
-
-  let has_locality t name =
-    Hash_set.mem t.located name || not (Hash_set.mem t.mode_args name)
   ;;
 end
 
@@ -469,7 +452,7 @@ module Vars = struct
     match t, txt with
     | Annotation vars, Var name ->
       Result.map
-        (Annotation_vars.var vars name ~loc ~use:`Mode_arg)
+        (Annotation_vars.mode vars name ~loc)
         ~f:(fun var -> Mode_arg.Var var)
     | Params params, Var name ->
       (match Map.find params name with
@@ -496,13 +479,6 @@ module Vars = struct
     | Mode { txt = Atoms _; _ } | Axis (_, { txt = Atoms _; _ }) -> None
     | Meet (t, _) | Release t | Static_if_const t | Const_if_static t ->
       term_var t
-  ;;
-
-  let no_locality name ~loc =
-    Typecheck_error.create
-      ~loc
-      (Invalid_mode
-         (sprintf "'%s is only a mode argument, which has no locality" name))
   ;;
 
   (* A term of one variable as [m(var)] on the right of [<=], or, on the left,
@@ -537,12 +513,8 @@ module Vars = struct
     in
     match expr with
     | Axis (on, { txt = Var name; loc }) ->
-      let%bind var = Annotation_vars.var vars name ~loc ~use:`Related in
-      (match on with
-       | Locality when not (Annotation_vars.has_locality vars name) ->
-         Error (no_locality name ~loc)
-       | Stage | Provenance | Locality ->
-         Ok (var, Mode.Morphism.identity (axis on)))
+      let%map var = Annotation_vars.mode vars name ~loc in
+      var, Mode.Morphism.identity (axis on)
     | Meet (t, atom) ->
       under
         t
@@ -592,16 +564,6 @@ module Vars = struct
       Result.map_error result ~f:(fun error ->
         Typecheck_error.create ~loc (Mode_error error))
     in
-    let locality_atoms name (atoms : Syntax.Mode_expr.Atom.t list) =
-      match t with
-      | Annotation vars
-        when (not (Annotation_vars.has_locality vars name))
-             && List.exists atoms ~f:(fun atom ->
-               match Syntax.Mode_expr.Atom.axis atom with
-               | Locality -> true
-               | Stage | Provenance -> false) -> Error (no_locality name ~loc)
-      | Annotation _ | Params _ -> Ok ()
-    in
     match t, lower, upper with
     | Params _, _, _ ->
       (match Option.first_some (term_var lower) (term_var upper) with
@@ -613,26 +575,11 @@ module Vars = struct
        | Atoms _, Atoms _ ->
          error ~loc (Invalid_mode "a constraint must be on a mode variable")
        | Var lower_name, Var upper_name ->
-         let%bind.Result lower =
-           Annotation_vars.var vars lower_name ~loc ~use:`Related
-         in
-         let%bind.Result upper =
-           Annotation_vars.var vars upper_name ~loc ~use:`Related
-         in
-         if Annotation_vars.has_locality vars lower_name
-            && Annotation_vars.has_locality vars upper_name
-         then checked (Mode.Var.submode lower upper reason)
-         else
-           checked
-             (let%bind.Result () =
-                Mode.Var.submode_on lower upper Stage reason
-              in
-              Mode.Var.submode_on lower upper Provenance reason)
+         let%bind.Result lower = Annotation_vars.mode vars lower_name ~loc in
+         let%bind.Result upper = Annotation_vars.mode vars upper_name ~loc in
+         checked (Mode.Var.submode lower upper reason)
        | Var lower, Atoms atoms ->
-         let%bind.Result () = locality_atoms lower atoms in
-         let%bind.Result var =
-           Annotation_vars.var vars lower ~loc ~use:`Related
-         in
+         let%bind.Result var = Annotation_vars.mode vars lower ~loc in
          checked
            (bound
               atoms
@@ -640,10 +587,7 @@ module Vars = struct
                 { f = (fun axis point -> Mode.Var.at_most var axis point reason)
                 })
        | Atoms atoms, Var upper ->
-         let%bind.Result () = locality_atoms upper atoms in
-         let%bind.Result var =
-           Annotation_vars.var vars upper ~loc ~use:`Related
-         in
+         let%bind.Result var = Annotation_vars.mode vars upper ~loc in
          checked
            (bound
               atoms

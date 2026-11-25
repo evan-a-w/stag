@@ -21,6 +21,7 @@ end
 type t =
   { closure : Mode_closure.t
   ; nodes : Mode_node.t array
+  ; observed : int (* The nodes before it; those after are hidden. *)
   ; index : Mode_node.t -> int
   ; find : Mode_node.t -> int option
   ; real_lows : int array
@@ -36,8 +37,9 @@ type t =
   ; queue : int Queue.t
   }
 
-let create closure ~nodes ~base_lower ~implicit items =
-  let nodes = Array.of_list nodes in
+let create closure ~nodes ~hidden ~base_lower ~implicit items =
+  let observed = List.length nodes in
+  let nodes = Array.of_list (nodes @ hidden) in
   let table = Mode_node.Table.create () in
   Array.iteri nodes ~f:(fun i n -> Hashtbl.set table ~key:n ~data:i);
   let index = Hashtbl.find_exn table in
@@ -46,9 +48,12 @@ let create closure ~nodes ~base_lower ~implicit items =
   let t =
     { closure
     ; nodes
+    ; observed
     ; index
     ; find = Hashtbl.find table
-    ; real_lows = Array.map nodes ~f:(Mode_closure.lower closure)
+    ; real_lows =
+        Array.mapi nodes ~f:(fun i n ->
+          if i < observed then Mode_closure.lower closure n else base_lower n)
     ; base_lower = Array.map nodes ~f:base_lower
     ; kept = Array.create ~len:(Array.length items) true
     ; forward = Array.create ~len:size []
@@ -149,17 +154,36 @@ let raise_ t base x p ~stop =
   level, !touched
 ;;
 
+let observed t i = i < t.observed
 let real_lower t i = t.real_lows.(i)
-let real_upper t i = Mode_closure.upper t.closure t.nodes.(i)
-let domain t i = Mode_closure.domain t.closure t.nodes.(i)
+
+(* A hidden node reads back with no bound but what the items give it. *)
+let real_upper t i =
+  if observed t i
+  then Mode_closure.upper t.closure t.nodes.(i)
+  else Mode_node.max t.nodes.(i).axis
+;;
+
+let domain t i =
+  if observed t i
+  then Mode_closure.domain t.closure t.nodes.(i)
+  else
+    List.range
+      ~start:`exclusive
+      (real_lower t i)
+      ~stop:`inclusive
+      (real_upper t i)
+;;
 
 let implied t (item : Item.t) =
   match item with
   | Edges edges ->
     (* While the rest are exact, an edge raising nothing above [0] at its
-       source's lower bound adds nothing to the lower bounds. *)
+       source's lower bound adds nothing to the observed lower bounds; hidden
+       ones are known only by fixpoint. *)
     let lows =
-      if List.exists edges ~f:(fun { lo; morphism; hi = _ } ->
+      if t.observed < size t
+         || List.exists edges ~f:(fun { lo; morphism; hi = _ } ->
            Mode.Morphism.left morphism (real_lower t (t.index lo)) > 0)
       then lows t
       else t.real_lows
@@ -173,8 +197,12 @@ let implied t (item : Item.t) =
           raise_ t lows lo p ~stop:(fun level -> level hi >= need)
         in
         level hi >= need))
-  | Lower _ -> Array.for_alli (lows t) ~f:(fun i p -> p = real_lower t i)
-  | Upper _ -> Array.for_alli (ups t) ~f:(fun i p -> p = real_upper t i)
+  | Lower _ ->
+    Array.for_alli (lows t) ~f:(fun i p ->
+      (not (observed t i)) || p = real_lower t i)
+  | Upper _ ->
+    Array.for_alli (ups t) ~f:(fun i p ->
+      (not (observed t i)) || p = real_upper t i)
 ;;
 
 let check_exact t =
@@ -186,7 +214,7 @@ let check_exact t =
   let lows = lows t in
   let ups = ups t in
   Array.iteri t.nodes ~f:(fun i n ->
-    if lows.(i) <> real_lower t i || ups.(i) <> real_upper t i
+    if observed t i && (lows.(i) <> real_lower t i || ups.(i) <> real_upper t i)
     then
       fail
         [%message
@@ -199,34 +227,36 @@ let check_exact t =
   (* The levels being the real ones, a raise needs comparing only where either
      raises. *)
   Array.iteri t.nodes ~f:(fun i x ->
-    List.iter (domain t i) ~f:(fun p ->
-      let real = Int.Table.create () in
-      List.iter (Mode_closure.raised_alist t.closure x p) ~f:(fun (y, point) ->
-        Option.iter (t.find y) ~f:(fun j ->
-          if point > lows.(j)
-          then
-            Hashtbl.update real j ~f:(fun current ->
-              Int.max point (Option.value current ~default:point))));
-      let level, touched = raise_ t lows i p ~stop:(fun _ -> false) in
-      List.iter
-        (touched @ Hashtbl.keys real)
-        ~f:(fun j ->
-          let real = Hashtbl.find real j |> Option.value ~default:lows.(j) in
-          if level j <> real
-          then
-            fail
-              [%message
-                "raise"
-                  (x : Mode_node.t)
-                  (p : int)
-                  ~y:(t.nodes.(j) : Mode_node.t)
-                  ~level:(level j : int)
-                  (real : int)])))
+    if observed t i
+    then
+      List.iter (domain t i) ~f:(fun p ->
+        let real = Int.Table.create () in
+        List.iter (Mode_closure.raised_alist t.closure x p) ~f:(fun (y, point) ->
+          Option.iter (t.find y) ~f:(fun j ->
+            if observed t j && point > lows.(j)
+            then
+              Hashtbl.update real j ~f:(fun current ->
+                Int.max point (Option.value current ~default:point))));
+        let level, touched = raise_ t lows i p ~stop:(fun _ -> false) in
+        List.iter
+          (List.filter touched ~f:(observed t) @ Hashtbl.keys real)
+          ~f:(fun j ->
+            let real = Hashtbl.find real j |> Option.value ~default:lows.(j) in
+            if level j <> real
+            then
+              fail
+                [%message
+                  "raise"
+                    (x : Mode_node.t)
+                    (p : int)
+                    ~y:(t.nodes.(j) : Mode_node.t)
+                    ~level:(level j : int)
+                    (real : int)])))
 ;;
 
-let reduce closure ~nodes ~base_lower ~implicit items ~item =
+let reduce closure ~nodes ~hidden ~base_lower ~implicit items ~item =
   let t, kinds =
-    create closure ~nodes ~base_lower ~implicit (List.map items ~f:item)
+    create closure ~nodes ~hidden ~base_lower ~implicit (List.map items ~f:item)
   in
   List.iteri items ~f:(fun i _ ->
     t.kept.(i) <- false;

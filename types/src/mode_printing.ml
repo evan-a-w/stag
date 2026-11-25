@@ -46,7 +46,6 @@ type t =
   ; counts : int Int.Table.t
   ; results : Int.Hash_set.t
   ; on_arrows : Int.Hash_set.t
-  ; mode_args : Int.Hash_set.t
   ; rep : int Int.Table.t
   ; atoms : (Mode.Axis.Any.t * int) list Int.Table.t
   ; names : string Int.Table.t
@@ -59,7 +58,6 @@ let create () =
   ; counts = Int.Table.create ()
   ; results = Int.Hash_set.create ()
   ; on_arrows = Int.Hash_set.create ()
-  ; mode_args = Int.Hash_set.create ()
   ; rep = Int.Table.create ()
   ; atoms = Int.Table.create ()
   ; names = Int.Table.create ()
@@ -75,13 +73,13 @@ let count t var ~(side : [ `Arg | `Res | `Mode_arg ]) =
    | `Res ->
      Hash_set.add t.on_arrows id;
      Hash_set.add t.results id
-   | `Mode_arg -> Hash_set.add t.mode_args id);
+   | `Mode_arg -> ());
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);
   Hashtbl.incr t.counts id
 ;;
 
-let portable = 1
+let portable = Mode.Stage.index Portable
 
 (* Whether [b] is at least [a] on the axis. *)
 let at_least closure a b axis =
@@ -89,6 +87,15 @@ let at_least closure a b axis =
   let b = { Mode_node.var = b; axis } in
   List.for_all (Mode_closure.domain closure a) ~f:(fun p ->
     Mode_closure.raise closure a p b >= p)
+;;
+
+(* Whether [a <= b] on the axis: [b] is at least [a] at its lower bound too. *)
+let holds closure a b axis =
+  let lo = { Mode_node.var = a; axis } in
+  let hi = { Mode_node.var = b; axis } in
+  List.for_all
+    (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
+    ~f:(fun p -> Mode_closure.raise closure lo p hi >= p)
 ;;
 
 (* Each written form, with its morphism and table. *)
@@ -143,9 +150,12 @@ let is_plain (r : Relation.t) =
    the rest imply. A class related to nothing, named once (or fixed on every
    axis), prints as the atoms of its fixed axes.
 
-   A mode argument has no locality, so neither has a variable only of mode
-   arguments (a [with] clause can't relate it, and relates it on its other axes
-   only): its locality is left out. *)
+   A mode argument reads only stage and provenance, so a variable only of mode
+   arguments has a locality no position reads: its node is eliminated, the
+   closure composing the relations through it, and neither bounded nor related
+   on its own. Plain relations still relate it as read back, so it is a hidden
+   node of the reduction, and they are kept only where the localities they
+   relate through it are related. *)
 let settle t =
   let ids =
     Hashtbl.keys t.vars
@@ -230,13 +240,7 @@ let settle t =
   (* A pair related on every axis both have prints as one relation. *)
   let plain_valid a b =
     List.for_all (axes a) ~f:(fun axis ->
-      (not (live b axis))
-      ||
-      let lo = { Mode_node.var = a; axis } in
-      let hi = { Mode_node.var = b; axis } in
-      List.for_all
-        (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
-        ~f:(fun p -> Mode_closure.raise closure lo p hi >= p))
+      (not (live b axis)) || holds closure a b axis)
   in
   let order id = Hashtbl.find_exn t.order id in
   let plain_pairs =
@@ -245,6 +249,40 @@ let settle t =
     |> List.dedup_and_sort ~compare:(fun (a, b) (a', b') ->
       [%compare: int * int] (order a, order b) (order a', order b'))
     |> List.filter ~f:(fun (a, b) -> plain_valid a b)
+  in
+  (* Read back, a pair relates the localities no position reads too, and so the
+     localities at either end of a path of pairs through them: kept only where
+     the closure has that. *)
+  let unread var = not (live var (T Locality)) in
+  let through_unread = Queue.create () in
+  let ends start ~step =
+    let seen = Int.Hash_set.create () in
+    let rec go var =
+      if not (Hash_set.mem seen var)
+      then (
+        Hash_set.add seen var;
+        if unread var
+        then
+          Queue.iter through_unread ~f:(fun pair ->
+            Option.iter (step pair var) ~f:go))
+    in
+    go start;
+    Hash_set.filter seen ~f:(Fn.non unread) |> Hash_set.to_list
+  in
+  let plain_pairs =
+    List.filter plain_pairs ~f:(fun (a, b) ->
+      (not (unread a || unread b))
+      ||
+      let lows =
+        ends a ~step:(fun (lo, hi) var -> Option.some_if (hi = var) lo)
+      in
+      let highs =
+        ends b ~step:(fun (lo, hi) var -> Option.some_if (lo = var) hi)
+      in
+      List.for_all lows ~f:(fun lo ->
+        List.for_all highs ~f:(fun hi -> holds closure lo hi (T Locality)))
+      && (Queue.enqueue through_unread (a, b);
+          true))
   in
   let plain_set = Int.Table.create () in
   List.iter plain_pairs ~f:(fun (a, b) ->
@@ -264,24 +302,14 @@ let settle t =
       @
       if upper < Mode_node.max n.axis then [ Printed.Upper (n, upper) ] else [])
   in
-  let item : Printed.t -> Mode_model.Item.t = function
-    | Plain (a, b) ->
-      Edges
-        (List.filter_map Mode.Axis.Any.all ~f:(fun axis ->
-           Option.some_if
-             (live a axis && live b axis)
-             (Relation.edge
-                { lo = { var = a; axis }
-                ; written = Plain axis
-                ; hi = { var = b; axis }
-                })))
-    | printed -> Printed.item printed
-  in
   (* Latest first, then pairs, then bounds. *)
   let printed =
     Mode_model.reduce
       closure
       ~nodes
+      ~hidden:
+        (List.filter_map reps ~f:(fun var ->
+           Option.some_if (unread var) { Mode_node.var; axis = T Locality }))
       ~base_lower
       ~implicit
       (List.rev_map
@@ -289,7 +317,7 @@ let settle t =
          ~f:(fun r -> Printed.Relation r)
        @ List.rev_map plain_pairs ~f:(fun (a, b) -> Printed.Plain (a, b))
        @ bounds)
-      ~item
+      ~item:Printed.item
   in
   let related = Int.Hash_set.create () in
   let bounded = Mode_node.Hash_set.create () in

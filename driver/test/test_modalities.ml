@@ -243,7 +243,7 @@ let read u = let f @ portable = p.* in f
 let f (p : ptr[int @@ local]) = p
 |};
   [%expect
-    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters relate only stage and provenance |}];
   check {|
 let f (p : ptr[int @@ portable external]) = p
 |};
@@ -361,15 +361,15 @@ type cell['p : mode] = { v : ptr[int @@ 'p] }
 let f (c : cell[local]) = c
 |};
   [%expect
-    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
-  (* Mode parameters have no locality, also where one only meets a field. *)
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters relate only stage and provenance |}];
+  (* No locality atom in a mode argument, also where one only meets a field. *)
   check
     {|
 type tagged['p : mode] = { payload : string @@ 'p }
 let f (t : tagged[global]) = t
 |};
   [%expect
-    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters relate only stage and provenance |}];
   (* A name is a mode variable or a type variable, not both. *)
   check
     {|
@@ -495,8 +495,9 @@ let constrained = .< fun (r : r) -> let s @ gc = r.any in s >.
     |}]
 ;;
 
-(* A mode argument's variable has no locality: relating others through it
-   plainly mustn't relate their localities. *)
+(* A mode argument reads only its variable's stage and provenance, so its
+   locality goes unprinted. As a plain relation through it would relate the
+   localities on either side, which the closure doesn't, one prints per axis. *)
 let%expect_test "printing: through a mode argument's variable" =
   round_trip
     {|
@@ -506,7 +507,7 @@ let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and 'm3 <= 'm4 and gc <= 'm1
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
     |}];
   check
     {|
@@ -519,9 +520,9 @@ let use (x @ local) = let r @ global = f x gb in r
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and 'm3 <= 'm4 and gc <= 'm1
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
     val gb : box[gc]
-    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and 'm3 <= 'm4 and gc <= 'm1
+    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
     val use : string @ 'm0 -> string @ 'm1 with local <= 'm0 and 'm0 <= gc and nonportable gc <= 'm1
     |}]
 ;;
@@ -564,8 +565,8 @@ let s : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('m) = fun x ->
 let%expect_test "a variable fixed on some axes keeps its name where others are \
                  free"
   =
-  (* [const] fixes stage, and so provenance ([static]); as only a mode argument
-     it has no locality, so it is fixed and prints as atoms. *)
+  (* [const] fixes stage, and so provenance ([static]); only a mode argument
+     reads it, on those axes, so it is fixed and prints as atoms. *)
   round_trip
     {|
 let diverge (u : unit) = diverge u
@@ -589,7 +590,9 @@ let s : 'a @ 'm1 -> ptr['a @@ 'm1] -> 'a with 'm1 <= const = fun x -> diverge ()
     |}]
 ;;
 
-let%expect_test "a variable only of mode arguments has no locality" =
+let%expect_test "a variable only of mode arguments: its locality is unread" =
+  (* Related and bounded on locality like any other: relations through it
+     print, its own locality doesn't. *)
   check
     {|
 type box['p : mode] = { v : string @@ 'p }
@@ -598,15 +601,22 @@ let s : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
   with release(locality('m0)) <= locality('m3) and 'm3 <= 'm4 = fun x -> diverge ()
 |};
   [%expect
-    {| This mode is invalid: 'm3 is only a mode argument, which has no locality |}];
+    {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val s : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with release(locality('m0)) <= locality('m3) and 'm2 <= 'm3
+    |}];
   check
     {|
 type box['p : mode] = { v : string @@ 'p }
 let s : box['m3] -> unit with 'm3 <= local = fun x -> ()
 |};
   [%expect
-    {| This mode is invalid: 'm3 is only a mode argument, which has no locality |}];
-  (* A plain relation relates the axes it has: stage and provenance. *)
+    {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val s : box['m0] -> unit
+    |}];
+  (* A plain relation relates every axis, so locality through ['m3] too. *)
   round_trip
     {|
 type box['p : mode] = { v : string @@ 'p }
@@ -618,6 +628,27 @@ let s : box['m3] @ 'm2 -> 'a @ 'm0 -> 'a @ 'm4
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : box['m1] @ 'm0 -> 'a @ 'm2 -> 'a @ 'm3 with 'm1 <= 'm3 and 'm2 <= 'm1 and 'm2 <= 'm3
+    val s : box['m1] @ 'm0 -> 'a @ 'm2 -> 'a @ 'm3 with 'm1 <= 'm3 and 'm2 <= 'm1
+    |}]
+;;
+
+let%expect_test "printing: localities related through a mode argument's variable" =
+  round_trip
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let diverge (u : unit) = diverge u
+let s : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
+  with locality('m0) <= locality('m3) and locality('m3) <= locality('m4) = fun x -> diverge ()
+let t : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
+  with 'm0 <= 'm3 and locality('m3) <= locality('m4) = fun x -> diverge ()
+let u : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
+  with 'm0 <= 'm3 and 'm3 <= 'm4 and 'm2 <= 'm3 = fun x -> diverge ()
+|};
+  [%expect {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val s : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with locality('m0) <= locality('m3)
+    val t : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with 'm0 <= 'm2 and locality('m0) <= locality('m3)
+    val u : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with 'm0 <= 'm2 and 'm1 <= 'm2 and 'm2 <= 'm3
     |}]
 ;;

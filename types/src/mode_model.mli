@@ -27,10 +27,14 @@ end
     [base_lower] (what they read back at least as). Edges are to be before
     bounds: dropping an edge keeps what the bounds imply. Then checks that the
     rest imply exactly what [closure] does of [nodes], raising if not: every
-    item must hold of [closure], and those it has to imply be among them. *)
+    item must hold of [closure], and those it has to imply be among them.
+
+    Items may also relate [hidden] nodes, which read back unbounded and only
+    pass raises on: what [closure] has of them isn't checked. *)
 val reduce
   :  Mode_closure.t
   -> nodes:Mode_node.t list
+  -> hidden:Mode_node.t list
   -> base_lower:(Mode_node.t -> int)
   -> implicit:Edge.t list
   -> 'a list

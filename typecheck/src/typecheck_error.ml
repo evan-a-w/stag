@@ -590,7 +590,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A mode argument is on stage and provenance only ([const], [portable], \
      [nonportable], [static], [gc], [external]) or a mode variable, as in \
      [ptr[string @@ external]]: a pointer's cell is always [global], and a \
-     type's mode parameters have no locality"
+     type's mode parameters relate only stage and provenance"
   | Relative_locality_modality ->
     "A modality's locality can only be [global]: [regional] and [local] are \
      relative to a region, and a part read from a block returned to the \
