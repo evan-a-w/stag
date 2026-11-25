@@ -67,6 +67,7 @@ module State = struct
     ; comments : (string * Loc.t) Queue.t
     ; errors : Error.t Queue.t option
     (** Where to record errors, to keep lexing after them, if any. *)
+    ; mutable previous : Token.t option
     }
 
   let peek_at t n =
@@ -130,13 +131,7 @@ let is_ident_start c = Char.is_alpha c || Char.equal c '_'
    with no trivia between, so that a [.] here is a field access's or a path's,
    not a root path's. *)
 let after_atom (t : State.t) ~glued =
-  glued
-  && t.offset > 0
-  &&
-  match t.src.[t.offset - 1] with
-  | ')' | ']' | '}' | '"' | '.' -> true
-  | '*' -> t.offset >= 2 && Char.equal t.src.[t.offset - 2] '.'
-  | c -> is_ident_char c
+  glued && Option.exists t.previous ~f:Token.ends_atom
 ;;
 
 let skip_while (t : State.t) ~f =
@@ -495,6 +490,7 @@ and token_or_skip (t : State.t) : Located.t =
          State.error t start (Illegal_character c);
          raise Skipped)
   in
+  t.previous <- Some token;
   { token; loc = State.loc_from t start }
 ;;
 
@@ -574,6 +570,7 @@ let lex ~file src ~errors =
     ; bol = 0
     ; comments = Queue.create ()
     ; errors
+    ; previous = None
     }
   in
   let tokens = Queue.create () in

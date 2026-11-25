@@ -155,6 +155,72 @@ let to_string = function
   | Eof -> "end of file"
 ;;
 
+let ends_atom : t -> bool = function
+  | Int _
+  | String _
+  | Lident _
+  | Uident _
+  | Label _
+  | Tyvar _
+  | Weak_tyvar _
+  | True
+  | False
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | Dot_star
+  | Quote_close
+  | Underscore
+  | Char _ -> true
+  | Let
+  | Rec
+  | Mut
+  | Stack_
+  | Exclave_
+  | Global_
+  | Let_expect_test
+  | Let_bench
+  | In
+  | Match
+  | With
+  | Fun
+  | Exception
+  | External
+  | Type
+  | Of
+  | Module
+  | Struct
+  | Include
+  | End
+  | Module_inline
+  | Include_inline
+  | End_inline
+  | Lparen
+  | Lbracket
+  | Expect_open
+  | Lbrace
+  | Comma
+  | Semi
+  | Colon
+  | Equal
+  | Bar
+  | Arrow
+  | Larrow
+  | Star
+  | Dot
+  | Root
+  | Dot_lbrace
+  | Dotdot
+  | Backslash
+  | Quote_open
+  | Less
+  | Greater
+  | Splice
+  | At
+  | At_at
+  | Eof -> false
+;;
+
 let ends_code : t -> bool = function
   | Lparen
   | Lbracket

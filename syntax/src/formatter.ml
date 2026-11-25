@@ -39,7 +39,7 @@ let printed_tokens doc ~tokens_of_text =
       let text = leaf_text leaf in
       ( List.rev_append
           (List.map (tokens_of_text text) ~f:(fun (t : Printed_token.t) ->
-             t.token, String.equal text "| "))
+             t.token, String.equal text Printer.case_bar))
           tokens
       , Doc.empty ))
   in
@@ -50,12 +50,13 @@ let printed_tokens doc ~tokens_of_text =
    (or module member, or module's [end]), in order, from [(0, 0)] to the ends.
    The tokens between two are aligned apart from the others, which keeps
    aligning a long file quick. [count] is the number of tokens a toplevel
-   prints. *)
+   prints, and [count_text] of a text. *)
 let cut_points
   (program : Syntax.Program.t)
   ~(source : Lexer.Located.t array)
   ~printed
   ~count
+  ~count_text
   =
   let first_at offset =
     match
@@ -73,10 +74,15 @@ let cut_points
     List.fold ts ~init:(start, acc) ~f:(fun (p, acc) (t : Syntax.Toplevel.t) ->
       let acc = (first_at t.loc.start.#offset, p) :: acc in
       match t.txt with
-      | Module (_, (_ :: _ as members)) ->
-        (* After [module M = struct]. *)
-        let p, acc = cuts members ~start:(p + 4) acc in
-        p + 1, (first_at t.loc.stop.#offset - 1, p) :: acc
+      | Module (name, (_ :: _ as members)) ->
+        let p, acc =
+          cuts
+            members
+            ~start:(p + count_text (Printer.module_open ~name:name.txt))
+            acc
+        in
+        ( p + count_text Printer.module_close
+        , (first_at t.loc.stop.#offset - 1, p) :: acc )
       | _ -> p + count t, acc)
   in
   let stop, cuts = cuts program ~start:0 [ 0, 0 ] in
@@ -455,7 +461,9 @@ let format ?(width = 80) ~file source =
             ~tokens_of_text
             ~source_tokens
             ~comments
-            ~cuts:(cut_points program ~count)
+            ~cuts:
+              (cut_points program ~count ~count_text:(fun text ->
+                 List.length (tokens_of_text text)))
       in
       match String.rstrip (Doc.render ~width doc) with
       | "" -> ""

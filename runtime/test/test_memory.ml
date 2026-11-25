@@ -444,3 +444,20 @@ let%expect_test "null and words" =
      (of_word_4096_minus_null 4096) (null_below_base true))
     |}]
 ;;
+
+let%expect_test "words below the bound are not pointers, as unsigned" =
+  List.iter [ 0; 4095; 4096; -1 ] ~f:(fun word ->
+    let word = Nativeint_u.of_int word in
+    print_s
+      [%message
+        ""
+          ~word:(Nativeint_u.to_nativeint word : nativeint)
+          ~non_pointer:(Addr.is_non_pointer (Addr.of_word word) : bool)]);
+  [%expect
+    {|
+    ((word 0) (non_pointer true))
+    ((word 4095) (non_pointer true))
+    ((word 4096) (non_pointer false))
+    ((word -1) (non_pointer false))
+    |}]
+;;

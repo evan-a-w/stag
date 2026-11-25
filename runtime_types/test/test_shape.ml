@@ -851,3 +851,40 @@ let%expect_test "the work bound does not depend on the cache" =
     (Error (Too_large 100000))
     |}]
 ;;
+
+let%expect_test "the depth bound does not depend on the cache" =
+  (* type c0 = int type c(i+1) = C of c(i): [c600] is 600 expansions deep, and
+     [w500] reaches it through 500 more. *)
+  let chain prefix n ~last =
+    List.init n ~f:(fun i ->
+      decl
+        ~name:(sprintf "%s%d" prefix i)
+        (if i = 0
+         then alias last
+         else variant [ ctor "C" [ tycon (sprintf "%s%d" prefix (i - 1)) [] ] ]))
+  in
+  let declarations =
+    chain "c" 601 ~last:int @ chain "w" 501 ~last:(tycon "c600" [])
+  in
+  let depth t ty =
+    print_s
+      [%sexp
+        (Result.map (Runtime_types.shape t ty) ~f:(fun _ -> "ok")
+         : (string, Error.t) Result.t)]
+  in
+  let t = Runtime_types.create (resolver declarations) in
+  depth t (tycon "w500" []);
+  depth t (tycon "c600" []);
+  let t = Runtime_types.create (resolver declarations) in
+  depth t (tycon "c600" []);
+  depth t (tycon "w500" []);
+  depth t (tycon "w300" []);
+  [%expect
+    {|
+    (Error (Too_deep 1000))
+    (Ok ok)
+    (Ok ok)
+    (Error (Too_deep 1000))
+    (Ok ok)
+    |}]
+;;

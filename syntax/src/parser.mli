@@ -31,9 +31,9 @@ val program_recovering
   -> string
   -> Syntax.Program.t * Error.t list
 
-(** How many times the parser has looked at a token so far, to test that it
-    takes linear time. *)
-val steps : unit -> int
+(** How many times [program_recovering] looks at a token, to test that it takes
+    linear time. *)
+val program_recovering_steps : file:string -> string -> int
 
 (** Also the tokens and the comments, in order. *)
 val program_with_comments

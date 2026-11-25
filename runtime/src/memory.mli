@@ -11,6 +11,14 @@ module Addr : sig
 
   val null : unit -> t [@@zero_alloc]
   val is_null : t -> bool [@@zero_alloc]
+
+  (** Words below it are never addresses, so they can be told apart from
+      pointers: scalars stored where a pointer may be, and niche values. *)
+  val non_pointer_bound : int
+
+  (** Below [non_pointer_bound]. *)
+  val is_non_pointer : t -> bool [@@zero_alloc]
+
   val to_word : t -> Nativeint_u.t [@@zero_alloc]
   val of_word : Nativeint_u.t -> t [@@zero_alloc]
   val add : t -> int -> t [@@zero_alloc]

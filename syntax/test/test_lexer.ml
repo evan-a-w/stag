@@ -799,6 +799,7 @@ let%expect_test "a dot before a name starts a root path unless after an atom" =
     ; ">.x .~.x .<.x>. .{.x} ..x"
     ; "(* c *).x x(* c *).x x .x"
     ; ". x .1 .`a"
+    ; "in.M.x with.x fun.x true.x 'c'.x"
     ]
     ~f:tokens;
   [%expect
@@ -809,5 +810,6 @@ let%expect_test "a dot before a name starts a root path unless after an atom" =
     >. x .~ ROOT x .< ROOT x >. .{ ROOT x } .. x
     ROOT x x ROOT x x ROOT x
     DOT x DOT 1 DOT `a
+    in ROOT M DOT x with ROOT x fun ROOT x true DOT x 'c' DOT x
     |}]
 ;;
