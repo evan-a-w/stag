@@ -204,10 +204,13 @@ let default_to_upper t = List.iter (nodes t) ~f:Graph.default_to_upper
 let generalize ts ~rank = Graph.generalize (List.concat_map ts ~f:nodes) ~rank
 let reopen t ~rank = List.iter (nodes t) ~f:(Graph.reopen ~rank)
 
+(* Its nodes are new, so it needn't be undone: a type's parameters are made when
+   first needed, which may be under [atomically]. *)
 let create_generic ids =
-  let t = create ids ~rank:1 in
-  generalize [ t ] ~rank:0;
-  t
+  Undo.detached (fun () ->
+    let t = create ids ~rank:1 in
+    generalize [ t ] ~rank:0;
+    t)
 ;;
 
 module Instance = struct

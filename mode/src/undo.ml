@@ -43,3 +43,13 @@ let assert_not_atomic what =
   then
     raise_s [%message "cannot be undone, so not allowed under atomically" what]
 ;;
+
+let detached f =
+  let saved_log = !log
+  and saved_depth = !depth in
+  log := [];
+  depth := 0;
+  Exn.protect ~f ~finally:(fun () ->
+    log := saved_log;
+    depth := saved_depth)
+;;
