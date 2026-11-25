@@ -154,7 +154,8 @@ their own, by interfaces and separately checked code.
   current neighbours) are projected onto its own;
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
-- a variable on `ptr` cells and mode arguments only has no locality.
+- a variable only on `ptr` cells and mode arguments prints no locality, which
+  no position reads; relations through it still print.
 
 A mutable global whose reads are `external` shows it
 (`val g : string @ external`), parenthesizing an arrow or tuple type
@@ -215,12 +216,16 @@ The printer finds the exact set as follows (`types/src/mode_closure.ml`,
    bounds and every `g`): a printer that would print something inexact fails
    with an internal error instead.
 
-A mode argument (`ptr[t @@ 'm]`, `cell[t, 'm]`) has no locality, so neither
-has a variable only in mode arguments: nothing in the solver relates its
-locality, a `with` clause naming it (`locality('m)`, `'m <= local`) is an
-error, and a plain `'m <= 'n` with it relates stage and provenance only. A
-variable also on an arrow has the arrow's locality. Such a variable prints as
-atoms only if fixed on both its axes (`ptr['a @@ const static]`), as a mode
+A mode argument (`ptr[t @@ 'm]`, `cell[t, 'm]`) relates only stage and
+provenance, and a locality atom in one is an error. Its variable is a mode
+variable like any other: a `with` clause may bound or relate its locality, and
+a plain `'m <= 'n` relates every axis. But if it is only in mode arguments, no
+position reads its locality, so the printer eliminates that node: the solver's
+closure composes the relations through it, which print between the nodes that
+are read. A plain relation still relates the eliminated node when read back,
+so the reduction keeps it as a hidden node, and a pair is printed plainly only
+where the localities it relates through it are related (else per axis). Such
+a variable prints as atoms only if fixed on both its axes (`ptr['a @@ const static]`), as a mode
 argument's unwritten axes read back as the default; one also on an arrow, and
 free there on locality, keeps its name in both places.
 
