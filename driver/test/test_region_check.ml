@@ -59,13 +59,13 @@ let use3 (u : unit) = match f3 () 1 with (a, b) -> b 2
     {|
     (Returned (value 1) (on_heap 3) (in_regions 0))
     (Use_after_free
-     "a call of the Closure at t.stag:6:27-45, made in the region of a call of toplevel f, after it ended")
+     "a reference, from a toplevel, to the Closure at t.stag:6:27-45, made in the region of a call of toplevel f, which ends first")
     (Returned (value 1) (on_heap 1) (in_regions 0))
     (Use_after_free
-     "a call of the Closure at t.stag:7:28-46, made in the region of a call of toplevel f2, after it ended")
+     "a reference, from the result of a call of toplevel f2, of the Closure at t.stag:7:28-46, made in the region of a call of toplevel f2, after it ended")
     (Returned (value 2) (on_heap 2) (in_regions 0))
     (Use_after_free
-     "a call of the Closure at t.stag:8:28-68, made in the region of a call of toplevel f3, after it ended")
+     "a reference, from the result of a call of toplevel f3, of the Closure at t.stag:8:28-68, made in the region of a call of toplevel f3, after it ended")
     |}]
 ;;
 
@@ -81,7 +81,7 @@ let use (u : unit) = f (fun b -> keep.* <- b; 0)
     {|
     (Returned (value 0) (on_heap 4) (in_regions 1))
     (Use_after_free
-     "a reference, from a toplevel, of the Box at t.stag:5:39-51, made in the region of a call of toplevel f, after it ended")
+     "a reference, from a toplevel, to the Box at t.stag:5:39-51, made in the region of a call of toplevel f, which ends first")
     |}]
 ;;
 
@@ -100,10 +100,10 @@ let user (u : unit) = match r () with {`g = g} -> keep.* <- g 1
     {|
     (Returned (value "()") (on_heap 3) (in_regions 1))
     (Use_after_free
-     "a reference, from a toplevel, of the Box at t.stag:5:40-50, made in the region of a call of toplevel usev, after it ended")
+     "a reference, from a toplevel, to the Box at t.stag:5:40-50, made in the region of a call of toplevel usev, which ends first")
     (Returned (value "()") (on_heap 3) (in_regions 1))
     (Use_after_free
-     "a reference, from a toplevel, of the Box at t.stag:6:42-52, made in the region of a call of toplevel user, after it ended")
+     "a reference, from a toplevel, to the Box at t.stag:6:42-52, made in the region of a call of toplevel user, which ends first")
     |}]
 ;;
 
@@ -118,9 +118,9 @@ let usem (u : unit) = keepf.* <- many 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 
     ~buggy:[ "t.stag:6:230-232", Caller_region ];
   [%expect
     {|
-    (Returned (value 1) (on_heap 3) (in_regions 17))
+    (Returned (value 1) (on_heap 3) (in_regions 0))
     (Use_after_free
-     "a reference, from a toplevel, of the Partial_application at t.stag:6:230-232, made in the region of a call of toplevel usem, after it ended")
+     "a reference, from a toplevel, to the Partial_application at t.stag:6:230-232, made in the region of a call of toplevel usem, which ends first")
     |}]
 ;;
 
@@ -175,5 +175,157 @@ let c2 (u : unit) = let x @ local = stack_ (Box.make 1) in a2 x 3 [@nontail]
     {|
     (Rejected
      ("This is local, because it is allocated by [stack_] (at t.stag:5:36-55), then it is part of the value (at t.stag:5:36-55), then it is bound by an annotated let (at t.stag:5:28-33), then x is used (at t.stag:5:62-63), then it is passed to a function (at t.stag:5:59-63), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:77-78), then x is used (at t.stag:3:77-78), then x is passed to the function (at t.stag:3:34-108), then a function is used at a type with other modes, then it is passed to a function (at t.stag:4:34-38), then x is used (at t.stag:4:37-38), then x is passed to the function (at t.stag:4:34-40), then a function is used at a type with other modes"))
+    |}]
+;;
+
+(* With every site of [kind] (in toplevel [in_]) made at [placement], whatever
+   the record says. *)
+let forcing ?in_ kind placement (allocation : Typed.Allocation.t) =
+  if Typed.Allocation.Kind.equal allocation.kind kind
+     && Option.for_all in_ ~f:(String.equal allocation.owner.toplevel.name)
+  then { allocation with placement; follows = None }
+  else allocation
+;;
+
+let%expect_test "a global left pointing into a region, though overwritten" =
+  let source =
+    {|
+let zero = Box.make 0
+let keepg : ptr[unit -> int] = Ptr.make (fun (u : unit) -> 0)
+let stored (u : unit) = keep.* <- Box.make 3; keep.* <- zero; 0
+let captured (u : unit) =
+  let b = Box.make 3 in
+  keepg.* <- (fun (u : unit) -> sum b);
+  keepg.* <- (fun (u : unit) -> 1);
+  0
+|}
+  in
+  List.iter [ "stored"; "captured" ] ~f:(fun entry ->
+    run (reviewed ^ source) ~entry;
+    run (reviewed ^ source) ~entry ~override:(forcing ~in_:entry Box Region));
+  [%expect
+    {|
+    (Returned (value 0) (on_heap 4) (in_regions 0))
+    (Use_after_free
+     "a reference, from a toplevel, to the Box at t.stag:7:34-44, made in the region of a call of toplevel stored, which ends first")
+    (Returned (value 0) (on_heap 5) (in_regions 0))
+    (Use_after_free
+     "a reference, from a toplevel, to the Box at t.stag:9:10-20, made in the region of a call of toplevel captured, which ends first")
+    |}]
+;;
+
+let%expect_test "a closure called in tail position, its region ended first" =
+  let source =
+    {|
+let main (u : unit) =
+  let n = sum (Box.make 3) in
+  let f = fun (a : int) -> Int.add a n in
+  f 2
+|}
+  in
+  run (reviewed ^ source) ~entry:"main";
+  run (reviewed ^ source) ~entry:"main" ~override:(forcing Closure Region);
+  [%expect
+    {|
+    (Returned (value 5) (on_heap 1) (in_regions 1))
+    (Use_after_free
+     "a call of the Closure at t.stag:7:10-38, made in the region of a call of toplevel main, after it ended")
+    |}]
+;;
+
+let%expect_test "a toplevel's initializer has a region of its own" =
+  let source =
+    {|
+let g = let b = Box.make 1 in fun (u : unit) -> sum b
+let x = let b = Box.make 1 in sum b
+let main (u : unit) = Int.add (g ()) x
+|}
+  in
+  allocations_of (reviewed ^ source);
+  run (reviewed ^ source) ~entry:"main";
+  run (reviewed ^ source) ~entry:"main" ~override:(forcing Box Region);
+  [%expect {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val g : unit @ '_m0 -> int @ '_m1
+    val x : int
+    val main : unit @ _ -> int @ _
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:16-26 Box in g: heap
+    t.stag:5:30-53 Closure in g: heap
+    t.stag:6:16-26 Box in x: region
+    (Returned (value 2) (on_heap 2) (in_regions 1))
+    (Use_after_free
+     "a reference, from a toplevel, of the Box at t.stag:5:16-26, made in the initializer of g, after it ended")
+    |}]
+;;
+
+let%expect_test "functions of functions, and saturated applications" =
+  let source =
+    {|
+let adder (n : int) = fun (x : int) -> Box.make (Int.add n x)
+let three (a : int) (b : int) (c : int) = Box.make (Int.add a (Int.add b c))
+let main (u : unit) =
+  let a @ local = adder 1 in
+  let b @ local = a 2 in
+  let p @ local = three 1 2 in
+  let c @ local = p 3 in
+  let d @ local = three 1 2 3 in
+  Int.add (sum b) (Int.add (sum c) (sum d)) [@nontail]
+|}
+  in
+  allocations_of (reviewed ^ source);
+  run (reviewed ^ source) ~entry:"main";
+  [%expect {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val adder : int @ 'm0 -> (int @ _ -> box[int] @ 'm2) @ 'm1 with 'm0 <= 'm1 and gc <= 'm2 and gc <= 'm1
+    val three : int @ 'm0 -> (int @ 'm2 -> (int @ _ -> box[int] @ 'm4) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3 and gc <= 'm4 and gc <= 'm3 and gc <= 'm1
+    val main : unit @ _ -> int @ _
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:22-61 Partial_application in adder: heap, caller's region if res is local
+    t.stag:5:39-61 Box in adder: heap, caller's region if res.res is local
+    t.stag:6:42-76 Partial_application in three: heap, caller's region if res is local
+    t.stag:6:42-76 Partial_application in three: heap, caller's region if res.res is local
+    t.stag:6:42-76 Box in three: heap, caller's region if res.res.res is local
+    (Returned (value 15) (on_heap 0) (in_regions 5))
+    |}]
+;;
+
+let%expect_test "prims and allocators used as values" =
+  let source =
+    {|
+let apply (f : int -> box[int]) (x : int) = f x
+let boxed (x : int) = apply Box.make x
+let plus (u : unit) = Int.add 1
+let partly (n : int) = let g = Int.add n in g 2
+let main (u : unit) = Int.add (sum (boxed 1)) (Int.add (plus () 2) (partly 3))
+|}
+  in
+  allocations_of (reviewed ^ source);
+  run (reviewed ^ source) ~entry:"main";
+  run
+    (reviewed ^ source)
+    ~entry:"main"
+    ~override:(forcing Partial_application Region);
+  [%expect {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val apply : (int -> box[int]) @ 'm0 -> (int @ _ -> box[int] @ 'm2) @ 'm1 with 'm0 <= 'm1 and nonportable gc <= 'm2 and gc <= 'm1
+    val boxed : int @ _ -> box[int] @ 'm0 with nonportable gc <= 'm0
+    val plus : unit @ _ -> (int @ _ -> int) @ 'm0 with gc <= 'm0
+    val partly : int @ _ -> int @ _
+    val main : unit @ _ -> int @ _
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:44-47 Partial_application in apply: heap, caller's region if res is local
+    t.stag:6:28-36 Box in boxed: heap
+    t.stag:7:22-31 Partial_application in plus: heap, caller's region if res is local
+    t.stag:8:31-40 Partial_application in partly: heap
+    (Returned (value 9) (on_heap 2) (in_regions 1))
+    (Use_after_free
+     "a reference, from the result of a call of toplevel plus, of the Partial_application at t.stag:7:22-31, made in the region of a call of toplevel plus, after it ended")
     |}]
 ;;

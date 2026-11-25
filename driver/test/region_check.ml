@@ -31,7 +31,7 @@ module Region = struct
 
   let heap = { name = "the heap"; live = true }
   let create name = { name; live = true }
-  let free t = t.live <- false
+  let is_heap t = phys_equal t heap
 end
 
 (* The instance of each owner running: whether each of its sides that a site
@@ -64,7 +64,11 @@ module Value = struct
     | Poly_record of t String.Map.t
     | Poly_variant of string * t
     | Obj of obj
-    | Prim_fn of Prim.t * t list (** Latest first. *)
+    | Prim_fn of Prim.t * Loc.t
+    (** A prim named as a value at [loc], where what applying it to too few
+        arguments makes is. *)
+    | Allocator of Allocation.Kind.t * Loc.t
+    (** [Box.make] or [Ptr.make] named as a value at [loc]. *)
 
   and obj =
     { id : int
@@ -78,6 +82,8 @@ module Value = struct
     | Ptr of t ref
     | Cell of t ref
     | Closure of closure
+    | Prim_partial of Prim.t * t list * Loc.t
+    (** The arguments given so far, latest first, and where it is made. *)
 
   and closure =
     { params : Typed.Ident.t list
@@ -113,6 +119,8 @@ module Value = struct
     ; current : Region.t
     ; instance : Instance.t
     ; owner : Allocation.Owner.t
+    ; running : (obj * env) option
+    (** The closure running, and what it captures. *)
     }
 
   let unit = Prim_value Unit
@@ -142,7 +150,20 @@ type t =
 
 let site t kind loc =
   match Hashtbl.find t.sites (kind, loc) with
-  | Some (allocation :: _) -> allocation
+  | Some (allocation :: others) ->
+    let where (allocation : Allocation.t) =
+      [%sexp
+        (allocation.placement : Allocation.Placement.t)
+        , (allocation.follows : Allocation.Follows.t option)]
+    in
+    if List.for_all others ~f:(fun other ->
+         Sexp.equal (where allocation) (where other))
+    then allocation
+    else
+      unsupported
+        !"%{Sexp} sites at %s placed differently"
+        [%sexp (kind : Allocation.Kind.t)]
+        (Loc.to_string loc)
   | Some [] | None ->
     unsupported
       !"no %{Sexp} site at %s"
@@ -165,40 +186,6 @@ let placement (ctx : ctx) (allocation : Allocation.t) =
   | Some _ | None -> allocation.placement
 ;;
 
-let alloc
-  t
-  (allocation : Allocation.t)
-  ~(at : Region.t)
-  ~caller
-  payload
-  (placement : Allocation.Placement.t)
-  =
-  t.next_id <- t.next_id + 1;
-  (match placement with
-   | Heap -> t.on_heap <- t.on_heap + 1
-   | Region | Caller_region -> t.in_regions <- t.in_regions + 1);
-  { id = t.next_id
-  ; region =
-      (match placement with
-       | Heap -> Region.heap
-       | Region -> at
-       | Caller_region -> caller)
-  ; site = describe allocation
-  ; payload
-  }
-;;
-
-let make t ctx kind loc payload =
-  let allocation = site t kind loc in
-  alloc
-    t
-    allocation
-    ~at:ctx.region
-    ~caller:ctx.caller
-    payload
-    (placement ctx allocation)
-;;
-
 let live (obj : obj) ~what =
   if not obj.region.live
   then
@@ -209,6 +196,111 @@ let live (obj : obj) ~what =
             what
             obj.site
             obj.region.name))
+;;
+
+(* The allocations [value] points to, not through another allocation. *)
+let rec pointees value ~f =
+  match value with
+  | Prim_value _ | Prim_fn _ | Allocator _ -> ()
+  | Tuple values | Construct (_, values) -> List.iter values ~f:(pointees ~f)
+  | Record values -> Array.iter values ~f:(pointees ~f)
+  | Poly_record values -> Map.iter values ~f:(pointees ~f)
+  | Poly_variant (_, value) -> pointees value ~f
+  | Obj obj -> f obj
+;;
+
+let escapes value ~what = pointees value ~f:(live ~what)
+
+(* What a closure with [env] running [body] holds. *)
+let rec captured env ~body =
+  Map.fold env ~init:[] ~f:(fun ~key:ident ~data:binding values ->
+    if Typed.Expr.refers_to body ~f:(fun binder ->
+         Typed.Binder.equal binder (Local ident))
+    then (
+      match !binding with
+      | Value value -> value :: values
+      | Generic_value { env; body; _ } -> captured env ~body @ values
+      | Generic_function { obj; _ } -> Obj obj :: values)
+    else values)
+;;
+
+let held = function
+  | Box value -> [ value ]
+  | Ptr cell | Cell cell -> [ !cell ]
+  | Closure closure -> captured closure.env ~body:closure.body
+  | Prim_partial (_, args, _) -> args
+;;
+
+(* Each allocation [values] reach, once. *)
+let iter_reached values ~f =
+  let seen = Int.Hash_set.create () in
+  let rec value v =
+    pointees v ~f:(fun obj ->
+      if not (Hash_set.mem seen obj.id)
+      then (
+        Hash_set.add seen obj.id;
+        f obj;
+        List.iter (held obj.payload) ~f:value))
+  in
+  List.iter values ~f:value
+;;
+
+let alloc
+  t
+  (allocation : Allocation.t)
+  ~(at : Region.t)
+  ~caller
+  ?(also = [])
+  payload
+  (placement : Allocation.Placement.t)
+  =
+  t.next_id <- t.next_id + 1;
+  (match placement with
+   | Heap -> t.on_heap <- t.on_heap + 1
+   | Region | Caller_region -> t.in_regions <- t.in_regions + 1);
+  let region =
+    match placement with
+    | Heap -> Region.heap
+    | Region -> at
+    | Caller_region -> caller
+  in
+  let site = describe allocation in
+  List.iter
+    (also @ held payload)
+    ~f:(escapes ~what:(sprintf "a pointer, from the %s," site));
+  { id = t.next_id; region; site; payload }
+;;
+
+(* What toplevels reach outlives every region: it is all on the heap. *)
+let check_globals t =
+  iter_reached (Hashtbl.data t.values) ~f:(fun obj ->
+    live obj ~what:"a reference, from a toplevel,";
+    if not (Region.is_heap obj.region)
+    then
+      raise
+        (Use_after_free
+           (sprintf
+              "a reference, from a toplevel, to the %s, made in %s, which ends \
+               first"
+              obj.site
+              obj.region.name)))
+;;
+
+let free t (region : Region.t) =
+  region.live <- false;
+  check_globals t
+;;
+
+let make ?also t ctx kind loc payload =
+  let allocation = site t kind loc in
+  alloc
+    t
+    allocation
+    ~at:ctx.region
+    ~caller:ctx.caller
+    ?also
+    payload
+    (placement ctx allocation)
 ;;
 
 (* The node of a side of an arrow in [ty]. *)
@@ -388,7 +480,16 @@ let partials t (loc : Loc.t) =
   Hashtbl.find t.sites (Partial_application, loc) |> Option.value ~default:[]
 ;;
 
+(* A function whose body is a function is one function of the parameters of
+   both, as the typechecker has it. *)
+let rec merged params (body : Typed.Expr.t) =
+  match body.desc with
+  | Fun { args; body; _ } -> merged (params @ args) body
+  | _ -> params, body
+;;
+
 let closure t ctx ~kind ~loc ~params ~body ~env ~partials_at ~owner =
+  let params, body = merged params body in
   Obj
     (make
        t
@@ -420,26 +521,19 @@ let rec toplevel t (ident : Typed.Ident.t) =
       | None -> unsupported "toplevel %s" ident.name
     in
     let owner = { Allocation.Owner.toplevel = top.ident; lets = [] } in
-    let ctx =
-      { region = Region.heap
-      ; caller = Region.heap
-      ; current = Region.heap
-      ; instance = Instance.empty
-      ; owner
-      }
-    in
     let value =
       match top.args with
       | _ :: _ ->
         t.next_id <- t.next_id + 1;
+        let params, body = merged top.args top.body in
         Obj
           { id = t.next_id
           ; region = Region.heap
           ; site = "toplevel " ^ ident.name
           ; payload =
               Closure
-                { params = top.args
-                ; body = top.body
+                { params
+                ; body
                 ; env = Typed.Ident.Map.empty
                 ; instance = Instance.empty
                 ; partials = partials t top.body.loc
@@ -447,18 +541,41 @@ let rec toplevel t (ident : Typed.Ident.t) =
                 }
           }
       | [] ->
+        (* An initializer's region ends when it does. *)
+        let region =
+          Region.create (sprintf "the initializer of %s" ident.name)
+        in
+        let ctx =
+          { region
+          ; caller = Region.heap
+          ; current = region
+          ; instance = Instance.empty
+          ; owner
+          ; running = None
+          }
+        in
         let value = eval t ctx Typed.Ident.Map.empty top.body ~tail:false in
-        if top.mut then unsupported "a mutable toplevel" else value
+        free t region;
+        if top.mut then unsupported "a mutable toplevel";
+        value
     in
     Hashtbl.set t.values ~key:ident.name ~data:value;
+    check_globals t;
     value
 
 and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
   match var with
+  | _ when Option.is_some (allocates var) ->
+    Allocator (Option.value_exn (allocates var), expr.loc)
   | Bound (Local ident) | Persistent (Local ident) ->
     (match Map.find env ident with
      | None -> unsupported "unbound %s" ident.name
      | Some binding ->
+       Option.iter ctx.running ~f:(fun (obj, captures) ->
+         match Map.find captures ident with
+         | Some captured when phys_equal captured binding ->
+           live obj ~what:"a read of what it captures, by the closure"
+         | Some _ | None -> ());
        (match !binding with
         | Value (Obj ({ payload = Cell cell; _ } as obj)) ->
           live obj ~what:"a read";
@@ -476,7 +593,7 @@ and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
                instantiate t ctx.instance ~owner ~scheme ~ty:expr.ty
              in
              Obj { obj with payload = Closure { closure with instance } }
-           | Box _ | Ptr _ | Cell _ -> assert false)))
+           | Box _ | Ptr _ | Cell _ | Prim_partial _ -> assert false)))
   | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
     (match toplevel t ident with
      | Obj ({ payload = Closure closure; _ } as obj) ->
@@ -491,85 +608,153 @@ and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
        in
        Obj { obj with payload = Closure { closure with instance } }
      | value -> value)
-  | Prim prim -> Prim_fn (prim, [])
+  | Prim prim -> Prim_fn (prim, expr.loc)
   | Free name -> unsupported "free %s" name
   | Intrinsic _ -> unsupported "an intrinsic not applied"
 
-and apply t ctx value arg ~tail =
-  match value with
-  | Prim_fn (prim, applied) ->
-    let applied = arg :: applied in
-    if List.length applied < Prim.arity prim
-    then Prim_fn (prim, applied)
-    else (
-      let args =
-        List.rev_map applied ~f:(function
-          | Prim_value value -> value
-          | _ -> unsupported "a prim of a non-prim value")
-      in
-      match Prim.apply prim ~output:ignore args with
-      | Ok value -> Prim_value value
-      | Error _ -> unsupported "a prim raising")
-  | Obj ({ payload = Closure closure; _ } as obj) ->
-    live obj ~what:"a call";
-    (* A tail call ends the region of the function making it first. *)
-    let caller =
-      if tail && t.tail_calls_end_regions
-      then (
-        Region.free ctx.region;
-        ctx.caller)
-      else ctx.current
+(* [prim] given [applied] (latest first) then [args]: a closure made at
+   [site] while too few. *)
+and apply_prim t ctx prim applied args ~site =
+  let rec take applied = function
+    | [] -> applied, []
+    | arg :: args when List.length applied < Prim.arity prim ->
+      take (arg :: applied) args
+    | args -> applied, args
+  in
+  let applied, rest = take applied args in
+  if List.length applied < Prim.arity prim
+  then
+    Obj
+      (make
+         t
+         ctx
+         Partial_application
+         site
+         (Prim_partial (prim, applied, site)))
+  else (
+    let values =
+      List.rev_map applied ~f:(function
+        | Prim_value value -> value
+        | _ -> unsupported "a prim of a non-prim value")
     in
-    (match closure.params with
-     | [] -> assert false
-     | [ param ] ->
-       let region =
-         Region.create (sprintf "the region of a call of %s" obj.site)
+    let result =
+      match Prim.apply prim ~output:ignore values with
+      | Ok value -> Prim_value value
+      | Error _ -> unsupported "a prim raising"
+    in
+    match rest with
+    | [] -> result
+    | _ :: _ -> unsupported "applying a prim's result")
+
+and apply t ctx value args ~tail =
+  match args with
+  | [] -> value
+  | arg :: rest ->
+    (match value with
+     | Prim_fn (prim, loc) -> apply_prim t ctx prim [] args ~site:loc
+     | Obj ({ payload = Prim_partial (prim, applied, site); _ } as obj) ->
+       live obj ~what:"a call";
+       apply_prim t ctx prim applied args ~site
+     | Allocator (kind, loc) ->
+       let payload : payload =
+         match kind with
+         | Box -> Box arg
+         | _ -> Ptr (ref arg)
        in
-       let env = Map.set closure.env ~key:param ~data:(ref (Value arg)) in
-       let result =
-         eval
-           t
-           { region
-           ; caller
-           ; current = region
-           ; instance = closure.instance
-           ; owner = closure.owner
-           }
-           env
-           closure.body
-           ~tail:true
-       in
-       Region.free region;
-       result
-     | param :: params ->
-       let partial, partials =
-         match closure.partials with
-         | partial :: partials -> partial, partials
-         | [] -> unsupported "no partial application site"
-       in
-       let ctx' = { ctx with instance = closure.instance } in
-       (match placement ctx' partial with
-        | Region -> unsupported "a partial application in its own region"
-        | Heap -> t.on_heap <- t.on_heap + 1
-        | Caller_region -> t.in_regions <- t.in_regions + 1);
-       t.next_id <- t.next_id + 1;
-       Obj
-         { id = t.next_id
-         ; region =
-             (match placement ctx' partial with
-              | Heap -> Region.heap
-              | Region | Caller_region -> caller)
-         ; site = describe partial
-         ; payload =
-             Closure
-               { closure with
-                 params
-               ; env = Map.set closure.env ~key:param ~data:(ref (Value arg))
-               ; partials
-               }
-         })
-  | _ -> unsupported "applying a non-function"
+       apply t ctx (Obj (make t ctx kind loc payload)) rest ~tail
+     | Obj ({ payload = Closure closure; _ } as obj) ->
+       let given = List.length args in
+       if given < List.length closure.params
+       then partial t ctx obj closure args ~tail
+       else (
+         let now = List.take args (List.length closure.params) in
+         let rest = List.drop args (List.length closure.params) in
+         let result =
+           call t ctx obj closure now ~tail:(tail && List.is_empty rest)
+         in
+         apply t ctx result rest ~tail)
+     | _ -> unsupported "applying a non-function")
+
+(* [closure], of [obj], given all its parameters. *)
+and call t ctx obj closure args ~tail =
+  (* A tail call ends the region of the function making it first. *)
+  let caller =
+    if tail && t.tail_calls_end_regions
+    then (
+      free t ctx.region;
+      ctx.caller)
+    else ctx.current
+  in
+  live obj ~what:"a call";
+  if tail
+  then
+    List.iter args ~f:(fun arg ->
+      escapes arg ~what:"a reference, from an argument of a tail call,");
+  let region = Region.create (sprintf "the region of a call of %s" obj.site) in
+  let env =
+    List.fold2_exn closure.params args ~init:closure.env ~f:(fun env param arg ->
+      Map.set env ~key:param ~data:(ref (Value arg)))
+  in
+  let result =
+    eval
+      t
+      { region
+      ; caller
+      ; current = region
+      ; instance = closure.instance
+      ; owner = closure.owner
+      ; running = Some (obj, closure.env)
+      }
+      env
+      closure.body
+      ~tail:true
+  in
+  free t region;
+  escapes
+    result
+    ~what:(sprintf "a reference, from the result of a call of %s," obj.site);
+  result
+
+(* [closure], of [obj], given too few of its parameters: a closure. *)
+and partial t ctx obj closure args ~tail =
+  let given = List.length args in
+  let partial = List.nth closure.partials (given - 1) in
+  let partial =
+    match partial with
+    | Some partial -> partial
+    | None -> unsupported "no partial application site"
+  in
+  let caller =
+    if tail && t.tail_calls_end_regions
+    then (
+      free t ctx.region;
+      ctx.caller)
+    else ctx.current
+  in
+  live obj ~what:"a partial application";
+  let ctx' = { ctx with instance = closure.instance } in
+  let placement = placement ctx' partial in
+  (match placement with
+   | Region -> unsupported "a partial application in its own region"
+   | Heap | Caller_region -> ());
+  let params = List.take closure.params given in
+  let unapplied = List.drop closure.params given in
+  Obj
+    (alloc
+       t
+       partial
+       ~at:caller
+       ~caller
+       ~also:[ Obj obj ]
+       (Closure
+          { closure with
+            params = unapplied
+          ; env =
+              List.fold2_exn params args ~init:closure.env ~f:(fun env p a ->
+                Map.set env ~key:p ~data:(ref (Value a)))
+          ; partials = List.drop closure.partials given
+          })
+       placement)
 
 and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
   tick t;
@@ -585,10 +770,23 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
      | Some Box -> Obj (make t ctx Box expr.loc (Box arg))
      | Some _ -> Obj (make t ctx Pointer expr.loc (Ptr (ref arg)))
      | None -> assert false)
-  | App (f, arg) ->
-    let f = eval' f in
-    let arg = eval' arg in
-    apply t ctx f arg ~tail
+  | App _ ->
+    (* A function given several arguments at once is called with them all, as
+       compiled code would, making no closure in between. *)
+    let rec spine (expr : Typed.Expr.t) args =
+      match expr.desc with
+      | App (f, arg) when not (is_allocation f) -> spine f (arg :: args)
+      | _ -> expr, args
+    in
+    let head, args = spine expr [] in
+    (match head.desc with
+     | Var (Prim prim) ->
+       let args = List.map args ~f:(fun arg -> eval' arg) in
+       apply_prim t ctx prim [] args ~site:expr.loc
+     | _ ->
+       let f = eval' head in
+       let args = List.map args ~f:(fun arg -> eval' arg) in
+       apply t ctx f args ~tail)
   | Let { ident; args; body; in_; generalized; _ } ->
     let binding = ref (Value unit) in
     let env' = Map.set env ~key:ident ~data:binding in
@@ -640,7 +838,9 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
     (match Option.map (Map.find env ident) ~f:( ! ) with
      | Some (Value (Obj ({ payload = Cell cell; _ } as obj))) ->
        live obj ~what:"an assignment";
+       escapes value ~what:"a reference, from what is assigned,";
        cell := value;
+       check_globals t;
        unit
      | _ -> unsupported "assigning a non-cell")
   | Assign _ -> unsupported "assigning a toplevel"
@@ -667,10 +867,11 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
         ~ctx:{ ctx with region; caller = ctx.current; current = region }
         expr
     in
-    Region.free region;
+    free t region;
+    escapes value ~what:"a reference, from the value of a [region_],";
     value
   | Marked (Exclave, expr) ->
-    Region.free ctx.region;
+    free t ctx.region;
     eval' ~ctx:{ ctx with current = ctx.caller } ~tail expr
   | Tuple exprs -> Tuple (List.map exprs ~f:(fun expr -> eval' expr))
   | Construct (constructor, exprs) ->
@@ -739,7 +940,9 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
     (match pointer with
      | Obj ({ payload = Ptr cell; _ } as obj) ->
        live obj ~what:"a store";
+       escapes value ~what:"a reference, from what is stored,";
        cell := update !cell fields;
+       check_globals t;
        unit
      | _ -> unsupported "storing into a non-pointer")
   | Match { scrutinee; cases; exception_cases = [] } ->
@@ -765,6 +968,11 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
     unsupported
       !"%{Sexp}"
       (Typed.Expr.Desc.sexp_of_t (fun _ -> Atom "_") expr.desc)
+
+and is_allocation (expr : Typed.Expr.t) =
+  match expr.desc with
+  | Var var -> Option.is_some (allocates var)
+  | _ -> false
 
 and allocates (var : Typed.Var_ref.t) : Allocation.Kind.t option =
   match var with
@@ -832,37 +1040,6 @@ and all env patterns values =
     Option.bind env ~f:(fun env -> matches env pattern value))
 ;;
 
-(* What [values] reach, failing at an allocation of a region that has ended. *)
-let reachable values =
-  let seen = Int.Hash_set.create () in
-  let rec value = function
-    | Prim_value _ | Prim_fn _ -> ()
-    | Tuple values | Construct (_, values) -> List.iter values ~f:value
-    | Record values -> Array.iter values ~f:value
-    | Poly_record values -> Map.iter values ~f:value
-    | Poly_variant (_, v) -> value v
-    | Obj obj ->
-      if not (Hash_set.mem seen obj.id)
-      then (
-        Hash_set.add seen obj.id;
-        live obj ~what:"a reference, from a toplevel,";
-        match obj.payload with
-        | Box v -> value v
-        | Ptr cell | Cell cell -> value !cell
-        | Closure closure -> env closure.env ~body:closure.body)
-  and env env ~body =
-    Map.iteri env ~f:(fun ~key:ident ~data:binding ->
-      if Typed.Expr.refers_to body ~f:(fun binder ->
-           Typed.Binder.equal binder (Local ident))
-      then bound !binding)
-  and bound = function
-    | Value v -> value v
-    | Generic_value { env = e; body; _ } -> env e ~body
-    | Generic_function { obj; _ } -> value (Obj obj)
-  in
-  List.iter values ~f:value
-;;
-
 let run ?(override = Fn.id) ?(tail_calls_end_regions = true) source ~entry =
   let stamps = Stamp_counter.create () in
   let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
@@ -914,12 +1091,13 @@ let run ?(override = Fn.id) ?(tail_calls_end_regions = true) source ~entry =
               ; current = Region.heap
               ; instance = Instance.empty
               ; owner = { toplevel = top.ident; lets = [] }
+              ; running = None
               }
               f
-              unit
+              [ unit ]
               ~tail:false
           in
-          reachable (Hashtbl.data t.values);
+          check_globals t;
           Outcome.Returned
             { value = Value.to_string result
             ; on_heap = t.on_heap

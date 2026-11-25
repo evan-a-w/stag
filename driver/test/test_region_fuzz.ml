@@ -205,7 +205,7 @@ let%expect_test "no allocation is used after its region ends" =
   let failures, outcomes, regions = fuzz ~seed:7 ~runs:300 () in
   Queue.iter failures ~f:print_endline;
   print_s [%message (outcomes : (string * int) list) (regions : int)];
-  [%expect {| ((outcomes ((ran 920) (rejected 580))) (regions 4839)) |}]
+  [%expect {| ((outcomes ((ran 920) (rejected 580))) (regions 2983)) |}]
 ;;
 
 (* The same programs, with what follows a side made as if the side were always
@@ -222,7 +222,7 @@ let%expect_test "with placements that ignore their instance, some are" =
   print_endline (Option.value_exn (Queue.peek failures));
   [%expect
     {|
-    (outcomes ((ran 683) (rejected 580) ("use after free" 237)))
+    (outcomes ((ran 527) (rejected 580) ("use after free" 393)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -230,6 +230,6 @@ let%expect_test "with placements that ignore their instance, some are" =
     let mk2 (a : int) (b : int) = Box.make (Int.add a b)
     let f h k (x : int) = ((keepc.* <- (mk2 x); (h x)))
     let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) 1 in sum r
-    a reference, from a toplevel, of the Partial_application at t.stag:5:30-52, made in the region of a call of Partial_application at t.stag:6:22-51, after it ended
+    a reference, from a toplevel, to the Partial_application at t.stag:5:30-52, made in the region of a call of toplevel f, which ends first
     |}]
 ;;
