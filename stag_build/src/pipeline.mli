@@ -7,6 +7,8 @@ module Checked : sig
   type t =
     { groups : Driver.Module_group.t list option
     (** The program's modules, if it parsed (as far as it did). *)
+    ; prelude : Syntax.Toplevel.t list option
+    (** The prelude it was checked with, if not the embedded one. *)
     ; checked : Typecheck.Checked.t option
     (** What checked of [groups], which with errors is
         [Typecheck.Failed.partial]. *)
@@ -25,20 +27,32 @@ val parse_files
 
 (** Checks the program [groups], if it parsed, with [errors] (its parse errors),
     seeing [prelude] ([Prelude] if none) within [limits]. [output] is as for
-    [Driver.check]. *)
+    [Driver.check], [record_references] as for [Typecheck.create]. *)
 val check_sources
   :  ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?record_references:bool
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> limits:Limits.t
   -> Driver.Module_group.t list option * Diagnostic.t list
   -> Checked.t
 
-(** [check_sources] with the prelude of [config], erring if it doesn't parse. *)
+(** [check_sources] with the prelude of [config], erring if it doesn't parse.
+    Its files are read as [Pipeline_config.Prelude_choice.prelude] does. *)
 val check
   :  ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?record_references:bool
   -> ?output:(string -> unit)
   -> ?contents:(string -> string option)
   -> Pipeline_config.t
   -> Driver.Module_group.t list option * Diagnostic.t list
   -> (Checked.t, Diagnostic.t) Result.t
+
+(** Checks [prelude] itself ([Driver.check_prelude]), as the module
+    [Prelude_path.root] of its toplevels. *)
+val check_prelude
+  :  ?record_references:bool
+  -> ?output:(string -> unit)
+  -> limits:Limits.t
+  -> Syntax.Toplevel.t list
+  -> Checked.t

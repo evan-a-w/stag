@@ -6,14 +6,7 @@ let marker_file = "stag-stdlib"
 let prelude_file = "prelude/prelude.stag"
 let core_dir = "core"
 let root t = t.root
-
-let create root =
-  { root =
-      Option.value
-        (Option.try_with (fun () -> Filename_unix.realpath root))
-        ~default:root
-  }
-;;
+let create root = { root = Fs.canonical root }
 
 let has_marker dir =
   match Fs.Kind.of_path (dir ^/ marker_file) with
@@ -108,15 +101,6 @@ let sources ?(contents = Fn.const None) t =
 let prelude ?contents t =
   let%bind.Result sources = sources ?contents t in
   Prelude.parse sources |> Result.map_error ~f:Diagnostic.of_source_file_error
-;;
-
-let check ?contents ?output ~limits t =
-  let%bind.Result prelude =
-    prelude ?contents t |> Result.map_error ~f:List.return
-  in
-  Driver.check_prelude ~limits ?output prelude
-  |> Result.map_error ~f:(fun { Typecheck.Failed.errors; partial = _ } ->
-    List.map errors ~f:Diagnostic.of_typecheck_error)
 ;;
 
 let signature_of_source t (signature : Signature.t) path =

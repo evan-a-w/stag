@@ -13,6 +13,14 @@ module Kind : sig
   val of_path : string -> t
 end
 
+(** [path] with symlinks resolved, or as it is if that fails (eg. it doesn't
+    exist). *)
+val canonical : string -> string
+
+(** The absolute [path] relative to the absolute directory [from], eg. [../b/c]
+    for [/a/b/c] from [/a/d], as written (without resolving symlinks). *)
+val relative_path : from:string -> string -> string
+
 (** [dir/name], or [name] for the directory [.]. *)
 val relative : dir:string -> string -> string
 

@@ -47,15 +47,6 @@ val prelude
   -> t
   -> (Syntax.Toplevel.t list, Diagnostic.t) Result.t
 
-(** Checks [prelude] as the prelude ([Driver.check_prelude]), failing with all
-    its errors. *)
-val check
-  :  ?contents:(string -> string option)
-  -> ?output:(string -> unit)
-  -> limits:Limits.t
-  -> t
-  -> (Driver.t, Diagnostic.t list) Result.t
-
 (** The part of the prelude's [signature] that its source [path] declares: all
     but [Core] for [prelude/prelude.stag], else [Core] with only the module of
     [path]. Errs if [path] names no module. *)

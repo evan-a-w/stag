@@ -31,17 +31,19 @@ val parse
 (** The absolute paths of the files of [target]'s program. *)
 val paths : Project.t -> Project.Target.t -> string list
 
-(** Of [target]'s program, as [Pipeline_config.create] of its [paths]. *)
-val config
-  :  limits:Limits.t
-  -> Project.t
+(** The prelude [target]'s program sees, as
+    [Pipeline_config.Prelude_choice.of_paths] of its [paths]. *)
+val prelude_choice
+  :  Project.t
   -> Project.Target.t
-  -> Pipeline_config.t
+  -> Pipeline_config.Prelude_choice.t
 
-(** [Pipeline.check] of [parse_recovering] with [config], failing with all the
-    errors, or the error of the prelude. [output] is as for [Driver.check]. *)
+(** [Pipeline.check_sources] of [parse_recovering] seeing [prelude] (eg. loaded
+    as [prelude_choice] says), failing with all the errors. [output] is as for
+    [Driver.check]. *)
 val check
   :  ?output:(string -> unit)
+  -> ?prelude:Syntax.Toplevel.t list
   -> limits:Limits.t
   -> Project.t
   -> Project.Target.t

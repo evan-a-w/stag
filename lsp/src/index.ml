@@ -43,9 +43,6 @@ type t =
   { entries : Entry.t Queue.t String.Table.t
   ; locals : Loc.t Typed.Ident.Table.t
   ; values : Loc.t String.Table.t
-  ; references : Name_reference.t Span.Table.t
-  ; known_files : Loc.File.t list
-  (** Of the program and [create]'s prelude, in which declarations are found. *)
   ; functions : Int.Hash_set.t String.Table.t
   ; splices : Span.Hash_set.t
   ; of_prelude : bool
@@ -60,10 +57,19 @@ module Syntax_at = struct
     ; fields : Syntax.Decl_path.t Located.t list Span.Table.t
     ; rests : Syntax.Name.t Span.Table.t
     ; assigned : Syntax.Decl_path.t Located.t Span.Table.t
+    ; references : Name_reference.t Span.Table.t
+    ; known_files : Loc.File.t list
+    (** Of the program and [create]'s prelude, in which declarations are found. *)
     }
 
-  let create () =
-    { lets = Span.Table.create ()
+  let create ~references ~known_files =
+    { references =
+        (let table = Span.Table.create () in
+         List.iter references ~f:(fun (loc, reference) ->
+           Hashtbl.set table ~key:(Span.of_loc loc) ~data:reference);
+         table)
+    ; known_files
+    ; lets = Span.Table.create ()
     ; funs = Span.Table.create ()
     ; constructors = Span.Table.create ()
     ; fields = Span.Table.create ()
@@ -73,6 +79,14 @@ module Syntax_at = struct
   ;;
 
   let set table loc data = Hashtbl.set table ~key:(Span.of_loc loc) ~data
+
+  (* Where the type, constructor or field named at [loc] is declared, if found. *)
+  let declaration t loc =
+    let%bind.Option reference = Hashtbl.find t.references (Span.of_loc loc) in
+    Option.some_if
+      (List.mem t.known_files reference.declaration.file ~equal:Loc.File.equal)
+      (Target.Loc reference.declaration)
+  ;;
 
   (* A [Resolved] one, of a list literal, is not written. *)
   let set_constructor t loc (path : Syntax.Decl_path.t Located.t) =
@@ -189,14 +203,6 @@ let add t (entry : Entry.t) =
       entry
 ;;
 
-(* Where the type, constructor or field named at [loc] is declared, if found. *)
-let declaration t loc =
-  let%bind.Option reference = Hashtbl.find t.references (Span.of_loc loc) in
-  Option.some_if
-    (List.mem t.known_files reference.declaration.file ~equal:Loc.File.equal)
-    (Target.Loc reference.declaration)
-;;
-
 let is_arrow ty =
   match Type.canonical_ty ty with
   | TArrow _ -> true
@@ -276,7 +282,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
         { loc = path.loc
         ; label = Some constructor.name
         ; ty = Some p.ty
-        ; target = declaration t path.loc
+        ; target = Syntax_at.declaration syntax path.loc
         });
     List.iter ps ~f:recurse
   | Record fields ->
@@ -289,7 +295,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
           { loc = path.loc
           ; label = Some (Typed.Field_ref.name field)
           ; ty = Some p.ty
-          ; target = declaration t path.loc
+          ; target = Syntax_at.declaration syntax path.loc
           });
       recurse p)
   | Poly_record { fields; rest } ->
@@ -316,7 +322,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
             { loc = path.loc
             ; label = Some (Typed.Field_ref.name field)
             ; ty = Some value.ty
-            ; target = declaration t path.loc
+            ; target = Syntax_at.declaration syntax path.loc
             }))
   in
   let var_target : Typed.Var_ref.t -> _ = function
@@ -359,7 +365,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
          { loc = path.loc
          ; label = Some constructor.name
          ; ty = Some e.ty
-         ; target = declaration t path.loc
+         ; target = Syntax_at.declaration syntax path.loc
          })
    | Record record | Record_update (_, record) ->
      typed ();
@@ -373,7 +379,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
            { loc = path.loc
            ; label = Some (Typed.Field_ref.name field)
            ; ty = Some e.ty
-           ; target = declaration t path.loc
+           ; target = Syntax_at.declaration syntax path.loc
            }))
    | Match { cases; exception_cases; _ } ->
      typed ();
@@ -506,17 +512,11 @@ let create
     { entries = String.Table.create ()
     ; locals = Typed.Ident.Table.create ()
     ; values = String.Table.create ()
-    ; references = Span.Table.create ()
-    ; known_files =
-        List.concat_map (List.map files ~f:snd @ prelude) ~f:toplevel_files
-        |> List.dedup_and_sort ~compare:Loc.File.compare
     ; functions = String.Table.create ()
     ; splices = Span.Hash_set.create ()
     ; of_prelude
     }
   in
-  List.iter checked.references ~f:(fun (loc, reference) ->
-    Hashtbl.set t.references ~key:(Span.of_loc loc) ~data:reference);
   declarations
     t
     ~up_to_date
@@ -526,7 +526,13 @@ let create
   let values = String.Table.create () in
   List.iter files ~f:(fun (prefix, toplevel) ->
     declarations t ~up_to_date ~values ~prefix [ toplevel ]);
-  let syntax = Syntax_at.create () in
+  let syntax =
+    Syntax_at.create
+      ~references:(Option.value checked.references ~default:[])
+      ~known_files:
+        (List.concat_map (List.map files ~f:snd @ prelude) ~f:toplevel_files
+         |> List.dedup_and_sort ~compare:Loc.File.compare)
+  in
   let bench_params = Span.Table.create () in
   let rec syntax_of_toplevel (toplevel : Syntax.Toplevel.t) =
     match toplevel.txt with
@@ -546,14 +552,13 @@ let create
     | Type _ | Exception _ | External _ | Malformed_exception _ -> ()
   in
   List.iter files ~f:(fun (_, toplevel) -> syntax_of_toplevel toplevel);
-  List.iter files ~f:(fun (module_path, toplevel) ->
+  List.iter files ~f:(fun (_, toplevel) ->
     List.iter
       (Syntax_names.of_toplevels
          ~walk_expansion:(fun expansion ->
            Hash_set.mem up_to_date (Span.of_loc expansion.loc))
-         ~module_path
          [ toplevel ])
-      ~f:(fun { loc; kind; path; declaration = _; module_path = _; quoted } ->
+      ~f:(fun { loc; kind; path; declaration = _; quoted } ->
         match kind with
         | Type ->
           let target =
@@ -561,7 +566,7 @@ let create
             then None
             else
               Option.map
-                (Hashtbl.find t.references (Span.of_loc loc))
+                (Hashtbl.find syntax.references (Span.of_loc loc))
                 ~f:(fun reference -> reference.name)
           in
           add
@@ -580,7 +585,8 @@ let create
                           || t.of_prelude -> target
                    | Some _ | None -> String.concat ~sep:"." path)
             ; ty = None
-            ; target = (if quoted then None else declaration t loc)
+            ; target =
+                (if quoted then None else Syntax_at.declaration syntax loc)
             }
         | Module
         | Constructor
@@ -638,8 +644,6 @@ let relocate t ~f =
   { entries
   ; locals = Hashtbl.map t.locals ~f
   ; values = Hashtbl.map t.values ~f
-  ; references = t.references
-  ; known_files = t.known_files
   ; functions
   ; splices =
       Hash_set.to_list t.splices

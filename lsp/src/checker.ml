@@ -97,59 +97,52 @@ let check_program
   sources
   =
   let config = Pipeline_config.create ~limits files in
-  let check ?prelude () =
-    let { Pipeline.Checked.groups; checked; diagnostics; driver = _ } =
-      Pipeline.check_sources
-        ?compile_time_c_calls
-        ~output:ignore
-        ?prelude
-        ~limits
-        sources
-    in
-    diagnostics, Option.both groups checked
-  in
   let result =
-    match config.prelude, stdlib with
-    | Embedded, None ->
-      let diagnostics, program = check () in
-      of_checked ~path ~absolute ~files ~diagnostics program
-    | Embedded, Some checkout ->
-      let embedded = Stdlib_checkout.relocate_embedded ~contents checkout in
-      let diagnostics, program = check () in
-      { (of_checked
+    match
+      Pipeline.check
+        ?compile_time_c_calls
+        ~record_references:true
+        ~output:ignore
+        ~contents
+        config
+        sources
+    with
+    | Error diagnostic ->
+      (* The prelude's error is reported in its source, and the program left
+         unchecked, which is said in it. *)
+      of_checked
+        ~path
+        ~absolute
+        ~files
+        ~diagnostics:
+          [ diagnostic
+          ; Diagnostic.create
+              ~loc:(Loc.start_of_file (Loc.File.of_string path))
+              "This file is not checked: its checkout's prelude has errors"
+          ]
+        None
+    | Ok { groups; prelude; checked; diagnostics; driver = _ } ->
+      let program = Option.both groups checked in
+      (match prelude, stdlib with
+       | Some prelude, _ ->
+         of_checked ~prelude ~path ~absolute ~files ~diagnostics program
+       | None, None -> of_checked ~path ~absolute ~files ~diagnostics program
+       | None, Some checkout ->
+         let embedded = Stdlib_checkout.relocate_embedded ~contents checkout in
+         of_checked
            ~prelude:(relocated ~relocate:embedded (force Prelude.toplevels))
            ~path
            ~absolute:(Fn.compose absolute embedded)
            ~files
            ~diagnostics
            program)
-        with
-        depends_on = source_paths checkout
-      }
-    | Checkout checkout, _ ->
-      let result =
-        match Stdlib_checkout.prelude ~contents checkout with
-        | Error diagnostic ->
-          (* The prelude's error is reported in its source, and the program left
-             unchecked, which is said in it. *)
-          of_checked
-            ~path
-            ~absolute
-            ~files
-            ~diagnostics:
-              [ diagnostic
-              ; Diagnostic.create
-                  ~loc:(Loc.start_of_file (Loc.File.of_string path))
-                  "This file is not checked: its checkout's prelude has errors"
-              ]
-            None
-        | Ok prelude ->
-          let diagnostics, program = check ~prelude () in
-          of_checked ~prelude ~path ~absolute ~files ~diagnostics program
-      in
-      { result with depends_on = source_paths checkout }
   in
-  { result with depends_on = depends_on @ result.depends_on }
+  let prelude_sources =
+    match config.prelude, stdlib with
+    | Checkout checkout, _ | Embedded, Some checkout -> source_paths checkout
+    | Embedded, None -> []
+  in
+  { result with depends_on = depends_on @ prelude_sources }
 ;;
 
 let in_stdlib ~limits ~contents checkout path =
@@ -168,24 +161,26 @@ let in_stdlib ~limits ~contents checkout path =
       ~diagnostics:[ error ]
       None
   | Ok prelude ->
-    let checked, type_errors =
-      match Driver.check_prelude ~limits ~output:ignore prelude with
-      | Ok driver -> Driver.checked driver, []
-      | Error { errors; partial } -> partial, errors
+    let { Pipeline.Checked.groups
+        ; checked
+        ; diagnostics
+        ; prelude = _
+        ; driver = _
+        }
+      =
+      Pipeline.check_prelude
+        ~record_references:true
+        ~limits
+        ~output:ignore
+        prelude
     in
     of_checked
       ~of_prelude:true
       ~path
       ~absolute:Fn.id
       ~files
-      ~diagnostics:(List.map type_errors ~f:Diagnostic.of_typecheck_error)
-      (Some
-         ( [ Driver.Module_group.Group
-               ( Located.create ~loc:Loc.none Prelude_path.root
-               , List.map prelude ~f:(fun toplevel ->
-                   Driver.Module_group.File toplevel) )
-           ]
-         , checked ))
+      ~diagnostics
+      (Option.both groups checked)
 ;;
 
 let standalone ?stdlib ~limits ~contents ~depends_on path =

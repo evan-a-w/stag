@@ -651,12 +651,20 @@ let%expect_test "stag, stag-build and the server agree on the prelude a \
         match Project.load ~root:(Client.path client "stag/proj") () with
         | Error diagnostics -> print_s [%sexp (diagnostics : Diagnostic.t list)]
         | Ok project ->
+          let target = Option.value_exn (Project.find project "app") in
+          let prelude =
+            Pipeline_config.Prelude_choice.prelude
+              (Program.prelude_choice project target)
+            |> Result.ok
+            |> Option.value_exn
+          in
           (match
              Program.check
                ~output:ignore
+               ?prelude
                ~limits:Limits.unlimited
                project
-               (Option.value_exn (Project.find project "app"))
+               target
            with
            | Ok (_ : Stag_driver.Driver.t) -> print_endline "checks"
            | Error diagnostics ->

@@ -59,18 +59,16 @@ let paths project target =
         Project.root project ^/ source.path))
 ;;
 
-let config ~limits project target =
-  Pipeline_config.create ~limits (paths project target)
+let prelude_choice project target =
+  Pipeline_config.Prelude_choice.of_paths (paths project target)
 ;;
 
-let check ?output ~limits project target =
-  match
-    Pipeline.check
-      ~compile_time_c_calls:(compile_time_c_calls project target)
-      ?output
-      (config ~limits project target)
-      (parse_recovering project target)
-  with
-  | Error diagnostic -> Error [ diagnostic ]
-  | Ok checked -> Pipeline.Checked.to_result checked
+let check ?output ?prelude ~limits project target =
+  Pipeline.check_sources
+    ~compile_time_c_calls:(compile_time_c_calls project target)
+    ?output
+    ?prelude
+    ~limits
+    (parse_recovering project target)
+  |> Pipeline.Checked.to_result
 ;;

@@ -97,11 +97,11 @@ type t =
   ; declared_types : Loc.t String.Table.t
   ; declared_members : Loc.t String.Table.t
   (** Constructors and fields, whose names differ by case. *)
-  ; references : Name_reference.t Loc.Table.t
+  ; references : Name_reference.t Loc.Table.t option
   ; report : Typecheck_error.t -> unit
   }
 
-let create_tables fresh ~report =
+let create_tables fresh ~record_references ~report =
   { fresh
   ; evaluate_splice =
       (fun _ _ ~loc:_ ->
@@ -116,7 +116,7 @@ let create_tables fresh ~report =
   ; field_types = String.Table.create ()
   ; declared_types = String.Table.create ()
   ; declared_members = String.Table.create ()
-  ; references = Loc.Table.create ()
+  ; references = Option.some_if record_references (Loc.Table.create ())
   }
 ;;
 
@@ -214,22 +214,24 @@ let evaluate_splice t module_ (expr : Expr.t) ~loc =
        result)
 ;;
 
-let record_reference t (kind : Name_reference.Kind.t) name ~loc =
-  let declared =
-    match kind with
-    | Type -> t.declared_types
-    | Constructor | Field -> t.declared_members
-  in
-  Option.iter (Hashtbl.find declared name) ~f:(fun declaration ->
-    Hashtbl.set
-      t.references
-      ~key:loc
-      ~data:{ Name_reference.kind; name; declaration })
+let record_reference t ~declared name ~loc =
+  Option.iter t.references ~f:(fun references ->
+    Option.iter (Hashtbl.find declared name) ~f:(fun declaration ->
+      Hashtbl.set references ~key:loc ~data:{ Name_reference.name; declaration }))
+;;
+
+let record_type_reference t name ~loc =
+  record_reference t ~declared:t.declared_types name ~loc
+;;
+
+let record_member_reference t name ~loc =
+  record_reference t ~declared:t.declared_members name ~loc
 ;;
 
 let references t =
-  Hashtbl.to_alist t.references
-  |> List.sort ~compare:(Comparable.lift Loc.compare ~f:fst)
+  Option.map t.references ~f:(fun references ->
+    Hashtbl.to_alist references
+    |> List.sort ~compare:(Comparable.lift Loc.compare ~f:fst))
 ;;
 
 let find_type t module_ path ~loc =
@@ -237,7 +239,7 @@ let find_type t module_ path ~loc =
   match Hashtbl.find t.types name with
   | Some decl ->
     (match path with
-     | Path _ | Root _ -> record_reference t Type name ~loc
+     | Path _ | Root _ -> record_type_reference t name ~loc
      | Resolved _ -> ());
     Ok decl
   | None ->
@@ -858,7 +860,7 @@ let declare
   in
   if not lazily then ignore (force params : Type.arg list);
   Hashtbl.set t.declared_types ~key:name ~data:decl.name.loc;
-  record_reference t Type name ~loc:decl.name.loc;
+  record_type_reference t name ~loc:decl.name.loc;
   Hashtbl.add_exn
     t.types
     ~key:name
@@ -1078,8 +1080,8 @@ let value_parameters t (root : Decl.t) =
   visit root
 ;;
 
-let create fresh ~report =
-  let t = create_tables fresh ~report in
+let create ?(record_references = false) fresh ~report =
+  let t = create_tables fresh ~record_references ~report in
   Fresh.set_value_parameters fresh (fun name ->
     Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
       match value_parameters t decl with
@@ -1265,7 +1267,7 @@ let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
         ~unbound:(fun path -> Unbound_constructor path)
         ~find:constructor
     in
-    record_reference t Constructor constructor.name ~loc;
+    record_member_reference t constructor.name ~loc;
     constructor
 ;;
 
@@ -1283,7 +1285,7 @@ let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
         ~unbound:(fun path -> Unbound_field path)
         ~find:field
     in
-    record_reference t Field (Field.name field) ~loc;
+    record_member_reference t (Field.name field) ~loc;
     field
 ;;
 

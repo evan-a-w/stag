@@ -10,7 +10,6 @@ module Outcome = struct
     ; corrected : int
     ; write_failed : bool
     }
-  [@@deriving sexp_of]
 
   let print_summary ?target ?(promoted = false) t =
     Out_channel.flush stdout;

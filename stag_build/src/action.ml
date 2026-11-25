@@ -3,14 +3,32 @@ open! Import
 let corrections_dir = "_stag"
 
 let contents project path =
-  Option.try_with (fun () -> In_channel.read_all (Project.root project ^/ path))
+  Option.try_with (fun () ->
+    In_channel.read_all
+      (if Filename.is_absolute path then path else Project.root project ^/ path))
+;;
+
+(* Files outside the project, eg. a checkout's prelude, are named relative to it
+   too. *)
+let relative project =
+  let root = lazy (Fs.canonical (Project.root project)) in
+  fun (loc : Loc.t) ->
+    let file = Loc.file_name loc in
+    if Filename.is_absolute file
+    then
+      { loc with
+        file = Loc.File.of_string (Fs.relative_path ~from:(force root) file)
+      }
+    else loc
 ;;
 
 let report project diagnostics =
   Out_channel.flush stdout;
   eprintf
     "%s%!"
-    (Diagnostic.list_to_string_hum ~contents:(contents project) diagnostics)
+    (Diagnostic.list_to_string_hum
+       ~contents:(contents project)
+       (List.map diagnostics ~f:(Diagnostic.relocate ~f:(relative project))))
 ;;
 
 let warn project diagnostic =
@@ -20,7 +38,7 @@ let warn project diagnostic =
     (Diagnostic.to_string_hum
        ~contents:(contents project)
        ~warning:true
-       diagnostic)
+       (Diagnostic.relocate diagnostic ~f:(relative project)))
 ;;
 
 let error message =
@@ -67,6 +85,22 @@ let stale_expansions (target : Project.Target.t) driver =
    discarded. *)
 let checker ?(stale_are_errors = false) ~limits project =
   let status = String.Table.create () in
+  (* By checkout root, each reporting its error once. *)
+  let preludes = String.Table.create () in
+  let prelude target =
+    match Program.prelude_choice project target with
+    | Embedded -> Some None
+    | Checkout checkout as choice ->
+      Hashtbl.findi_or_add
+        preludes
+        (Stdlib_checkout.root checkout)
+        ~default:(fun _ ->
+          match Pipeline_config.Prelude_choice.prelude choice with
+          | Ok prelude -> Some prelude
+          | Error diagnostic ->
+            report project [ diagnostic ];
+            None)
+  in
   let rec check (target : Project.Target.t) =
     let name = Project.Target.name target in
     match Hashtbl.find status name with
@@ -77,20 +111,22 @@ let checker ?(stale_are_errors = false) ~limits project =
           Option.is_some (check dep))
       in
       let driver =
-        if not deps_ok
-        then None
-        else (
-          match Program.check ~output:ignore ~limits project target with
-          | Ok driver ->
-            warn_unrun_tests project target driver;
-            if not stale_are_errors
-            then
-              List.iter (stale_expansions target driver) ~f:(fun expansion ->
-                warn project (Inline_expansion.diagnostic expansion));
-            Some driver
-          | Error diagnostics ->
-            report project diagnostics;
-            None)
+        match deps_ok, prelude target with
+        | false, _ | _, None -> None
+        | true, Some prelude ->
+          (match
+             Program.check ~output:ignore ?prelude ~limits project target
+           with
+           | Ok driver ->
+             warn_unrun_tests project target driver;
+             if not stale_are_errors
+             then
+               List.iter (stale_expansions target driver) ~f:(fun expansion ->
+                 warn project (Inline_expansion.diagnostic expansion));
+             Some driver
+           | Error diagnostics ->
+             report project diagnostics;
+             None)
       in
       Hashtbl.set status ~key:name ~data:driver;
       driver

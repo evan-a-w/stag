@@ -131,7 +131,7 @@ Editing the expansion makes it stale.
   Error: This inline expansion is out of date
   1 inline expansion(s) out of date
 
-Checking and running a program only warn of stale expansions.
+Checking, running and benchmarking a program only warn of stale expansions.
 
   $ stag check gen.stag
   File "gen.stag", line 8, characters 2-48:
@@ -146,6 +146,11 @@ Checking and running a program only warn of stale expansions.
     end
   end
   $ stag run gen.stag
+  File "gen.stag", line 8, characters 2-48:
+  8 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Warning: This inline expansion is out of date
+  $ stag bench -warm-up 1us -time 1us -fake-clock 100ns gen.stag -baseline-dir bench
   File "gen.stag", line 8, characters 2-48:
   8 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

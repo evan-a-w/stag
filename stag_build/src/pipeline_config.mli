@@ -9,7 +9,6 @@ module Prelude_choice : sig
   type t =
     | Embedded
     | Checkout of Stdlib_checkout.t
-  [@@deriving sexp_of]
 
   (** Of a program of files at [paths], absolute or relative to the current
       directory. *)

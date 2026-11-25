@@ -85,8 +85,9 @@ let bench_command ~fake_clock =
          named TARGET/NAME, whose names contain any FILTER (all without), or \
          with -phases benchmarks the interpreter on the program of each \
          target: TARGET/parse, TARGET/typecheck and TARGET/eval. Baselines are \
-         saved in %s/."
-        Action.bench_dir)
+         saved in %s/. Benchmarks are unlimited. "
+        Action.bench_dir
+      ^ Pipeline_config.limits_readme ~phases:"compile time and evaluation")
     (let%map_open.Command filters = anon (sequence ("FILTER" %: string))
      and options = Bench_command.Options.param ~fake_clock
      and limits = Pipeline_config.limits_param ()

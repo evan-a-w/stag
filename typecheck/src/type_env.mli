@@ -11,7 +11,12 @@ type t
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
-val create : Fresh.t -> report:(Typecheck_error.t -> unit) -> t
+(** With [record_references], [references] are recorded. *)
+val create
+  :  ?record_references:bool
+  -> Fresh.t
+  -> report:(Typecheck_error.t -> unit)
+  -> t
 
 (** Declares [decl], a member of [module_], whose parameters are distinct. Types
     may refer to each other in any order, once declared. With [lazily], its
@@ -196,10 +201,11 @@ val field_modality : t -> string -> Modality.t
     variable or an open row. *)
 val pointer_free : t -> Type.ty -> bool
 
-(** Records that the name at [loc] is [name], declared in [t] (else nothing is
-    recorded). Declared types, types named in type expressions and constructors
-    and fields found by path are recorded by [t] itself. *)
-val record_reference : t -> Name_reference.Kind.t -> string -> loc:Loc.t -> unit
+(** Records that the name at [loc] is the constructor or field [name], declared
+    in [t] (else nothing is recorded). Declared types, types named in type
+    expressions and constructors and fields found by path are recorded by [t]
+    itself. *)
+val record_member_reference : t -> string -> loc:Loc.t -> unit
 
-(** By location of the name. *)
-val references : t -> (Loc.t * Name_reference.t) list
+(** By location of the name, if [create]d to record them. *)
+val references : t -> (Loc.t * Name_reference.t) list option

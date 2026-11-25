@@ -1,13 +1,9 @@
 open! Import
 
-let canonical path =
-  Option.value
-    (Option.try_with (fun () -> Filename_unix.realpath path))
-    ~default:path
-;;
-
 let dedup paths =
-  List.stable_dedup paths ~compare:(Comparable.lift String.compare ~f:canonical)
+  List.stable_dedup
+    paths
+    ~compare:(Comparable.lift String.compare ~f:Fs.canonical)
 ;;
 
 let read_files paths =
@@ -105,7 +101,14 @@ let check_with_prelude_sources ~limits ~sources ~program =
         (fst (List.hd_exn sources))
         path;
       exit 1));
-  match Stdlib_checkout.check ~limits checkout with
+  let prelude =
+    match Stdlib_checkout.prelude checkout with
+    | Ok prelude -> prelude
+    | Error diagnostic ->
+      report [] diagnostic;
+      exit 1
+  in
+  match Pipeline.Checked.to_result (Pipeline.check_prelude ~limits prelude) with
   | Error diagnostics ->
     report_all [] diagnostics;
     exit 1
@@ -114,7 +117,10 @@ let check_with_prelude_sources ~limits ~sources ~program =
     let signature = (Driver.checked driver).signature in
     List.iter sources ~f:(fun (path, _) ->
       match
-        Stdlib_checkout.signature_of_source checkout signature (canonical path)
+        Stdlib_checkout.signature_of_source
+          checkout
+          signature
+          (Fs.canonical path)
       with
       | Ok signature ->
         print_string (Signature.to_string_hum ~of_prelude:true signature)
@@ -124,7 +130,16 @@ let check_with_prelude_sources ~limits ~sources ~program =
     if not (List.is_empty program)
     then (
       let files = read_files program in
-      let driver = check { prelude = Checkout checkout; limits } files in
+      let driver =
+        match
+          Pipeline.check_sources ~prelude ~limits (Pipeline.parse_files files)
+          |> Pipeline.Checked.to_result
+        with
+        | Ok driver -> driver
+        | Error diagnostics ->
+          report_all files diagnostics;
+          exit 1
+      in
       warn_stale files driver;
       print_string (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
@@ -149,7 +164,7 @@ let check_command =
      fun () ->
        let sources, program =
          List.partition_map (dedup paths) ~f:(fun path ->
-           match Stdlib_checkout.of_source (canonical path) with
+           match Stdlib_checkout.of_source (Fs.canonical path) with
            | Some checkout -> First (path, checkout)
            | None -> Second path)
        in
@@ -291,6 +306,7 @@ let bench_command ~fake_clock =
        let driver =
          check ~output:ignore (Pipeline_config.create ~limits paths) files
        in
+       warn_stale files driver;
        let benches =
          if phases
          then Phase_bench.benches (Phase_bench.parse_files files)

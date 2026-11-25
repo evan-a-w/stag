@@ -132,6 +132,7 @@ type t =
   ; const_toplevels : bool
   ; compile_time_c_calls : Compile_time_c_calls.t
   ; prelude : Syntax.Toplevel.t list Lazy.t
+  ; record_references : bool
   }
 
 let create
@@ -139,6 +140,7 @@ let create
   ~interpreter
   ?(const_toplevels = false)
   ?(compile_time_c_calls = Compile_time_c_calls.none)
+  ?(record_references = false)
   ?prelude
   ()
   =
@@ -153,6 +155,7 @@ let create
       (match prelude with
        | Some prelude -> Lazy.from_val prelude
        | None -> Prelude.toplevels)
+  ; record_references
   }
 ;;
 
@@ -837,9 +840,8 @@ let find_constructor (scope : Scope.t) ~loc ~known : Source.Constructor.t -> _
          ~missing:(fun ~type_name constructor ->
            No_such_constructor { type_name; constructor })
        |> Result.map ~f:(fun (constructor : Type_env.Constructor.t) ->
-         Type_env.record_reference
+         Type_env.record_member_reference
            scope.program.type_env
-           Constructor
            constructor.name
            ~loc:path.loc;
          constructor)
@@ -865,9 +867,8 @@ let find_field (scope : Scope.t) ~loc ~known (field : Source.Field.t) =
          ~loc:path.loc
          ~missing:(fun ~type_name field -> No_such_field { type_name; field })
        |> Result.map ~f:(fun field ->
-         Type_env.record_reference
+         Type_env.record_member_reference
            scope.program.type_env
-           Field
            (Type_env.Field.name field)
            ~loc:path.loc;
          field)
@@ -3780,7 +3781,7 @@ module Checked = struct
     { signature : Signature.t
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
-    ; references : (Loc.t * Name_reference.t) list
+    ; references : (Loc.t * Name_reference.t) list option
     }
 end
 
@@ -4313,12 +4314,14 @@ let program_env
   ~modes
   ~const_toplevels
   ~compile_time_c_calls
+  ?record_references
   interpreter
   =
   let report = ref (fun (_ : Typecheck_error.t) -> ()) in
   let program_env =
     { Program_env.type_env =
-        Type_env.create t ~report:(fun error -> !report error)
+        Type_env.create ?record_references t ~report:(fun error ->
+          !report error)
     ; toplevels = String.Table.create ()
     ; stamps
     ; interpreter
@@ -4463,6 +4466,7 @@ let typecheck ({ fresh; stamps; interpreter; _ } as t) ~program =
       ~modes:t.modes
       ~const_toplevels:t.const_toplevels
       ~compile_time_c_calls:t.compile_time_c_calls
+      ~record_references:t.record_references
       interpreter
   in
   let (_ : Module_scope.t), root = prelude_and_root t program_env in
@@ -4478,6 +4482,7 @@ let check_prelude
   ; modes
   ; const_toplevels
   ; compile_time_c_calls
+  ; record_references
   }
   =
   let program_env =
@@ -4487,6 +4492,7 @@ let check_prelude
       ~modes
       ~const_toplevels
       ~compile_time_c_calls
+      ~record_references
       interpreter
   in
   let prelude = add_prelude program_env (force prelude) in

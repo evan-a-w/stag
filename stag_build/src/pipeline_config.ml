@@ -4,18 +4,15 @@ module Prelude_choice = struct
   type t =
     | Embedded
     | Checkout of Stdlib_checkout.t
-  [@@deriving sexp_of]
-
-  let canonical path =
-    Option.value
-      (Option.try_with (fun () -> Filename_unix.realpath path))
-      ~default:path
-  ;;
 
   let of_paths paths =
+    let found = String.Table.create () in
     let checkouts =
       List.map paths ~f:(fun path ->
-        Stdlib_checkout.find (Filename.dirname (canonical path)))
+        Hashtbl.findi_or_add
+          found
+          (Filename.dirname (Fs.canonical path))
+          ~default:(fun dir -> Stdlib_checkout.find dir))
     in
     match checkouts with
     | Some checkout :: rest

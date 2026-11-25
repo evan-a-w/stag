@@ -42,6 +42,27 @@ let try_ ~path f =
        Error (Diagnostic.create ~loc:Loc.none (sprintf "%s: %s" path reason)))
 ;;
 
+let canonical path =
+  Option.value
+    (Option.try_with (fun () -> Filename_unix.realpath path))
+    ~default:path
+;;
+
+let relative_path ~from path =
+  let parts path =
+    String.split path ~on:'/' |> List.filter ~f:(Fn.non String.is_empty)
+  in
+  let rec common from path =
+    match from, path with
+    | a :: from, b :: path when String.equal a b -> common from path
+    | _ -> from, path
+  in
+  let up, down = common (parts from) (parts path) in
+  match List.map up ~f:(Fn.const "..") @ down with
+  | [] -> "."
+  | parts -> String.concat ~sep:"/" parts
+;;
+
 let relative ~dir name = if String.equal dir "." then name else dir ^/ name
 
 let read_dir ?(must_read = Fn.const false) ~error ~root dir =

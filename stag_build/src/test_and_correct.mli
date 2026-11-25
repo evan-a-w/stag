@@ -16,7 +16,6 @@ module Outcome : sig
     ; corrected : int (** Files with a correction. *)
     ; write_failed : bool
     }
-  [@@deriving sexp_of]
 
   (** Prints, to stderr, how many tests failed and expansions are stale, if any,
       prefixed by [target], saying they are promoted if [promoted]. *)
