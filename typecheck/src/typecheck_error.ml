@@ -297,15 +297,23 @@ let level_name level =
 (* Why a type has pointers is given once in a message: [said] are the reasons
    given already. *)
 let mode_reasons ?(said = String.Hash_set.create ()) because =
-  List.filter_map because ~f:(fun ({ loc; what; layout } : Mode.Reason.t) ->
+  let alone =
+    List.for_all because ~f:(fun (reason : Mode.Reason.t) ->
+      match reason.shown with
+      | If_alone -> true
+      | Always | Once -> false)
+  in
+  List.filter_map because ~f:(fun ({ loc; what; shown } : Mode.Reason.t) ->
     let text =
       if Loc.is_none loc
       then what
       else sprintf "%s (at %s)" what (Loc.to_string loc)
     in
     Option.some_if
-      ((not layout)
-       || Hash_set.strict_add said text |> Hash_set.Ok_or_duplicate.is_ok)
+      (match shown with
+       | Always -> true
+       | If_alone -> alone
+       | Once -> Hash_set.strict_add said text |> Hash_set.Ok_or_duplicate.is_ok)
       text)
   |> List.remove_consecutive_duplicates ~equal:String.equal
   |> String.concat ~sep:", then "

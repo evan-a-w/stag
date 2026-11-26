@@ -1095,7 +1095,6 @@ let rec expr ?(seq = true) t : Expr.t =
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
-  | Stack_ | Exclave_ | Region_ -> region t ~seq
   | Forget -> forget t ~seq
   | _ ->
     let first = assignment t ~seq in
@@ -1247,12 +1246,14 @@ and tuple_item t ~seq : Expr.t =
   | Forget -> forget t ~seq
   | _ -> construct t
 
-(** [stack_ e], [exclave_ e] or [region_ e]. *)
+(** [stack_ e], [exclave_ e] or [region_ e]: [e] is a tuple's item, so
+    [stack_ e1, e2] is [(stack_ e1), e2] and [region_ e1; e2] is
+    [(region_ e1); e2]. *)
 and region t ~seq : Expr.t =
   let start = loc t in
   let keyword = peek t in
   advance t;
-  let body = expr t ~seq in
+  let body = tuple_item t ~seq in
   expr_at
     ~loc:(Loc.merge start body.loc)
     (match keyword with

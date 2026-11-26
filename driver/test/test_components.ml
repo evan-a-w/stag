@@ -168,7 +168,7 @@ let bad (k : string) = { x = ext "x"; y = k }
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:29-36), but must be at most gc, because it is held by a field or argument with a modality (at t.stag:5:29-36) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:5:29-36), but must be at most gc, because it is held by a field or argument with a modality (at t.stag:5:29-36) |}]
 ;;
 
 let%expect_test "locality: a local component next to a global one" =

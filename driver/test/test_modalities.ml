@@ -32,7 +32,7 @@ type r = { g : ptr[int] @@ global; l : ptr[int] }
 let l (r @ local) = Ptr.make r.l
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:11-16), then r is passed to the function (at t.stag:3:20-32), then r is used (at t.stag:3:29-30), then its type turned out to be r, which has pointers, then its field is read (at t.stag:3:29-32), then it is passed to a function (at t.stag:3:20-32), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}];
+    {| This is regional, because it is annotated local (at t.stag:3:11-16), then r is passed to the function (at t.stag:3:20-32), then r is used (at t.stag:3:29-30), then its type turned out to be r, which has pointers, then its field is read (at t.stag:3:29-32), then it is passed to a function (at t.stag:3:20-32), but must be at most global, because Ptr.make holds it |}];
   (* Stage: what a [@@ portable] field holds is portable, whatever else the
      record holds. *)
   check
@@ -54,7 +54,7 @@ let make u = { p = (fun x -> x); n = (let n = Int.to_string 3 in fun x -> String
 let n u = let f @ portable = (make ()).n in f
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then it is held (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then a function is used at a type with other modes, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then it is held (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
   check
     {|
 type r = { p : string -> string @@ portable }
@@ -88,7 +88,7 @@ let borrowed u = let s @ gc = (make ()).borrowed in s
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-46), then it is held (at t.stag:5:39-46), then the function returns it (at t.stag:5:13-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:30-39), then its field is read (at t.stag:6:30-48), then it is bound by an annotated let (at t.stag:6:25-27), but must be at most gc, because it is annotated gc (at t.stag:6:25-27) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:5:39-46), then it is held (at t.stag:5:39-46), then the function returns it (at t.stag:5:13-48), then the function returns it (at t.stag:6:30-39), then its field is read (at t.stag:6:30-48), then it is bound by an annotated let (at t.stag:6:25-27), but must be at most gc, because it is annotated gc (at t.stag:6:25-27) |}];
   check
     (ext
      ^ {|
@@ -96,7 +96,7 @@ type r = { owned : string @@ gc }
 let bad u = { owned = ext "a" }
 |});
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:22-29), but must be at most gc, because it is held by a field or argument with a modality (at t.stag:5:22-29) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:5:22-29), but must be at most gc, because it is held by a field or argument with a modality (at t.stag:5:22-29) |}];
   (* Several axes at once, and as constructor arguments. *)
   check
     (ext
@@ -182,7 +182,7 @@ let set_owned u = p.*.owned <- ext "c"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:31-38), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:6:31-38) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:6:31-38), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:6:31-38) |}];
   check
     {|
 type r = { owned : string @@ gc; any : string }
@@ -305,7 +305,7 @@ let bad u = c.v.* <- ext "b"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:21-28), but must be at most gc, because the types are unified |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:6:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:21-28), but must be at most gc, because the types are unified |}];
   check
     {|
 type tagged['p : mode] = { tag : int; payload : string @@ 'p }
@@ -546,7 +546,7 @@ let get_f : r -> (string @ nonportable gc global -> string @ nonportable gc glob
 let use (x @ local) = get_f {f = fun s -> s} x
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48), then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48) |}]
 ;;
 
 let%expect_test "printing: a variable's relation to itself" =
@@ -700,7 +700,7 @@ let read = let z @ const = b.v in z
     {|
     This is portable, because b is a parameter, which may differ between calls (at t.stag:8:16-40), then b is used (at t.stag:8:32-33), then its field is read (at t.stag:8:32-35), then it is bound by an annotated let (at t.stag:8:24-29), but must be at most const, because it is annotated const (at t.stag:8:24-29)
     This is portable, because b is a parameter, which may differ between calls (at t.stag:9:25-49), then b is used (at t.stag:9:41-42), then its field is read (at t.stag:9:41-44), then it is bound by an annotated let (at t.stag:9:33-38), but must be at most const, because it is annotated const (at t.stag:9:33-38)
-    This is nonportable, because Ptr.make allocates it at run time, then a function is used at a type with other modes, then the function returns it (at t.stag:10:14-24), then it is held by a field or argument with a modality (at t.stag:10:14-24), then the types are unified, then its field is read (at t.stag:11:27-30), then it is bound by an annotated let (at t.stag:11:19-24), but must be at most const, because it is annotated const (at t.stag:11:19-24)
+    This is nonportable, because Ptr.make allocates it at run time, then the function returns it (at t.stag:10:14-24), then it is held by a field or argument with a modality (at t.stag:10:14-24), then the types are unified, then its field is read (at t.stag:11:27-30), then it is bound by an annotated let (at t.stag:11:19-24), but must be at most const, because it is annotated const (at t.stag:11:19-24)
     |}]
 ;;
 

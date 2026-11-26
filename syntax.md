@@ -499,8 +499,11 @@ cell[string, external]   cell['a, gc portable]   cell['a, 'm]
 `@` binds looser than `*` and tighter than `->`: `int * int @ local -> int`
 is `(int * int) @ local -> int`. A mode is written only on a binder, an
 annotation, or a function type's argument or result: `list[int @ local]` and
-`(int @ local) -> int` are errors. `stack_`, `exclave_` and `region_` extend as far
-right as `fun` does. `[@nontail]` follows an application, but not as a
+`(int @ local) -> int` are errors. `stack_`, `exclave_` and `region_` take a
+tuple's item: an application, or a `let`, `match` or `fun` (which extend as far
+right as they do). So `stack_ (Box.make 1), Box.make k` is a pair of a local
+and a global box, and `region_ f x; g y` runs only `f x` in the region
+(`region_ (f x; g y)` runs both). `[@nontail]` follows an application, but not as a
 constructor's argument, where it would read as applying to the construction:
 `C (f x [@nontail])`, not `C (f x) [@nontail]`.
 
