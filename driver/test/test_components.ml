@@ -344,7 +344,8 @@ let whole (n : int) (g : int -> int) =
   let p = ident (stack_ (Ptr.make n, Box.make g)) in
   match p with (a, b) -> Int.add a.* (b.* n)
 |};
-  [%expect {|
+  [%expect
+    {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val shaped : int @ 'm0 -> ((int -> int) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     val whole : int @ 'm0 -> ((int -> int) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1

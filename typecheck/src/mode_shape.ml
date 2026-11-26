@@ -87,8 +87,8 @@ let rec follow t (path : Path.t) =
   | [] -> t.whole, Modality.id, Some t
   | Part (step, (_ : Modality.t)) :: rest ->
     (match part t step with
-     (* The component's mode was checked to fit the modality when the value
-        was made: reading it through that changes nothing. *)
+     (* The component's mode was checked to fit the modality when the value was
+        made: reading it through that changes nothing. *)
      | Some component -> follow component rest
      | None -> unknown ())
   | Through _ :: _ -> unknown ()

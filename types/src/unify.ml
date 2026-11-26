@@ -1085,16 +1085,16 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
          (List.zip_exn args1 args2)
          variances
          ~f:(fun (arg1, arg2) (variance : Variance.t) ->
-        match arg1, arg2, variance with
-        | ATy lower, ATy upper, Covariant -> co ~lower ~upper
-        | ATy upper, ATy lower, Contravariant -> contra ~lower ~upper
-        | ATy lower, ATy upper, (Invariant | Bivariant) ->
-          unify_ty ~lower ~upper
-        | AMode mode1, AMode mode2, variance -> mode_arg variance mode1 mode2
-        | ARow row1, ARow row2, _ -> unify_row' state ~row1 ~row2
-        | (ATy _ | ARow _ | AMode _), _, _ ->
-          Error
-            (Type_mismatch (expected, actual, Mismatch_arg_kind (arg1, arg2))))
+           match arg1, arg2, variance with
+           | ATy lower, ATy upper, Covariant -> co ~lower ~upper
+           | ATy upper, ATy lower, Contravariant -> contra ~lower ~upper
+           | ATy lower, ATy upper, (Invariant | Bivariant) ->
+             unify_ty ~lower ~upper
+           | AMode mode1, AMode mode2, variance -> mode_arg variance mode1 mode2
+           | ARow row1, ARow row2, _ -> unify_row' state ~row1 ~row2
+           | (ATy _ | ARow _ | AMode _), _, _ ->
+             Error
+               (Type_mismatch (expected, actual, Mismatch_arg_kind (arg1, arg2))))
   | TArrow (arg1, res1, modes1), TArrow (arg2, res2, modes2) ->
     let%bind.Result () = contra ~lower:arg2 ~upper:arg1 in
     let%bind.Result () = co ~lower:res1 ~upper:res2 in

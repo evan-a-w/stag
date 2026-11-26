@@ -923,9 +923,7 @@ let apply
      call [@nontail])"
   in
   let f_expected =
-    if curried
-    then Expected.callee ctx expected
-    else Expected.fresh ctx
+    if curried then Expected.callee ctx expected else Expected.fresh ctx
   in
   let (f : Typed.Expr.t), allocation = callee f_expected in
   let allocator = Option.is_some allocation in
@@ -1292,7 +1290,6 @@ let use_free ctx expected ~locks ~loc ~why =
 
 module Splice = struct
   let code ~code f = f (Expected.of_mode code)
-
   let captured = Expected.captured
 
   let substitution ctx expected ~loc f =

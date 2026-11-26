@@ -629,7 +629,8 @@ type t['a] = .~(%{splice})
   List.iter [ "of_param"; "let _ = h in of_param" ] ~f:(fun splice ->
     printf "%s: " splice;
     located (program ~splice));
-  [%expect {|
+  [%expect
+    {|
     of_param: ok
     let _ = h in of_param: t.stag:2:64-65: This expression has type t[string -> string] but an expression was expected of type t[string -> string @ local]
     The definition of t is not known yet, as its splice is still being run, so its arguments must be equal, but their modes differ: This is local, because it is annotated local (at t.stag:2:55-60), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:2:23-29)
@@ -648,11 +649,13 @@ let i (x : t[int]) = let y @ global = x in y
 type t['a] = .~(%{splice})
 |}]
   in
-  List.iter [ "of_param"; "let _ = k in let _ = i in of_param" ]
+  List.iter
+    [ "of_param"; "let _ = k in let _ = i in of_param" ]
     ~f:(fun splice ->
       modes (program ~splice);
       Mode_helpers.round_trip (program ~splice) ~show:`Quiet);
-  [%expect {|
+  [%expect
+    {|
     val of_param : Stag.Type_decl.Kind.t
     val g : t[string] @ 'm0 -> t[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val k : t[string] @ 'm0 -> t[string] @ 'm1 with 'm0 <= 'm1 and 'm0 <= global
