@@ -79,7 +79,7 @@ let p = Ptr.make "a"
 let store u = p.* <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:4:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:21-28), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:4:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:21-28), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
   provenance
     {|
 let p = Ptr.make "a"
@@ -144,7 +144,7 @@ let ext (x : string) = let y @ external = x in y
 let annotated u = let mut s @ gc = "a" in s <- ext "b"; s
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:3:47-54), then it is assigned to s (at t.stag:3:42-54), but must be at most gc, because it is annotated gc (at t.stag:3:30-32) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:3:47-54), then it is assigned to s (at t.stag:3:42-54), but must be at most gc, because it is annotated gc (at t.stag:3:30-32) |}];
   provenance
     {|
 let ext (x : string) = let y @ external = x in y
@@ -183,7 +183,7 @@ let mut g @ gc = "a"
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:4:17-24), then it is assigned to g (at t.stag:4:12-24), but must be at most gc, because it is annotated gc (at t.stag:3:12-14) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:4:17-24), then it is assigned to g (at t.stag:4:12-24), but must be at most gc, because it is annotated gc (at t.stag:3:12-14) |}]
 ;;
 
 let%expect_test "static: literals and const values, but not run-time \
@@ -203,7 +203,7 @@ let closed u = let f @ static = fun x -> x in f
 let made u = let p @ static = Ptr.make 1 in p
 |};
   [%expect
-    {| This is gc, because Ptr.make allocates it at run time, then a function is used at a type with other modes, then the function returns it (at t.stag:2:30-40), then it is bound by an annotated let (at t.stag:2:21-27), but must be at most static, because it is annotated static (at t.stag:2:21-27) |}];
+    {| This is gc, because Ptr.make allocates it at run time, then the function returns it (at t.stag:2:30-40), then it is bound by an annotated let (at t.stag:2:21-27), but must be at most static, because it is annotated static (at t.stag:2:21-27) |}];
   provenance {|
 let captures (s : string) = let f @ static = fun v -> s in f
 |};
@@ -225,7 +225,7 @@ let r = { f = fun s -> s }
 let bad u = r.f (ext "a")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:16-25), then it is passed to a function (at t.stag:5:12-25), but must be at most gc, because a function type fixes it, as a function is used at a type with other modes |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:5:16-25), then it is passed to a function (at t.stag:5:12-25), but must be at most gc, because a function type fixes it, as a function is used at a type with other modes |}];
   provenance
     {|
 type t = { f : string @ external -> string @ external }
@@ -277,7 +277,7 @@ let built u = captures (Int.to_string 1)
 let ptr u = let p = Ptr.make 1 in let f @ static = fun v -> p in f
 |};
   [%expect
-    {| This is gc, because Ptr.make allocates it at run time, then a function is used at a type with other modes, then the function returns it (at t.stag:2:20-30), then p is captured by a closure (at t.stag:2:60-61), then the closure is made at run time, unless it is [const] (at t.stag:2:51-61), then the closure is made (at t.stag:2:51-61), then it is bound by an annotated let (at t.stag:2:42-48), but must be at most static, because it is annotated static (at t.stag:2:42-48) |}]
+    {| This is gc, because Ptr.make allocates it at run time, then the function returns it (at t.stag:2:20-30), then p is captured by a closure (at t.stag:2:60-61), then the closure is made at run time, unless it is [const] (at t.stag:2:51-61), then the closure is made (at t.stag:2:51-61), then it is bound by an annotated let (at t.stag:2:42-48), but must be at most static, because it is annotated static (at t.stag:2:42-48) |}]
 ;;
 
 let%expect_test "a closure capturing an external value is external" =
@@ -288,7 +288,7 @@ let p = Ptr.make (fun (v : int) -> "a")
 let store u = let s = ext "a" in p.* <- (fun v -> s)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:40-52), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:40-52), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
 ;;
 
 let%expect_test "toplevel constants are static" =
@@ -351,20 +351,20 @@ let k (a : int) (b : int) = a
 let g3 (n : int) = let h @ static = k n in h
 |};
   [%expect
-    {| This is gc, because a partial application is made at run time (at t.stag:2:28-29), then the partial application is made at run time, unless it is [const] (at t.stag:2:28-29), then a function is used at a type with other modes, then the function returns it (at t.stag:3:36-39), then it is bound by an annotated let (at t.stag:3:27-33), but must be at most static, because it is annotated static (at t.stag:3:27-33) |}];
+    {| This is gc, because a partial application is made at run time (at t.stag:2:28-29), then the partial application is made at run time, unless it is [const] (at t.stag:2:28-29), then the function returns it (at t.stag:3:36-39), then it is bound by an annotated let (at t.stag:3:27-33), but must be at most static, because it is annotated static (at t.stag:3:27-33) |}];
   provenance
     {|
 let f (a : string) (b : int) = a
 let g u = let h @ static = f "x" in h
 |};
   [%expect
-    {| This is gc, because a partial application is made at run time (at t.stag:2:31-32), then the partial application is made at run time, unless it is [const] (at t.stag:2:31-32), then a function is used at a type with other modes, then the function returns it (at t.stag:3:27-32), then it is bound by an annotated let (at t.stag:3:18-24), but must be at most static, because it is annotated static (at t.stag:3:18-24) |}];
+    {| This is gc, because a partial application is made at run time (at t.stag:2:31-32), then the partial application is made at run time, unless it is [const] (at t.stag:2:31-32), then the function returns it (at t.stag:3:27-32), then it is bound by an annotated let (at t.stag:3:18-24), but must be at most static, because it is annotated static (at t.stag:3:18-24) |}];
   provenance {|
 let mk x = fun v -> x
 let g u = let h @ static = mk "a" in h
 |};
   [%expect
-    {| This is gc, because a partial application is made at run time (at t.stag:2:11-21), then the partial application is made at run time, unless it is [const] (at t.stag:2:11-21), then a function is used at a type with other modes, then the function returns it (at t.stag:3:27-33), then it is bound by an annotated let (at t.stag:3:18-24), but must be at most static, because it is annotated static (at t.stag:3:18-24) |}];
+    {| This is gc, because a partial application is made at run time (at t.stag:2:11-21), then the partial application is made at run time, unless it is [const] (at t.stag:2:11-21), then the function returns it (at t.stag:3:27-33), then it is bound by an annotated let (at t.stag:3:18-24), but must be at most static, because it is annotated static (at t.stag:3:18-24) |}];
   provenance {|
 let k (a : int) (b : int) = a
 let g = k 1
@@ -387,7 +387,7 @@ let copy u = p.* <- get ()
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then a function is used at a type with other modes, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
   provenance
     {|
 let ext (x : string) = let y @ external = x in y
@@ -397,7 +397,7 @@ let keep u = let s @ gc = get () in s
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:17-24), then it is assigned to g (at t.stag:6:12-24), but must be at most gc, because it is annotated gc (at t.stag:5:21-23), then it is bound by an annotated let (at t.stag:5:21-23), then the function returns it (at t.stag:5:26-32), then a function is used at a type with other modes, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:6:17-24), then it is assigned to g (at t.stag:6:12-24), but must be at most gc, because it is annotated gc (at t.stag:5:21-23), then it is bound by an annotated let (at t.stag:5:21-23), then the function returns it (at t.stag:5:26-32), then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
   provenance
     {|
 let ext (x : string) = let y @ external = x in y
@@ -407,7 +407,7 @@ let keep u = let s @ gc = h 1 in s
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:17-24), then it is assigned to g (at t.stag:6:12-24), but must be at most gc, because it is annotated gc (at t.stag:5:21-23), then it is bound by an annotated let (at t.stag:5:21-23), then the function returns it (at t.stag:5:26-29), then a function is used at a type with other modes, then the function returns it (at t.stag:4:25-26), then g is used (at t.stag:4:25-26) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:6:17-24), then it is assigned to g (at t.stag:6:12-24), but must be at most gc, because it is annotated gc (at t.stag:5:21-23), then it is bound by an annotated let (at t.stag:5:21-23), then the function returns it (at t.stag:5:26-29), then the function returns it (at t.stag:4:25-26), then g is used (at t.stag:4:25-26) |}]
 ;;
 
 let%expect_test "a raised payload is allocated at run time" =

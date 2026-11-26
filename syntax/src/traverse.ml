@@ -59,6 +59,10 @@ let rec pattern_binders (p : Pattern.t) =
   | Var name -> [ name ]
   | Tuple ps | Construct (_, ps) -> List.concat_map ps ~f:pattern_binders
   | Deref p | Exception p -> pattern_binders p
+  | Or (p, q) ->
+    List.stable_dedup
+      (pattern_binders p @ pattern_binders q)
+      ~compare:String.compare
   | Record fs -> List.concat_map fs ~f:(fun (_, p) -> pattern_binders p)
   | Poly_variant (_, p) -> Option.value_map p ~default:[] ~f:pattern_binders
   | Poly_record { fields; rest } ->
@@ -154,6 +158,7 @@ let pattern (v : _ Visitor_type.t) ctx (p : Pattern.t) : Pattern.t =
     | Poly_record { fields; rest } ->
       Poly_record { fields = map_snd fields ~f:sub; rest }
     | Exception p -> Exception (sub p)
+    | Or (p, q) -> Or (sub p, sub q)
   in
   { p with txt }
 ;;

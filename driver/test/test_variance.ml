@@ -33,7 +33,7 @@ let apply (f : string @ local -> int) = f "a"
 let global_only = apply (fun (s : string) -> let g @ global = s in String.length g)
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:2:24-29), then a function is used at a type with other modes, then s is passed to the function (at t.stag:3:24-83), then s is used (at t.stag:3:62-63), then it is bound by an annotated let (at t.stag:3:53-59), but must be at most global, because it is annotated global (at t.stag:3:53-59) |}]
+    {| This is regional, because it is annotated local (at t.stag:2:24-29), then s is passed to the function (at t.stag:3:24-83), then s is used (at t.stag:3:62-63), then it is bound by an annotated let (at t.stag:3:53-59), but must be at most global, because it is annotated global (at t.stag:3:53-59) |}]
 ;;
 
 let%expect_test "a result's modes are covariant" =
@@ -60,7 +60,7 @@ let external_bad = take (fun (u : unit) -> ext "a")
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it, by a tail call (at t.stag:5:43-50), but must be at most gc, because its type is written without a mode (at t.stag:4:22-28), then a function is used at a type with other modes |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it, by a tail call (at t.stag:5:43-50), but must be at most gc, because its type is written without a mode (at t.stag:4:22-28) |}]
 ;;
 
 let%expect_test "nested arrows compose: an argument's argument is covariant" =
@@ -82,7 +82,7 @@ let bad = twice (fun (g : string @ local -> int) -> g "a")
   [%expect
     {|
     This expression has type string @ local -> int but an expression was expected of type string -> int
-    Their modes differ: This is local, because it is annotated local (at t.stag:3:35-40), then a function is used at a type with other modes, but must be at most global, because its type is written without a mode (at t.stag:2:16-22)
+    Their modes differ: This is local, because it is annotated local (at t.stag:3:35-40), but must be at most global, because its type is written without a mode (at t.stag:2:16-22)
     |}]
 ;;
 
@@ -119,7 +119,7 @@ let pick (b : bool) =
 let use (s @ local) = pick true s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:5:42-48), then it is bound by an annotated let (at t.stag:5:42-48), then s is used (at t.stag:5:51-52), then s is passed to the function (at t.stag:5:13-72), then a function is used at a type with other modes |}];
+    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:5:42-48), then it is bound by an annotated let (at t.stag:5:42-48), then s is used (at t.stag:5:51-52), then s is passed to the function (at t.stag:5:13-72) |}];
   check
     {|
 let pick (b : bool) =
@@ -129,7 +129,7 @@ let pick (b : bool) =
 let use (s @ local) = pick true s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:4:41-47), then it is bound by an annotated let (at t.stag:4:41-47), then s is used (at t.stag:4:50-51), then s is passed to the function (at t.stag:4:12-71), then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:4:41-47), then it is bound by an annotated let (at t.stag:4:41-47), then s is used (at t.stag:4:50-51), then s is passed to the function (at t.stag:4:12-71) |}]
 ;;
 
 let%expect_test "_ can't be constrained or declared" =
@@ -168,7 +168,7 @@ let matched (b : box['a]) = match b with *x -> x
 let bad (s @ local) = let b = Box.make s in let r @ global = b.* in r
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:2:13-18), then s is passed to the function (at t.stag:2:22-69), then s is used (at t.stag:2:39-40), then it is passed to a function (at t.stag:2:30-40), but must be at most global, because it is annotated global (at t.stag:2:52-58), then it is bound by an annotated let (at t.stag:2:52-58), then it is dereferenced (at t.stag:2:61-64), then b is used (at t.stag:2:61-62), then the function returns it (at t.stag:2:30-40), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:2:13-18), then s is passed to the function (at t.stag:2:22-69), then s is used (at t.stag:2:39-40), then it is passed to a function (at t.stag:2:30-40), but must be at most global, because it is annotated global (at t.stag:2:52-58), then it is bound by an annotated let (at t.stag:2:52-58), then it is dereferenced (at t.stag:2:61-64), then b is used (at t.stag:2:61-62), then the function returns it (at t.stag:2:30-40), then Box.make holds it |}]
 ;;
 
 let%expect_test "a box can't be stored to" =
@@ -543,7 +543,7 @@ let after (n : int) x = let r = match n with | 0 -> x | _ -> (fun (s @ local) ->
 let use_after (s @ local) = after 0 (fun (t : string) -> let g @ global = t in 1) s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:19-24), then s is passed to the function (at t.stag:3:28-83), then s is used (at t.stag:3:82-83), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:28-83), but must be at most global, because it is annotated global (at t.stag:3:65-71), then it is bound by an annotated let (at t.stag:3:65-71), then t is used (at t.stag:3:74-75), then t is passed to the function (at t.stag:3:36-81), then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:3:19-24), then s is passed to the function (at t.stag:3:28-83), then s is used (at t.stag:3:82-83), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:28-83), but must be at most global, because it is annotated global (at t.stag:3:65-71), then it is bound by an annotated let (at t.stag:3:65-71), then t is used (at t.stag:3:74-75), then t is passed to the function (at t.stag:3:36-81) |}]
 ;;
 
 let%expect_test "joins by variance: contravariant and invariant parts" =
@@ -825,7 +825,7 @@ let call (x : takes[gc]) = x.f (ext "a")
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:31-40), then it is passed to a function (at t.stag:5:27-40), but must be at most gc, because the types are unified, then a function is used at a type with other modes |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:5:31-40), then it is passed to a function (at t.stag:5:27-40), but must be at most gc, because the types are unified |}];
   (* A mode parameter has no locality: alone, the arrow's is the default,
      global. *)
   check
@@ -880,7 +880,7 @@ let ext_bad (x : takes[gc]) = x.f (ext "a")
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:34-43), then it is passed to a function (at t.stag:5:30-43), but must be at most gc, because the types are unified, then a function is used at a type with other modes |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:5:34-43), then it is passed to a function (at t.stag:5:30-43), but must be at most gc, because the types are unified |}];
   check
     {|
 type gives['p : mode] = { g : unit -> string @ regional 'p }

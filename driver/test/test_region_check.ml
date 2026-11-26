@@ -174,7 +174,7 @@ let c2 (u : unit) = let x @ local = stack_ (Box.make 1) in a2 x 3 [@nontail]
   [%expect
     {|
     (Rejected
-     ("This is local, because it is annotated local (at t.stag:5:28-33), then x is used (at t.stag:5:62-63), then it is passed to a function (at t.stag:5:59-63), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:77-78), then x is used (at t.stag:3:77-78), then x is passed to the function (at t.stag:3:34-108), then a function is used at a type with other modes, then it is passed to a function (at t.stag:4:34-38), then x is used (at t.stag:4:37-38), then x is passed to the function (at t.stag:4:34-40), then a function is used at a type with other modes"))
+     ("This is local, because it is annotated local (at t.stag:5:28-33), then x is used (at t.stag:5:62-63), then it is passed to a function (at t.stag:5:59-63), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:77-78), then x is used (at t.stag:3:77-78), then x is passed to the function (at t.stag:3:34-108), then it is passed to a function (at t.stag:4:34-38), then x is used (at t.stag:4:37-38), then x is passed to the function (at t.stag:4:34-40)"))
     |}]
 ;;
 

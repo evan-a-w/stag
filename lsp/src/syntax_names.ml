@@ -183,6 +183,9 @@ let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
        | Bind name ->
          add ~declaration:true ~kind:Kind.Pattern_var ~loc:name.loc [ name.txt ])
     | Exception pattern -> recurse pattern
+    | Or (left, right) ->
+      recurse left;
+      recurse right
   and walk_expr ~(add : add) ~type_expr ~toplevels (expr : Syntax.Expr.t) =
     let recurse = walk_expr ~add ~type_expr ~toplevels in
     let labelled fields =

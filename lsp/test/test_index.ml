@@ -443,6 +443,30 @@ let g x = let _ = print_endline x in 1
         |}])
 ;;
 
+let%expect_test "an or-pattern's variable is defined by its first binder" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|type t = A of int | B of int
+let f x = match x with A n | B n -> n
+|}
+        )
+      ]
+    (fun client ->
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 1, 25; 1, 31; 1, 36 ];
+      [%expect
+        {|
+        1:25 1:25-1:26 ```stag n : int ```
+        1:25 -> a.stag 1:25-1:26
+        1:31 1:31-1:32 ```stag n : int ```
+        1:31 -> a.stag 1:31-1:32
+        1:36 1:36-1:37 ```stag n : int ```
+        1:36 -> a.stag 1:25-1:26
+        |}])
+;;
+
 let%expect_test "a nonrec let refers to the outer binding" =
   Client.with_server
     ~files:

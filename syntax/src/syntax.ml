@@ -200,6 +200,8 @@ module Defs = struct
     | Exception of pattern
     (** [exception p], at the top of a match arm: matches an exception the
         scrutinee raises. *)
+    | Or of pattern * pattern
+    (** [p | q]: matches what either does, binding the same variables. *)
 
   and expr = expr_desc Located.t
 
@@ -435,6 +437,7 @@ module Pattern = struct
         ; rest : Rest.t
         }
     | Exception of t
+    | Or of t * t
 
   let sexp_of_t = sexp_of_pattern
   let compare = compare_pattern

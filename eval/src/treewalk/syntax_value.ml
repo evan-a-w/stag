@@ -644,6 +644,7 @@ module Of_value = struct
                ; rest = field "rest" (rest ~loc) record
                })
          | "Exception", 1 -> Exception (arg 0 (pattern ~loc))
+         | "Or", 2 -> Or (arg 0 (pattern ~loc), arg 1 (pattern ~loc))
          | _ -> raise Bad_arguments))
 
   and rest value ~loc =

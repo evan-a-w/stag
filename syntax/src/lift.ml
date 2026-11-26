@@ -22,6 +22,7 @@ let indirect_constructors =
     ; "Pattern.Deref", 1
     ; "Pattern.Poly_variant", 2
     ; "Pattern.Exception", 1
+    ; "Pattern.Or", 2
     ; "Expr.App", 2
     ; "Expr.Let", 5
     ; "Expr.Let_nonrec", 5
@@ -172,6 +173,7 @@ module Make (B : Builder) = struct
             ]
         ]
     | Exception p -> con "Exception" [ pattern p ]
+    | Or (p, q) -> con "Or" [ pattern p; pattern q ]
   ;;
 
   (* [antiquote] replaces splices, the expression of each splice it doesn't

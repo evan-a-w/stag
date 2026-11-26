@@ -263,6 +263,7 @@ and pattern t : Pattern.t =
                ; rest = pick t [ Pattern.Rest.Closed; Open; Bind (name t) ]
                })
          ; (fun t -> Exception (pattern t))
+         ; (fun t -> Or (pattern t, pattern t))
          ])
 
 and binding t : Binding.t = binder t, annot t

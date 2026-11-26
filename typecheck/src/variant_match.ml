@@ -25,21 +25,30 @@ let pattern_type
       ; ty = Fresh.variant t row
       ; loc = Source.Pattern.loc pattern
       }
-    , [ { Pattern_var.ident
-        ; ty = rest
-        ; loc = Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
-        ; path = []
-        }
+    , [ Pattern_var.bound
+          ident
+          rest
+          ~loc:
+            (Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern))
       ] )
   | _ -> Pattern_check.pattern_type t scope ~pattern ~expected:scrutinee
 ;;
 
-let add_case handled ({ desc; ty = _; loc = _ } : Typed.Pattern.t) =
+(* The alternatives of an or-pattern, each matching what it does. *)
+let rec alternatives ({ desc; _ } as pattern : Typed.Pattern.t) =
   match desc with
-  | Poly_variant (tag, arg)
-    when Option.for_all arg ~f:Typed.Pattern.is_irrefutable
-         && not (List.mem handled tag ~equal:String.equal) -> handled @ [ tag ]
-  | _ -> handled
+  | Or (left, right) -> alternatives left @ alternatives right
+  | _ -> [ pattern ]
+;;
+
+let add_case handled pattern =
+  List.fold (alternatives pattern) ~init:handled ~f:(fun handled pattern ->
+    match pattern.desc with
+    | Poly_variant (tag, arg)
+      when Option.for_all arg ~f:Typed.Pattern.is_irrefutable
+           && not (List.mem handled tag ~equal:String.equal) ->
+      handled @ [ tag ]
+    | _ -> handled)
 ;;
 
 let is_empty_nominal (scope : Scope.t) scrutinee =
@@ -50,7 +59,8 @@ let is_empty_nominal (scope : Scope.t) scrutinee =
 
 let close t (scope : Scope.t) ~scrutinee ~loc (patterns : Typed.Pattern.t list) =
   let patterns =
-    List.map patterns ~f:(fun (pattern : Typed.Pattern.t) -> pattern.desc)
+    List.concat_map patterns ~f:alternatives
+    |> List.map ~f:(fun (pattern : Typed.Pattern.t) -> pattern.desc)
   in
   let tags =
     List.filter_map patterns ~f:(function

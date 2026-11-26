@@ -161,7 +161,9 @@ let same t t' =
 ;;
 
 let sub_reason =
-  Mode.Reason.create "a function is used at a type with other modes"
+  Mode.Reason.create
+    ~shown:If_alone
+    "a function is used at a type with other modes"
 ;;
 
 let sub_fixed_reason =
