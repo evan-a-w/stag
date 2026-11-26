@@ -21,7 +21,17 @@ type ('a, 'bound) var =
   ; mutable kept : kept list
   ; mutable in_record : bool
   ; mutable watchers : ('a, unification_error) Watcher.t list
+  ; mutable frontier : 'a frontier
   }
+
+(** What is cached of a [Link]'s target: see [Type.frontier]. *)
+and 'a frontier =
+  | Not_computed
+  | Variables of
+      { target : 'a
+      ; vars : (ty, Nothing.t) var list
+      }
+  | Not_only_variables of 'a
 
 and ty =
   | TCon of string * arg list
@@ -122,6 +132,7 @@ module Var = struct
     ; mutable kept : kept list
     ; mutable in_record : bool
     ; mutable watchers : ('a, unification_error) Watcher.t list
+    ; mutable frontier : 'a frontier
     }
 
   let create id state =
@@ -132,6 +143,7 @@ module Var = struct
     ; kept = []
     ; in_record = false
     ; watchers = []
+    ; frontier = Not_computed
     }
   ;;
 
@@ -293,6 +305,77 @@ let presence_bound_var = function
      | PVar var -> Some var
      | Present | Absent -> None)
   | If_present _ -> None
+;;
+
+(* A type's structure only grows, as its variables are linked, so what a [Link]
+   reaches is kept with it: if it is only tuples and constructors applied to
+   types around a few variables, traversals reaching it again (as uses of a
+   binding do, each time its type is instantiated or generalized) see the
+   variables at once, rather than its whole structure. Kept with undo, as an
+   undone link would bring back a variable it reached through. *)
+module Frontier = struct
+  let max_vars = 16
+
+  let set (var : (ty, _) var) frontier =
+    let old = var.frontier in
+    Var.change
+      ~undo:(fun () -> var.frontier <- old)
+      (fun () -> var.frontier <- frontier)
+  ;;
+
+  exception Not_only_variables
+
+  let rec of_link (var : (ty, _) var) ~target =
+    match var.frontier with
+    | Variables { target = target'; vars }
+      when phys_equal target target'
+           && List.for_all vars ~f:(fun (var : _ Var.t) ->
+             match var.state with
+             | Link _ -> false
+             | Unbound _ | Generic -> true) -> Some vars
+    | Not_only_variables target' when phys_equal target target' -> None
+    | (Variables _ | Not_only_variables _ | Not_computed)
+      when not (Mode.Private.Undo.cacheable ()) -> None
+    | Variables _ | Not_only_variables _ | Not_computed ->
+      (* Not in place until known, so a cycle is found as not only variables. *)
+      set var (Not_only_variables target);
+      let vars =
+        match collect target ~into:[] with
+        | vars -> Some vars
+        | exception Not_only_variables -> None
+      in
+      Option.iter vars ~f:(fun vars -> set var (Variables { target; vars }));
+      vars
+
+  and collect ty ~into =
+    match ty with
+    | TVar ({ state = Link target; _ } as var) ->
+      (match of_link var ~target with
+       | None -> raise Not_only_variables
+       | Some vars ->
+         List.fold vars ~init:into ~f:(fun into var -> add var ~into))
+    | TVar var -> add var ~into
+    | TCon (_, args) ->
+      List.fold args ~init:into ~f:(fun into -> function
+        | ATy ty -> collect ty ~into
+        | ARow _ | AMode _ -> raise Not_only_variables)
+    | TTuple tys ->
+      List.fold tys ~init:into ~f:(fun into ty -> collect ty ~into)
+    | TArrow _ | TCode _ | TRecord _ | TVariant _ -> raise Not_only_variables
+
+  and add (var : (ty, Nothing.t) var) ~into =
+    if List.exists into ~f:(fun (var' : _ Var.t) -> var'.id = var.id)
+    then into
+    else if List.length into >= max_vars
+    then raise Not_only_variables
+    else var :: into
+  ;;
+end
+
+let frontier (var : (ty, Nothing.t) var) =
+  match var.state with
+  | Link target -> Frontier.of_link var ~target
+  | Unbound _ | Generic -> None
 ;;
 
 module Link_pairs = struct
@@ -481,7 +564,10 @@ let iterate
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
       if Visited.enter_link visited ~id:var.id ~guarded
-      then iter_ty ~guarded target
+      then (
+        match frontier var with
+        | Some vars -> iter_vars ~guarded vars
+        | None -> iter_ty ~guarded target)
       else Ok ()
     | TVar var -> (f.ty ~guarded) var
     | TCon (_, args) -> iter_args ~guarded args
@@ -515,6 +601,13 @@ let iterate
     | AMode mode :: args ->
       (match Mode_arg.iter_result mode ~f:(fun var -> held var) with
        | Ok () -> iter_args ~guarded args
+       | Error _ as error -> error)
+  and iter_vars ~guarded vars =
+    match vars with
+    | [] -> Ok ()
+    | var :: vars ->
+      (match (f.ty ~guarded) var with
+       | Ok () -> iter_vars ~guarded vars
        | Error _ as error -> error)
   and iter_tys ~guarded tys =
     match tys with
@@ -653,7 +746,10 @@ module Changes = struct
   let rec ty t ty' =
     match ty' with
     | TVar ({ state = Link target; _ } as var') ->
-      vertex t t.tys var'.id ~target:(fun () -> ty t target)
+      (match frontier var' with
+       | Some vars ->
+         List.exists vars ~f:(fun var' -> not (t.keeps var')), Int.max_value
+       | None -> vertex t t.tys var'.id ~target:(fun () -> ty t target))
     | TVar var' -> var t var'
     | TCon (_, args) ->
       List.fold args ~init:none ~f:(fun acc -> function

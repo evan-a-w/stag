@@ -90,6 +90,7 @@ let permanent f =
       log := saved_log)
 ;;
 
+let cacheable () = !suspended = 0
 let when_settled f = if settled () then f () else Queue.enqueue settled_queue f
 
 let assert_not_atomic what =

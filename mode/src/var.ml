@@ -299,6 +299,9 @@ module Node = struct
 
   let fate = Graph.fate
   let above = Graph.above
+
+  module Above_each = Graph.Above_each
+
   let at_most = Graph.at_most
   let at_least = Graph.at_least
 

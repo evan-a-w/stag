@@ -1152,6 +1152,100 @@ let above t =
   Queue.to_list found
 ;;
 
+module Above_each = struct
+  type node = t
+
+  type t =
+    { kept : node array
+    ; above : Bitset.t array
+    }
+
+  (* The nodes are found in one search from all [sources], which also gives
+     their strongly connected components (Tarjan's), each after those it leads
+     to: so each component's set, its kept nodes' positions and the sets of the
+     components it has edges to, is made in one pass. *)
+  let create sources ~keep =
+    let index = Int.Table.create () in
+    let low = Int.Table.create () in
+    let on_stack = Int.Hash_set.create () in
+    let component = Stack.create () in
+    let finished = Queue.create () in
+    let components = Queue.create () in
+    let start node =
+      let at = Hashtbl.length index in
+      Hashtbl.set index ~key:node.id ~data:at;
+      Hashtbl.set low ~key:node.id ~data:at;
+      Stack.push component node;
+      Hash_set.add on_stack node.id
+    in
+    let lower node bound =
+      Hashtbl.update low node.id ~f:(fun current ->
+        Int.min (Option.value_exn current) bound)
+    in
+    let close node =
+      let rec pop members =
+        let member = Stack.pop_exn component in
+        Hash_set.remove on_stack member.id;
+        if phys_equal member node
+        then member :: members
+        else pop (member :: members)
+      in
+      Queue.enqueue components (pop [])
+    in
+    let visit source =
+      if not (Hashtbl.mem index source.id)
+      then (
+        start source;
+        let todo = Stack.singleton (source, ref source.succ) in
+        while not (Stack.is_empty todo) do
+          let node, edges = Stack.top_exn todo in
+          match !edges with
+          | edge :: rest ->
+            edges := rest;
+            let hi = edge.hi in
+            if not (Hashtbl.mem index hi.id)
+            then (
+              start hi;
+              Stack.push todo (hi, ref hi.succ))
+            else if Hash_set.mem on_stack hi.id
+            then lower node (Hashtbl.find_exn index hi.id)
+          | [] ->
+            ignore (Stack.pop_exn todo : node * edge list ref);
+            Queue.enqueue finished node;
+            let node_low = Hashtbl.find_exn low node.id in
+            Option.iter (Stack.top todo) ~f:(fun (parent, _) ->
+              lower parent node_low);
+            if node_low = Hashtbl.find_exn index node.id then close node
+        done)
+    in
+    List.iter sources ~f:visit;
+    let position = Int.Table.create () in
+    let kept = Queue.create () in
+    Queue.iter finished ~f:(fun node ->
+      if keep node
+      then (
+        Hashtbl.set position ~key:node.id ~data:(Queue.length kept);
+        Queue.enqueue kept node));
+    let kept = Queue.to_array kept in
+    let sets = Int.Table.create () in
+    Queue.iter components ~f:(fun members ->
+      let set = Bitset.create (Array.length kept) in
+      List.iter members ~f:(fun member ->
+        Option.iter (Hashtbl.find position member.id) ~f:(Bitset.add set));
+      List.iter members ~f:(fun member ->
+        List.iter member.succ ~f:(fun edge ->
+          Option.iter (Hashtbl.find sets edge.hi.id) ~f:(fun above ->
+            ignore (Bitset.union set above : bool))));
+      List.iter members ~f:(fun member ->
+        Hashtbl.set sets ~key:member.id ~data:set));
+    { kept
+    ; above =
+        Array.of_list_map sources ~f:(fun source ->
+          Hashtbl.find_exn sets source.id)
+    }
+  ;;
+end
+
 (* What a generic node's scheme adds to every instance, as a layout guarding it
    has pointers. *)
 let holding t =

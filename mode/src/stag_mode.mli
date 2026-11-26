@@ -44,6 +44,7 @@ end
 module Reason = Reason
 module Var = Var
 module Morphism = Morphism
+module Bitset = Bitset
 module Written_morphism = Written_morphism
 
 module Private : sig

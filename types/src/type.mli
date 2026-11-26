@@ -27,7 +27,17 @@ type ('a, 'bound) var = private
   ; mutable kept : kept list
   ; mutable in_record : bool
   ; mutable watchers : ('a, unification_error) Watcher.t list
+  ; mutable frontier : 'a frontier
   }
+
+(** What is cached of a [Link]'s target: see [Type.frontier]. *)
+and 'a frontier =
+  | Not_computed
+  | Variables of
+      { target : 'a
+      ; vars : (ty, Nothing.t) var list
+      }
+  | Not_only_variables of 'a
 
 and ty =
   | TCon of string * arg list
@@ -148,6 +158,7 @@ module Var : sig
     ; mutable kept : kept list
     ; mutable in_record : bool
     ; mutable watchers : ('a, unification_error) Watcher.t list
+    ; mutable frontier : 'a frontier
     }
 
   val create : Id.t -> 'a state -> ('a, _) t
@@ -261,6 +272,11 @@ val tail_var : row -> (row, bound) Var.t option
 val presence_bound_var
   :  presence_bound
   -> (presence, presence_bound) Var.t option
+
+(** For a [Link], the variables it reaches (unbound or generic), if it reaches
+    nothing else but tuples and constructors applied to types, and only a few:
+    kept with the [Link], so found at once again while it reaches the same. *)
+val frontier : (ty, Nothing.t) Var.t -> (ty, Nothing.t) Var.t list option
 
 (** Whether two types are the same up to [Link]s: records and variants are only
     the same if they are the same node, so this is conservative. *)

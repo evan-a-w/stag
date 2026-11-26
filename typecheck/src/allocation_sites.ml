@@ -110,7 +110,8 @@ let sides start =
 
 module Owner = struct
   type t =
-    { owner : Typed.Allocation.Owner.t
+    { index : int
+    ; owner : Typed.Allocation.Owner.t
     ; depth : int
     ; sides : (Typed.Allocation.Side.t * Mode.Var.Node.t) list
     ; vars : Mode.Var.Node.t list
@@ -138,7 +139,8 @@ let place ~rank members ~awaiting =
   let owner toplevel (lets : Frame.t list) ~ty =
     let sides, vars = sides ty in
     let owner =
-      { Owner.owner =
+      { Owner.index = Queue.length owners
+      ; owner =
           { toplevel
           ; lets =
               List.rev_map lets ~f:(fun (frame : Frame.t) ->
@@ -206,83 +208,125 @@ let place ~rank members ~awaiting =
      only made in a region when every node above it is pinned or summarized
      away: no instance, and no code yet to be checked, can make it any less
      local. *)
-  let above =
-    Array.map sites ~f:(fun ((_, (site : Mode_rules.Site.t)), _) ->
-      Mode.Var.Node.above (Mode.Var.node site.mode Locality))
-  in
   let internal node =
     match Mode.Var.Node.fate node ~rank ~kept:in_scheme with
     | Eliminated -> true
     | Outer | Kept | Generic -> false
   in
+  let above =
+    Mode.Var.Node.Above_each.create
+      (Array.to_list sites
+       |> List.map ~f:(fun ((_, (site : Mode_rules.Site.t)), _) ->
+         Mode.Var.node site.mode Locality))
+      ~keep:(fun node -> not (internal node))
+  in
+  (* Each pinned node with its position in [above.kept], if above a site. *)
   let pinned =
+    let position = Int.Table.create () in
+    Array.iteri above.kept ~f:(fun index node ->
+      Hashtbl.set position ~key:(id node) ~data:index);
     let seen = Int.Hash_set.create () in
     let pin node =
       if Hash_set.mem seen (id node)
       then None
       else (
         Hash_set.add seen (id node);
-        Some node)
+        Some (node, Hashtbl.find position (id node)))
     in
-    List.filter_map (List.map sides ~f:snd) ~f:pin
-    @ List.filter_map
-        (List.concat (Array.to_list above))
-        ~f:(fun node -> if internal node then None else pin node)
+    Array.of_list
+      (List.filter_map (List.map sides ~f:snd) ~f:pin
+       @ List.filter_map (Array.to_list above.kept) ~f:pin)
   in
   let read () =
     Array.map sites ~f:(fun ((_, site), _) -> Mode_rules.placement site)
   in
   let least =
-    match assuming pinned ~also:(fun () -> Ok ()) ~read with
+    match
+      assuming
+        (Array.to_list (Array.map pinned ~f:fst))
+        ~also:(fun () -> Ok ())
+        ~read
+    with
     | Some least -> least
     | None ->
       (* Fixing nodes at their lower bounds can't fail; were it to, the heap is
          safe whatever the instance. *)
       Array.map sites ~f:(fun _ -> Typed.Allocation.Placement.Heap)
   in
-  let above =
-    Array.map above ~f:(fun nodes -> Int.Set.of_list (List.map nodes ~f:id))
+  (* Of each site, the positions in [pinned] of those above it; and the sites
+     each pinned node is above, and each owner is of, so that what a side
+     applies to is found without going through every site. *)
+  let pinned_above =
+    let at = Array.create ~len:(Array.length above.kept) (-1) in
+    Array.iteri pinned ~f:(fun index (_, kept) ->
+      Option.iter kept ~f:(fun kept -> at.(kept) <- index));
+    Array.map above.above ~f:(fun above ->
+      let bits = Mode.Bitset.create (Array.length pinned) in
+      List.iter (Mode.Bitset.to_list above) ~f:(fun kept ->
+        if at.(kept) >= 0 then Mode.Bitset.add bits at.(kept));
+      bits)
   in
+  let below = Int.Table.create () in
+  Array.iteri pinned ~f:(fun index (node, _) ->
+    Array.iteri pinned_above ~f:(fun i above ->
+      if Mode.Bitset.mem above index
+      then Hashtbl.add_multi below ~key:(id node) ~data:i));
+  let of_owner = Int.Table.create () in
+  Array.iteri sites ~f:(fun i (_, chain) ->
+    List.iter chain ~f:(fun (owner : Owner.t) ->
+      Hashtbl.add_multi of_owner ~key:owner.index ~data:i));
   let follows = Array.map sites ~f:(fun _ -> None) in
   (* A side of an owner a site is in, innermost owners' first, may make it more
      local in the instances where it is [local]. *)
   List.stable_sort owners ~compare:(fun (a : Owner.t) b ->
     Int.compare b.depth a.depth)
   |> List.iter ~f:(fun (owner : Owner.t) ->
+    let of_owner =
+      Int.Hash_set.of_list (Hashtbl.find_multi of_owner owner.index)
+    in
     List.iter owner.sides ~f:(fun (side, node) ->
-      let applies i =
-        Option.is_none follows.(i)
-        && Set.mem above.(i) (id node)
-        && List.exists (snd sites.(i)) ~f:(phys_equal owner)
+      let applies =
+        Hashtbl.find_multi below (id node)
+        |> List.filter ~f:(fun i ->
+          Option.is_none follows.(i) && Hash_set.mem of_owner i)
+        |> List.sort ~compare:Int.compare
       in
       (* Only the nodes above the sites it applies to bound what is read of
          them, and fixing the others at their least can't fail. *)
-      let relevant = Int.Hash_set.create () in
-      Array.iteri sites ~f:(fun i _ ->
-        if applies i then Set.iter above.(i) ~f:(Hash_set.add relevant));
-      if not (Hash_set.is_empty relevant)
-      then
+      if not (List.is_empty applies)
+      then (
+        let relevant = Mode.Bitset.create (Array.length pinned) in
+        List.iter applies ~f:(fun i ->
+          ignore (Mode.Bitset.union relevant pinned_above.(i) : bool));
+        let pinned =
+          Mode.Bitset.to_list relevant
+          |> List.filter_map ~f:(fun index ->
+            let pinned, _ = pinned.(index) in
+            Option.some_if (id pinned <> id node) pinned)
+        in
+        let applies = Array.of_list applies in
         Option.iter
           (assuming
-             (List.filter pinned ~f:(fun pinned ->
-                id pinned <> id node && Hash_set.mem relevant (id pinned)))
+             pinned
              ~also:(fun () ->
                Mode.Var.Node.at_least
                  node
                  (Mode.Locality.index Local)
                  (Mode.Reason.create "an instance has it local"))
-             ~read)
+             ~read:(fun () ->
+               Array.map applies ~f:(fun i ->
+                 Mode_rules.placement (snd (fst sites.(i))))))
           ~f:(fun if_local ->
-            Array.iteri if_local ~f:(fun i if_local ->
-              if applies i
-                 && not (Typed.Allocation.Placement.equal if_local least.(i))
+            Array.iteri if_local ~f:(fun j if_local ->
+              let i = applies.(j) in
+              if not (Typed.Allocation.Placement.equal if_local least.(i))
               then
                 follows.(i)
                 <- Some
                      { Typed.Allocation.Follows.owner = owner.owner
                      ; side
                      ; if_local
-                     }))));
+                     })))));
   Array.to_list
     (Array.mapi sites ~f:(fun i ((id, (site : Mode_rules.Site.t)), chain) ->
        { Typed.Allocation.id

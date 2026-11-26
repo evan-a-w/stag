@@ -77,6 +77,19 @@ module Node : sig
       upper bounds bound [t]'s. *)
   val above : t -> t list
 
+  (** What [above] gives of each of [sources], of the nodes [keep] holds: as
+      positions in [kept]. *)
+  module Above_each : sig
+    type node := t
+
+    type t =
+      { kept : node array
+      ; above : Bitset.t array
+      }
+
+    val create : node list -> keep:(node -> bool) -> t
+  end
+
   (** Only under [assuming]. *)
   val at_most : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
 

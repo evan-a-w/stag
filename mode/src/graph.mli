@@ -157,6 +157,20 @@ val var_id : t -> int
     upper bounds bound [t]'s. *)
 val above : t -> t list
 
+(** What [above] gives of each of [sources], of the nodes [keep] holds: as
+    positions in [kept]. Linear in the nodes and edges found, times the words of
+    a set. *)
+module Above_each : sig
+  type node := t
+
+  type t =
+    { kept : node array
+    ; above : Bitset.t array
+    }
+
+  val create : node list -> keep:(node -> bool) -> t
+end
+
 val axis : t -> Axis.Any.t
 
 (** Scheme lower bounds ([scheme_lower]), shared by queries made while the graph

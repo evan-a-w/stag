@@ -90,6 +90,47 @@ module Type_splice = struct
     }
 end
 
+(* Whether what a [Link] reaches is pointer-free, if it reaches only the
+   variables of its [Type.frontier]: then that and which of their layouts it
+   depends on are the same until the frontier is, or a variable of it is
+   generalized, or made unbound again. *)
+module Link_layout = struct
+  type t =
+    { target : Type.ty
+    ; frontier : (Type.ty, Nothing.t) Type.Var.t list
+    ; generic : bool list
+    ; pointer_free : bool
+    ; depends_on : (Type.ty, Nothing.t) Type.Var.t list
+    }
+
+  let generic (frontier : (Type.ty, Nothing.t) Type.Var.t list) =
+    List.map frontier ~f:(fun (var : _ Type.Var.t) ->
+      match var.state with
+      | Generic -> true
+      | Unbound _ | Link _ -> false)
+  ;;
+
+  (* With undo, as the structure between [target] and [frontier] may be. *)
+  let set table (var : (Type.ty, Nothing.t) Type.Var.t) t =
+    let old = Hashtbl.find table var.id in
+    Mode.Private.Undo.change
+      ~undo:(fun () ->
+        match old with
+        | Some old -> Hashtbl.set table ~key:var.id ~data:old
+        | None -> Hashtbl.remove table var.id)
+      (fun () -> Hashtbl.set table ~key:var.id ~data:t)
+  ;;
+
+  let find table (var : (Type.ty, Nothing.t) Type.Var.t) ~target ~frontier =
+    match Hashtbl.find table var.id with
+    | Some t
+      when phys_equal t.target target
+           && List.equal phys_equal t.frontier frontier
+           && List.equal Bool.equal t.generic (generic frontier) -> Some t
+    | Some _ | None -> None
+  ;;
+end
+
 type t =
   { fresh : Fresh.t
   ; evaluate_splice :
@@ -114,6 +155,8 @@ type t =
   ; report : Typecheck_error.t -> unit
   ; layouts : Var_layout.t Set_once.t
   (** Set by [create]: what a layout is depends on the types declared. *)
+  ; link_layouts : Link_layout.t Int.Table.t
+  (** Of [Link]s of type variables, by id. *)
   }
 
 let create_tables fresh ~record_references ~report ~evaluate_splice =
@@ -131,6 +174,7 @@ let create_tables fresh ~record_references ~report ~evaluate_splice =
   ; declared_members = String.Table.create ()
   ; references = Option.some_if record_references (Loc.Table.create ())
   ; layouts = Set_once.create ()
+  ; link_layouts = Int.Table.create ()
   }
 ;;
 
@@ -1595,6 +1639,15 @@ let pointer_free' t ~check root =
     collected := layout :: !collected;
     true
   in
+  (* The variables whose layouts are collected, and whether a declaration whose
+     splice is being computed was reached, since the innermost [Link] being
+     found. *)
+  let reached = ref [] in
+  let reached_pending = ref false in
+  let unknown_var var =
+    reached := var :: !reached;
+    unknown (Var_layout.of_ty (layouts t) var)
+  in
   (* What [f] collects, set apart. *)
   let collecting f =
     let outer = !collected in
@@ -1639,12 +1692,17 @@ let pointer_free' t ~check root =
     match ty with
     | TVar { id; state = Generic; _ } when Map.mem params id ->
       Map.find_exn params id
-    | TVar { id; state = Link target; _ } ->
-      node ~table:links params id ~f:(fun () -> ty_ params target)
+    | TVar ({ id; state = Link target; _ } as var) ->
+      let compute () =
+        node ~table:links params id ~f:(fun () -> ty_ params target)
+      in
+      (match Type.frontier var with
+       | Some frontier when Map.is_empty params ->
+         link var ~target ~frontier ~compute
+       | Some _ | None -> compute ())
     | _ ->
       (match Type.canonical_ty ty with
-       | TVar ({ state = Unbound _; _ } as var) ->
-         unknown (Var_layout.of_ty (layouts t) var)
+       | TVar ({ state = Unbound _; _ } as var) -> unknown_var var
        | TVar _ | TArrow _ | TCode _ -> false
        | TCon (("int" | "bool" | "char" | "unit"), []) -> true
        | TCon (name, _) when Type.is_pointer_name name -> false
@@ -1699,9 +1757,46 @@ let pointer_free' t ~check root =
       then Hashtbl.set nominals ~key:(name, args) ~data;
       collected := mine @ !collected;
       result
+  and link var ~target ~frontier ~compute =
+    match Link_layout.find t.link_layouts var ~target ~frontier with
+    | Some { pointer_free; depends_on; _ } ->
+      List.iter depends_on ~f:(fun var -> ignore (unknown_var var : bool));
+      pointer_free
+    | None ->
+      let outer = !reached
+      and outer_pending = !reached_pending in
+      reached := [];
+      reached_pending := false;
+      let pointer_free, mine = collecting compute in
+      let depends_on = !reached
+      and pending = !reached_pending in
+      reached := depends_on @ outer;
+      reached_pending := pending || outer_pending;
+      collected := mine @ !collected;
+      let ids layouts = List.map layouts ~f:Mode.Layout.id |> Int.Set.of_list in
+      (* Only what is found again from the variables is kept. *)
+      if (not pending)
+         && Mode.Private.Undo.cacheable ()
+         && Set.equal
+              (ids mine)
+              (ids (List.map depends_on ~f:(Var_layout.of_ty (layouts t))))
+      then
+        Link_layout.set
+          t.link_layouts
+          var
+          { target
+          ; frontier
+          ; generic = Link_layout.generic frontier
+          ; pointer_free
+          ; depends_on =
+              List.dedup_and_sort depends_on ~compare:(fun a b ->
+                Int.compare a.Type.Var.id b.id)
+          };
+      pointer_free
   (* Has pointers once its definition does, or an argument that has pointers
      where the definition gives it pointers. *)
   and pending params (decl : Decl.t) args =
+    reached_pending := true;
     let own =
       match decl.pending_layouts with
       | Some layouts -> layouts
