@@ -94,9 +94,11 @@ let use_free (scope : Scope.t) ~at ~why ~loc =
 
 let generalizes (scope : Scope.t) mode ~is_function ~loc =
   is_function
-  || (Mode.Stage.le (Scope.known_stage scope ~bounds:Live mode) Const
-      && Mode_rules.const (Scope.modes scope) mode ~loc ~why:"it is generalized"
-     )
+  || (* Raising parameters only raises the stage, so a mode already above
+        [const] needn't be searched, through all the lets it comes from. *)
+  (Mode.Stage.le (Mode.Var.lower mode).stage Const
+   && Mode.Stage.le (Scope.known_stage scope ~bounds:Live mode) Const
+   && Mode_rules.const (Scope.modes scope) mode ~loc ~why:"it is generalized")
 ;;
 
 (* Whether a local of an earlier level may be embedded, if that isn't known yet:

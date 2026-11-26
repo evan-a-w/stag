@@ -255,11 +255,17 @@ let place ~rank members ~awaiting =
         && Set.mem above.(i) (id node)
         && List.exists (snd sites.(i)) ~f:(phys_equal owner)
       in
-      if Array.existsi sites ~f:(fun i _ -> applies i)
+      (* Only the nodes above the sites it applies to bound what is read of
+         them, and fixing the others at their least can't fail. *)
+      let relevant = Int.Hash_set.create () in
+      Array.iteri sites ~f:(fun i _ ->
+        if applies i then Set.iter above.(i) ~f:(Hash_set.add relevant));
+      if not (Hash_set.is_empty relevant)
       then
         Option.iter
           (assuming
-             (List.filter pinned ~f:(fun pinned -> id pinned <> id node))
+             (List.filter pinned ~f:(fun pinned ->
+                id pinned <> id node && Hash_set.mem relevant (id pinned)))
              ~also:(fun () ->
                Mode.Var.Node.at_least
                  node

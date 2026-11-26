@@ -15,4 +15,5 @@ module Written_morphism = Written_morphism
 
 module Private = struct
   module Undo = Undo
+  module Implied_constraints = Implied_constraints
 end
