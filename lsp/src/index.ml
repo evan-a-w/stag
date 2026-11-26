@@ -113,6 +113,9 @@ module Syntax_at = struct
        | Closed | Open -> ());
       List.iter fields ~f:(fun (_, p) -> pattern t p)
     | Exception p -> pattern t p
+    | Or (p, q) ->
+      pattern t p;
+      pattern t q
   ;;
 
   let rec expr t (e : Syntax.Expr.t) =
@@ -213,7 +216,9 @@ let is_arrow ty =
 
 let add_binder t (name : Syntax.Name.t) ~label ~ty ~ident =
   Option.iter ident ~f:(fun ident ->
-    Hashtbl.set t.locals ~key:ident ~data:name.loc);
+    (* An or-pattern binds an ident on each side: the first is its definition. *)
+    ignore
+      (Hashtbl.add t.locals ~key:ident ~data:name.loc : [ `Ok | `Duplicate ]));
   if is_arrow ty then add_function t name.loc;
   add
     t
@@ -267,6 +272,10 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       ~ident:(Some ident)
   | Any | Lit _ -> typed ()
   | Error ps -> List.iter ps ~f:recurse
+  | Or (p, q) ->
+    typed ();
+    recurse p;
+    recurse q
   | Deref p ->
     typed ();
     recurse p

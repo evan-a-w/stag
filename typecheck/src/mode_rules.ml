@@ -639,10 +639,36 @@ module Binding = struct
     Binding.of_mode cell, Binding.of_mode held
   ;;
 
-  let component ctx block path ~loc =
-    let mode, modality, shape = Mode_shape.follow block path in
-    ( Binding.of_mode (read ctx mode modality ~loc ~why:"it is bound to a part")
-    , shape )
+  let component ctx block (paths : Mode_shape.Path.t Nonempty_list.t) ~loc =
+    let part path =
+      let mode, modality, shape = Mode_shape.follow block path in
+      read ctx mode modality ~loc ~why:"it is bound to a part", shape
+    in
+    match paths with
+    | [ path ] ->
+      let mode, shape = part path in
+      Binding.of_mode mode, shape
+    | _ :: _ :: _ ->
+      let parts = Nonempty_list.to_list (Nonempty_list.map paths ~f:part) in
+      let join modes =
+        let joined = Ctx.fresh ctx in
+        List.iter modes ~f:(fun mode ->
+          Ctx.add
+            ctx
+            ~loc
+            (Mode.Var.submode
+               mode
+               joined
+               (reason ~loc "it is bound by an alternative of an or-pattern")));
+        joined
+      in
+      let mode = join (List.map parts ~f:fst) in
+      let shape =
+        Option.all (List.map parts ~f:snd)
+        |> Option.map ~f:(fun shapes ->
+          Mode_shape.join shapes ~whole:mode ~component:join)
+      in
+      Binding.of_mode mode, shape
   ;;
 
   let embedded ctx ~name ~loc =

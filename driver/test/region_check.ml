@@ -1016,6 +1016,10 @@ and block t ctx (allocation : Allocation.t) arg =
 and matches env (pattern : Typed.Pattern.t) (value : Value.t) =
   match pattern.desc, value with
   | Any, _ -> Some env
+  | Or (left, right), _ ->
+    (match matches env left value with
+     | Some env -> Some env
+     | None -> matches env right value)
   | Var ident, _ -> Some (Map.set env ~key:ident ~data:(ref (Value value)))
   | Lit lit, Prim_value value ->
     if [%equal: Sexp.t]

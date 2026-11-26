@@ -967,7 +967,7 @@ let k (u : unit) = .< fun (q : ptr[int] @ local) -> g <- .~(h ()) q >.
       val h : unit @ _ -> <ptr[int] @ 'm0 -> ptr[int] @ 'm1>{..'a} @ _ with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable gc <= 'm1
     let f = .< same ident (fun (p : ptr[int]) -> Ptr.make 0) >. in f
       val h : unit @ _ -> <ptr[int] @ 'm0 -> ptr[int] @ 'm1>{..'a} @ _ with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable gc <= 'm1
-    This is local, because it is annotated local (at t.stag:7:42-47), then q is passed to the function (at t.stag:7:22-67), then q is used (at t.stag:7:66-67), then it is passed to a function (at t.stag:7:57-67), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:27-54), then x is used (at t.stag:2:49-50), then the function returns it (at t.stag:2:27-54), then a function is used at a type with other modes, then the function returns it (at t.stag:7:57-67), then it is assigned to g (at t.stag:7:52-67), but must be at most global, because g is a toplevel (at t.stag:6:12-22)
+    This is local, because it is annotated local (at t.stag:7:42-47), then q is passed to the function (at t.stag:7:22-67), then q is used (at t.stag:7:66-67), then it is passed to a function (at t.stag:7:57-67), then x is passed to the function (at t.stag:2:27-54), then x is used (at t.stag:2:49-50), then the function returns it (at t.stag:2:27-54), then the function returns it (at t.stag:7:57-67), then it is assigned to g (at t.stag:7:52-67), but must be at most global, because g is a toplevel (at t.stag:6:12-22)
     |}]
 ;;
 
@@ -994,7 +994,7 @@ let h (u : unit) =
     val g : ptr[int]
     val h : unit @ _ -> <ptr[int] @ 'm0 -> (ptr[int] @ 'm2 -> unit @ _) @ 'm1>{..'a} @ _ with local <= 'm0 and 'm0 <= 'm1 and 'm2 <= global and nonportable gc <= 'm1
     This expression has type ptr[int] @ regional -> ptr[int] @ local but an expression was expected of type ptr[int] @ regional -> ptr[int]
-    Their modes differ: This is local, because it is annotated local (at t.stag:6:25-30), then q is passed to the function (at t.stag:6:5-77), then q is used (at t.stag:6:62-63), then it is passed to a function (at t.stag:6:58-63), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:27-54), then x is used (at t.stag:2:49-50), then the function returns it (at t.stag:2:27-54), then a function is used at a type with other modes, but must be at most global, because g is a toplevel (at t.stag:3:12-22), then it is assigned to g (at t.stag:6:67-77), then the function returns it (at t.stag:6:72-77), then a function is used at a type with other modes
+    Their modes differ: This is local, because it is annotated local (at t.stag:6:25-30), then q is passed to the function (at t.stag:6:5-77), then q is used (at t.stag:6:62-63), then it is passed to a function (at t.stag:6:58-63), then x is passed to the function (at t.stag:2:27-54), then x is used (at t.stag:2:49-50), then the function returns it (at t.stag:2:27-54), but must be at most global, because g is a toplevel (at t.stag:3:12-22), then it is assigned to g (at t.stag:6:67-77), then the function returns it (at t.stag:6:72-77)
     |}]
 ;;
 

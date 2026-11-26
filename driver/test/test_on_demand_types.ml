@@ -324,7 +324,7 @@ type t = A of al | B
     {|
     (Error
      ((t.stag:3:68-69
-       "This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:38-69), then x is used (at t.stag:3:61-62), then its type turned out to be t, which has pointers, then it is passed to a function (at t.stag:3:55-62), but must be at most global, because it is annotated global (at t.stag:3:46-52), then it is bound by an annotated let (at t.stag:3:46-52), then the function returns it (at t.stag:3:55-62), then a function is used at a type with other modes, then the function returns it (at t.stag:2:14-15), then x is used (at t.stag:2:14-15), then x is passed to the function (at t.stag:2:14-15), then a function is used at a type with other modes")
+       "This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:38-69), then x is used (at t.stag:3:61-62), then its type turned out to be t, which has pointers, then it is passed to a function (at t.stag:3:55-62), but must be at most global, because it is annotated global (at t.stag:3:46-52), then it is bound by an annotated let (at t.stag:3:46-52), then the function returns it (at t.stag:3:55-62), then the function returns it (at t.stag:2:14-15), then x is used (at t.stag:2:14-15), then x is passed to the function (at t.stag:2:14-15)")
       (t.stag:4:48-49
        "This expression has type string but an expression was expected of type int")))
     |}]

@@ -343,7 +343,16 @@ C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
 exception p                         (* only at the top of a match arm *)
+p | q                               (* or-pattern: the first that matches *)
 ```
+
+`|` binds loosest, so `A, x | B, x` is `(A, x) | (B, x)`, and is left
+associative; a match arm may start with one more `|`, as `| A | B -> e`.
+Alternatives nest anywhere (`Some (A n | B n)`), and both must bind the same
+variables, at the same types. A variable's mode is the join of its modes in
+each alternative: if it is bound to a local part in one, it is local. In an
+exception arm, `exception E | exception F` is `exception (E | F)`; an
+alternative mixing value and exception patterns is an error.
 
 ## Exceptions
 
@@ -490,8 +499,11 @@ cell[string, external]   cell['a, gc portable]   cell['a, 'm]
 `@` binds looser than `*` and tighter than `->`: `int * int @ local -> int`
 is `(int * int) @ local -> int`. A mode is written only on a binder, an
 annotation, or a function type's argument or result: `list[int @ local]` and
-`(int @ local) -> int` are errors. `stack_`, `exclave_` and `region_` extend as far
-right as `fun` does. `[@nontail]` follows an application, but not as a
+`(int @ local) -> int` are errors. `stack_`, `exclave_` and `region_` take a
+tuple's item: an application, or a `let`, `match` or `fun` (which extend as far
+right as they do). So `stack_ (Box.make 1), Box.make k` is a pair of a local
+and a global box, and `region_ f x; g y` runs only `f x` in the region
+(`region_ (f x; g y)` runs both). `[@nontail]` follows an application, but not as a
 constructor's argument, where it would read as applying to the construction:
 `C (f x [@nontail])`, not `C (f x) [@nontail]`.
 

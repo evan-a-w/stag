@@ -118,6 +118,16 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
   expr "g (Some (f x)) [@nontail]";
   expr "region_ let x = stack_ (Some 1) in f x";
   expr "(region_ (f x), region_ exclave_ g x)";
+  expr "stack_ (Box.make 1), Box.make k";
+  expr "region_ f x; g y";
+  expr "region_ (f x; g y)";
+  expr "exclave_ match x with A -> f x | B -> g x";
+  expr "p.* <- stack_ (Ptr.make 1)";
+  expr "region_ c <- Box.make 3";
+  expr "stack_ p.* <- v";
+  expr "exclave_ x <- v";
+  expr "region_ (c <- Box.make 3)";
+  expr "region_ f x <- v";
   [%expect
     {|
     (Stack (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
@@ -142,10 +152,24 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
     (Region
      (Let x () () (Stack (Construct Some ((Lit (Int 1)))))
       (App (Var f ()) (Var x ()))))
-    (Region
-     (Tuple
-      ((App (Var f ()) (Var x ()))
-       (Region (Exclave (App (Var g ()) (Var x ())))))))
+    (Tuple
+     ((Region (App (Var f ()) (Var x ())))
+      (Region (Exclave (App (Var g ()) (Var x ()))))))
+    (Tuple
+     ((Stack (App (Var Box.make ()) (Lit (Int 1))))
+      (App (Var Box.make ()) (Var k ()))))
+    (Seq (Region (App (Var f ()) (Var x ()))) (App (Var g ()) (Var y ())))
+    (Region (Seq (App (Var f ()) (Var x ())) (App (Var g ()) (Var y ()))))
+    (Exclave
+     (Match (Var x ())
+      (((Construct A ()) (App (Var f ()) (Var x ())))
+       ((Construct B ()) (App (Var g ()) (Var x ()))))))
+    (Store (Deref (Var p ())) (Stack (App (Var Ptr.make ()) (Lit (Int 1)))))
+    t.stag:1:0-9: region_ applies to one item, not to an assignment: write [region_ (x <- v)] to assign inside it
+    t.stag:1:0-10: stack_ applies to one item, not to an assignment: write [stack_ (x <- v)] to assign inside it
+    t.stag:1:0-10: exclave_ applies to one item, not to an assignment: write [exclave_ (x <- v)] to assign inside it
+    (Region (Assign c (App (Var Box.make ()) (Lit (Int 3)))))
+    t.stag:1:8-11: only a variable or a dereference can be assigned to
     |}]
 ;;
 

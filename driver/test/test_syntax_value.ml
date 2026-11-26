@@ -139,7 +139,7 @@ let%expect_test "the prelude's signature" =
         module Rest : sig
           type t = Closed | Open | Bind of string
         end
-        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Deref of ptr[t] | Poly_variant of ptr[string * option[t]] | Poly_record of {`fields : list[string * t]; `rest : Rest.t} | Exception of ptr[t]
+        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Deref of ptr[t] | Poly_variant of ptr[string * option[t]] | Poly_record of {`fields : list[string * t]; `rest : Rest.t} | Exception of ptr[t] | Or of ptr[t * t]
         val construct : string -> list[t] -> t
         val list : list[t] -> t
         val tuple : list[t] -> t
@@ -822,7 +822,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 122)
+    ((constructors 123)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Region
        prelude.Stag.Expr.Store prelude.Stag.Mode_expr.Atom.External
@@ -834,11 +834,11 @@ let%expect_test "constructors are made as the typechecker resolves them" =
        prelude.Stag.Mode_expr.Term.Const_if_static
        prelude.Stag.Mode_expr.Term.Meet prelude.Stag.Mode_expr.Term.Release
        prelude.Stag.Mode_expr.Term.Static_if_const prelude.Stag.Mode_expr.Var_at
-       prelude.Stag.Pattern.Deref prelude.Stag.Toplevel.External
-       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
-       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_decl.Param.Mode
-       prelude.Stag.Type_expr.Arg.Mode prelude.Stag.Type_ref.Path.Prelude
-       prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Pattern.Deref prelude.Stag.Pattern.Or
+       prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
+       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
+       prelude.Stag.Type_decl.Param.Mode prelude.Stag.Type_expr.Arg.Mode
+       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;
