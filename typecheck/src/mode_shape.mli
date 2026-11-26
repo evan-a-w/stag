@@ -15,11 +15,13 @@ module Step : sig
   [@@deriving sexp_of, equal]
 end
 
+(** Each component at least the mode of that component, if they are known: then
+    a component not there (of another constructor) is not in the value. *)
+type parts
+
 type t = private
   { whole : Mode.Var.t
-  ; parts : (Step.t * t) list option
-  (** Each at least the mode of that component, if they are known: then a
-      component not there (of another constructor) is not in the value. *)
+  ; parts : parts
   }
 [@@deriving sexp_of]
 

@@ -1152,6 +1152,73 @@ let above t =
   Queue.to_list found
 ;;
 
+module Above_each = struct
+  type node = t
+
+  type t =
+    { kept : node array
+    ; above : Bitset.t array
+    }
+
+  (* Each node's set is its own position if kept, and the sets of the nodes it
+     has edges to: the nodes are found in one search from all [sources], then
+     given their sets in the order the search finished them, which is after
+     those they lead to unless they form a cycle, so repeated until none
+     changes. *)
+  let create sources ~keep =
+    let position = Int.Table.create () in
+    let finished = Queue.create () in
+    let kept = Queue.create () in
+    let visit source =
+      let todo = Stack.singleton (source, ref source.succ) in
+      if not (Hashtbl.mem position source.id)
+      then (
+        Hashtbl.set position ~key:source.id ~data:(-1);
+        while not (Stack.is_empty todo) do
+          let node, edges = Stack.top_exn todo in
+          match !edges with
+          | edge :: rest ->
+            edges := rest;
+            if not (Hashtbl.mem position edge.hi.id)
+            then (
+              Hashtbl.set position ~key:edge.hi.id ~data:(-1);
+              Stack.push todo (edge.hi, ref edge.hi.succ))
+          | [] ->
+            ignore (Stack.pop_exn todo : node * edge list ref);
+            Queue.enqueue finished node
+        done)
+    in
+    List.iter sources ~f:visit;
+    let finished = Queue.to_array finished in
+    Array.iter finished ~f:(fun node ->
+      if keep node
+      then (
+        Hashtbl.set position ~key:node.id ~data:(Queue.length kept);
+        Queue.enqueue kept node));
+    let kept = Queue.to_array kept in
+    let sets = Int.Table.create () in
+    Array.iter finished ~f:(fun node ->
+      let set = Bitset.create (Array.length kept) in
+      let at = Hashtbl.find_exn position node.id in
+      if at >= 0 then Bitset.add set at;
+      Hashtbl.set sets ~key:node.id ~data:set);
+    let changed = ref true in
+    while !changed do
+      changed := false;
+      Array.iter finished ~f:(fun node ->
+        let set = Hashtbl.find_exn sets node.id in
+        List.iter node.succ ~f:(fun edge ->
+          if Bitset.union set (Hashtbl.find_exn sets edge.hi.id)
+          then changed := true))
+    done;
+    { kept
+    ; above =
+        Array.of_list_map sources ~f:(fun source ->
+          Hashtbl.find_exn sets source.id)
+    }
+  ;;
+end
+
 (* What a generic node's scheme adds to every instance, as a layout guarding it
    has pointers. *)
 let holding t =
