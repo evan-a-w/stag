@@ -28,8 +28,7 @@ module Private = struct
     let read () =
       Queue.fold
         all
-        ~init:
-          (String.Map.singleton "allocated_words" (allocated_words ()))
+        ~init:(String.Map.singleton "allocated_words" (allocated_words ()))
         ~f:(fun counts t ->
           Map.update counts t.name ~f:(fun count ->
             Option.value count ~default:0 + t.count))

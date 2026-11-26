@@ -662,7 +662,8 @@ let%expect_test "long files format in linear time" =
     ^ String.concat
         (List.init n ~f:(fun i -> sprintf "  `a%d = ((%d)); (* c%d *)\n" i i i))
     ^ "}\n");
-  [%expect {|
+  [%expect
+    {|
     ((lines 10000) (idempotent true)
      (last_lines
       ("let g4998 = 4998" "let f4999 x = match x with a, b -> (a, b) (* c4999 *)"

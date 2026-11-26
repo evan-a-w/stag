@@ -134,7 +134,8 @@ let%expect_test "semantic tokens of a large typechecked file take linear time" =
   in
   let growth = Work.Private.growth ~small:2500 ~large:10_000 tokens in
   print_s [%message (growth : Work.Private.Growth.t String.Map.t)];
-  [%expect {|
+  [%expect
+    {|
     0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
     17500 tokens
     0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
