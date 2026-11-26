@@ -324,6 +324,9 @@ let poison ty =
     ty
 ;;
 
+(* Each step of unification, and each variable or edge one looks through. *)
+let work = Work.create "types.unify"
+
 (* [lower <= upper] between type variables not bound yet ([sub_ty]): the two are
    to have the same structure, with their modes related by variance, once either
    is bound. Kept on both, by a watcher which settles them once its variable is
@@ -447,6 +450,7 @@ module Sub_edge = struct
       let class_ = Undoable_union_find.get state.class_ in
       let members =
         List.filter class_.members ~f:(fun member ->
+          Work.incr work;
           match member.state with
           | Unbound _ -> true
           | Generic | Link _ -> false)
@@ -467,6 +471,7 @@ module Sub_edge = struct
       List.filter
         (Undoable_union_find.get state.class_).members
         ~f:(fun member ->
+          Work.incr work;
           member.id <> var.id
           &&
           match member.state with
@@ -494,6 +499,7 @@ module Sub_edge = struct
 end
 
 let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
+  Work.incr work;
   match ty1, ty2 with
   | ( Type.TVar { id = id1; state = Link _; _ }
     , Type.TVar { id = id2; state = Link _; _ } )
@@ -999,6 +1005,7 @@ end
 let rec sub_ty' state sub ~join ~expected ~lower ~upper
   : (unit, Unification_error.t) Result.t
   =
+  Work.incr work;
   let rec is_join : Type.ty -> bool = function
     | TVar ({ state = Link ty; _ } as var) -> Sub_edge.is_join var || is_join ty
     | TVar var -> Sub_edge.is_join var
@@ -1181,6 +1188,7 @@ and settle fresh (state : Sub_edge.State.t) =
   let edges = List.rev (Undoable_union_find.get state.edges).edges in
   Undoable_union_find.set state.edges Sub_edge.Edges.empty;
   List.fold edges ~init:(Ok ()) ~f:(fun result (edge : Sub_edge.t) ->
+    Work.incr work;
     if edge.settled
     then result
     else (

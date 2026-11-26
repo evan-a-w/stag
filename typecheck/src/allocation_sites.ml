@@ -39,6 +39,8 @@ let frame t ~parent ~name ~loc ~ty =
   frame
 ;;
 
+let work = Work.create "typecheck.types"
+
 (* The locality nodes of the sides of the arrows in [ty] that aren't fixed, with
    where each first is; and every mode variable in [ty]. *)
 let sides start =
@@ -73,6 +75,7 @@ let sides start =
       true)
   in
   let rec ty (ty' : Type.ty) ~(steps : Typed.Allocation.Side.Step.t list) =
+    Work.incr work;
     let step ty' s = ty ty' ~steps:(s :: steps) in
     match ty' with
     | TVar { id; state = Link target; _ } -> if first id then ty target ~steps

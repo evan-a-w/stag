@@ -1,18 +1,19 @@
 open! Import
 open Mode_helpers
 
-let ratio ~small ~large ~within source =
-  let time n =
-    List.init 3 ~f:(fun _ ->
-      let start = Time_ns.now () in
-      assert (Result.is_ok (checked (source n)));
-      Time_ns.diff (Time_ns.now ()) start)
-    |> List.min_elt ~compare:Time_ns.Span.compare
-    |> Option.value_exn
-  in
-  let small_time = time small in
-  let large_time = time large in
-  Time_ns.Span.( < ) large_time (Time_ns.Span.scale small_time within)
+let growth ~small ~large source =
+  Work.Private.growth ~net_of:1 ~small ~large (fun n ->
+    snd
+      (Work.Private.measure (fun () ->
+         assert (Result.is_ok (checked (source n))))))
+;;
+
+let print_growth name ~small ~large source =
+  print_s
+    [%message
+      name
+        ~growth:
+          (growth ~small ~large source : Work.Private.Growth.t String.Map.t)]
 ;;
 
 let names n = List.init n ~f:(sprintf "x%d")
@@ -33,17 +34,21 @@ let%expect_test "many parameters take at most quadratic time" =
   in
   List.iter
     [ "first", first; "tuple", tuple; "curried", curried ]
-    ~f:(fun (name, source) ->
-      print_s
-        [%message
-          name
-            ~four_times_within_30_times_the_time:
-              (ratio ~small:50 ~large:200 ~within:30. source : bool)]);
+    ~f:(fun (name, source) -> print_growth name ~small:50 ~large:200 source);
   [%expect
     {|
-    (first (four_times_within_30_times_the_time true))
-    (tuple (four_times_within_30_times_the_time true))
-    (curried (four_times_within_30_times_the_time true))
+    (first
+     (growth
+      ((allocated_words Quadratic) (mode.graph Quadratic) (syntax.format Linear)
+       (typecheck.types Linear) (types.traversal Linear))))
+    (tuple
+     (growth
+      ((allocated_words Quadratic) (mode.graph Quadratic) (syntax.format Linear)
+       (typecheck.types Linear) (types.traversal Linear))))
+    (curried
+     (growth
+      ((allocated_words Quadratic) (mode.graph Quadratic) (syntax.format Linear)
+       (typecheck.types Linear) (types.traversal Linear))))
     |}]
 ;;
 
@@ -55,12 +60,14 @@ let%expect_test "a chain of lets takes linear time" =
          (List.init n ~f:(fun i -> sprintf "let a%d = a%d in\n" (i + 1) i)))
       n
   in
-  print_s
-    [%message
-      ""
-        ~four_times_within_8_times_the_time:
-          (ratio ~small:500 ~large:2000 ~within:8. chain : bool)];
-  [%expect {| (four_times_within_8_times_the_time true) |}]
+  print_growth "let" ~small:500 ~large:2000 chain;
+  [%expect
+    {|
+    (let
+     (growth
+      ((allocated_words Linear) (mode.graph Linear) (typecheck.types Linear)
+       (types.traversal Linear) (types.unify Linear))))
+    |}]
 ;;
 
 let chain ~prelude ~step n =
@@ -78,16 +85,17 @@ let%expect_test "chains of values each holding the one before take linear time" 
     ; ("list", "", fun i -> sprintf "Cons (Box.make (1, a%d))" i)
     ]
     ~f:(fun (name, prelude, step) ->
-      print_s
-        [%message
-          name
-            ~four_times_within_8_times_the_time:
-              (ratio ~small:200 ~large:800 ~within:8. (chain ~prelude ~step)
-               : bool)]);
+      print_growth name ~small:200 ~large:800 (chain ~prelude ~step));
   [%expect
     {|
-    (tuple (four_times_within_8_times_the_time true))
-    (list (four_times_within_8_times_the_time true))
+    (tuple
+     (growth
+      ((allocated_words Linear) (mode.graph Linear) (typecheck.types Linear)
+       (types.traversal Linear) (types.unify Linear))))
+    (list
+     (growth
+      ((allocated_words Linear) (mode.graph Linear) (typecheck.types Linear)
+       (types.traversal Linear) (types.unify Linear))))
     |}]
 ;;
 
@@ -99,15 +107,17 @@ let%expect_test "chains of records and closures take at most quadratic time" =
     ; "closure", "", sprintf "fun (u : unit) -> a%d"
     ]
     ~f:(fun (name, prelude, step) ->
-      print_s
-        [%message
-          name
-            ~four_times_within_30_times_the_time:
-              (ratio ~small:50 ~large:200 ~within:30. (chain ~prelude ~step)
-               : bool)]);
+      print_growth name ~small:50 ~large:200 (chain ~prelude ~step));
   [%expect
     {|
-    (record (four_times_within_30_times_the_time true))
-    (closure (four_times_within_30_times_the_time true))
+    (record
+     (growth
+      ((allocated_words Quadratic) (mode.graph Linear) (syntax.format Linear)
+       (typecheck.types Quadratic) (types.traversal Quadratic)
+       (types.unify Quadratic))))
+    (closure
+     (growth
+      ((allocated_words Quadratic) (mode.graph Quadratic) (syntax.format Linear)
+       (typecheck.types Linear) (types.traversal Quadratic) (types.unify Linear))))
     |}]
 ;;

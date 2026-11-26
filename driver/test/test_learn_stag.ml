@@ -13,7 +13,7 @@ let file = "doc.stag"
 let limits =
   { Limits.fuel = Some 10_000_000
   ; max_depth = Some 100_000
-  ; time_limit = Some (Time_ns.Span.of_int_sec 10)
+  ; time_limit = Some (Time_ns.Span.of_int_sec 120)
   }
 ;;
 

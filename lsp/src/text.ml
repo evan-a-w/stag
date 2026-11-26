@@ -85,6 +85,9 @@ let length t ~pos ~len =
   walk pos 0
 ;;
 
+(* Each character a position is found through. *)
+let work = Work.create "lsp.text"
+
 let position_of_offset t offset =
   let offset = Int.clamp_exn offset ~min:0 ~max:(String.length t.contents) in
   let line =
@@ -101,6 +104,7 @@ let position_of_offset t offset =
   let start = t.line_starts.(line) in
   (* Units of the characters that start before [offset]. *)
   let rec walk pos units =
+    Work.incr work;
     if pos >= offset
     then units
     else (
