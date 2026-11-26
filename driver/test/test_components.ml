@@ -208,6 +208,43 @@ let g (n : int) = let p = stack_ (Ptr.make n, Ptr.make n) in match p with (_, b)
     {| This is local, because it is allocated by [stack_] (at t.stag:3:46-56), then p is used (at t.stag:3:67-68), then b is used (at t.stag:3:84-85), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:18-85) |}]
 ;;
 
+let%expect_test "[stack_ e1, e2] allocates only [e1] locally, also in a \
+                 scrutinee"
+  =
+  Mode_helpers.allocations
+    {|
+let pair (k : int) =
+  let p = (stack_ (Ptr.make 1), Ptr.make k) in
+  match (k, p) with (_, (_, b)) -> b
+let direct (k : int) =
+  match (k, (stack_ (Ptr.make 1), Ptr.make k)) with (_, (_, b)) -> b
+let wrapped (k : int) =
+  let p = (stack_ (Ptr.make 1), Ptr.make k) in
+  match Some p with Some (_, b) -> b | None -> Ptr.make 0
+|};
+  [%expect
+    {|
+    val pair : int @ _ -> ptr[int @@ 'm1] @ 'm0 with portable <= 'm1 and nonportable gc <= 'm0
+    val direct : int @ _ -> ptr[int @@ 'm1] @ 'm0 with portable <= 'm1 and nonportable gc <= 'm0
+    val wrapped : int @ _ -> ptr[int @@ 'm1] @ 'm0 with portable <= 'm1 and nonportable gc <= 'm0
+    t.stag:3:18-30 Pointer in pair: region
+    t.stag:3:32-42 Pointer in pair: heap
+    t.stag:6:20-32 Pointer in direct: region
+    t.stag:6:34-44 Pointer in direct: heap
+    t.stag:8:18-30 Pointer in wrapped: region
+    t.stag:8:32-42 Pointer in wrapped: heap
+    t.stag:9:47-57 Pointer in wrapped: heap, caller's region if res is local
+    |}];
+  check
+    {|
+let first (k : int) =
+  let p = (stack_ (Ptr.make 1), Ptr.make k) in
+  match (k, p) with (_, (a, _)) -> a
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:11-30), then it is part of the value (at t.stag:3:11-30), then p is used (at t.stag:4:12-13), then a is used (at t.stag:4:35-36), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:2-4:36) |}]
+;;
+
 let%expect_test "closures capture the whole" =
   check
     (ext
