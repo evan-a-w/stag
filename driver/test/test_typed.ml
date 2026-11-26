@@ -72,7 +72,7 @@ let use = let pair x = (x, x) in (id 1, id true, pair (), pair)
 
 let%expect_test "constructors and fields in modules" =
   print
-    {|
+    {|[@@@warning "-non-exhaustive"]
 module M = struct
   type t = A | B of int | C of bool * int
   type r = {x : int; y : bool}
@@ -634,7 +634,7 @@ let captured x = .~(.<captured x>.)
 ;;
 
 let%expect_test "literals that look like placeholders" =
-  print {|
+  print {|[@@@warning "-non-exhaustive"]
 let lits s = match s with "\0000" -> ('\000', "\0003")
 |};
   [%expect

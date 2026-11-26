@@ -322,7 +322,7 @@ let%expect_test "a toplevel whose evaluation an exception abandons is \
   let t =
     Option.value_exn
       (typecheck
-         {|
+         {|[@@@warning "-non-exhaustive"]
 let head ty =
   match Stag.Type.expr ty with
   | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r

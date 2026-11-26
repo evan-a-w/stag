@@ -1022,7 +1022,7 @@ let%expect_test "generated syntax the parser does not make" =
   Round_trip.program program;
   print_string (Printer.program program);
   [%expect
-    {|
+    {|[@@@warning "-non-exhaustive"]
     ((Type
       ((name t) (params ())
        (kind

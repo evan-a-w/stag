@@ -78,7 +78,7 @@ let reflect =
   {|
 let head ty =
   match Stag.Type.expr ty with
-  | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
+  | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r [@@warning "-non-exhaustive"]
 let decl ty = Stag.Type.decl (head ty)
 |}
 ;;

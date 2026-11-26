@@ -337,7 +337,7 @@ let%expect_test "generated code's unqualified fields resolve by type" =
      naming fields by name rather than by ref: [s] shadows [r]'s [x]. *)
   File_check.check
     ~run:true
-    {|
+    {|[@@@warning "-non-exhaustive"]
 let fst p = match p with (a, _) -> a
 
 let getter ty r =

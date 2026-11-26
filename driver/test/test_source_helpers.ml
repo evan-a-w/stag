@@ -61,7 +61,7 @@ let x = 1
 ;;
 
 let%expect_test "runtime errors" =
-  run {|
+  run {|[@@@warning "-non-exhaustive"]
 type ab = A | B
 let a = 1
 let b = match B with A -> 0

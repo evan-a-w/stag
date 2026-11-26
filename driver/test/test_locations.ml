@@ -368,7 +368,7 @@ let%expect_test "staging" =
   (* the [a] *)
   check {|let x = .~(.<1>.).{a}|};
   (* the splice, failing at the match *)
-  check {|let x = .~(match 1 with 2 -> .<1>.)|};
+  check {|let x = .~(match 1 with 2 -> .<1>.) [@@warning "-non-exhaustive"]|};
   [%expect
     {|
     ((Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0)) @

@@ -152,7 +152,7 @@ let%expect_test "generated functions, and constructors of one tuple argument" =
   check
     ~run:true
     (generators
-     ^ {|
+     ^ {|[@@@warning "-non-exhaustive"]
 let pair = Cons (Box.make ( (Stag.Expr.int 1, Cons (Box.make ( (Stag.Expr.int 2, Nil))))))
 include .~(value "some" (Stag.Expr.construct "Some" pair))
 include .~(value "swap"
@@ -1645,7 +1645,7 @@ end
 let%expect_test "generated record updates, by name and by ref" =
   let program decls =
     generators
-    ^ {|
+    ^ {|[@@@warning "-non-exhaustive"]
 let head ty = match Stag.Type.expr ty with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
 let first_field ty =
   match Stag.Type.decl (head ty) with

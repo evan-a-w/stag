@@ -13,7 +13,7 @@ type t =
   ; whole_file : bool
   ; message : string
   ; notes : Note.t list
-  ; warning : bool
+  ; warning : bool [@sexp.bool]
   }
 [@@deriving sexp_of]
 

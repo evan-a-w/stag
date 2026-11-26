@@ -252,7 +252,7 @@ let%expect_test "test results" =
   let contents =
     {x|let%expect_test "error" =
   print_string "before\n  indented";
-  match 2 with 1 -> ()
+  match 2 with 1 -> () [@@warning "-non-exhaustive"]
 
 let%expect_test "different" =
   let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; print_string ""

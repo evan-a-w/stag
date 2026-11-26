@@ -2082,15 +2082,16 @@ and match_type
         have been known only from an annotation. *)
      ()
    | _ ->
-     Variant_match.close
-       t
-       scope
-       ~scrutinee:scrutinee.ty
-       ~loc
-       (List.map cases ~f:fst)
-     |> Result.iter_error ~f:(fun error ->
-       patterns_failed := true;
-       Scope.report scope error));
+     counting_errors (fun () ->
+       Variant_match.close
+         t
+         scope
+         ~scrutinee:scrutinee.ty
+         ~loc
+         (List.map cases ~f:fst)
+       |> Result.iter_error ~f:(fun error ->
+         patterns_failed := true;
+         Scope.report scope error)));
   (match expr with
    | Syntax _ when not (!patterns_failed || Type.is_error scrutinee.ty) ->
      report_coverage

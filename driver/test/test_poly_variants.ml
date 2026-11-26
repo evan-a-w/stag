@@ -175,7 +175,7 @@ let later_cases v k = match v with `A -> 1 | other -> k other | `B -> 2
 
 let%expect_test "nested variant patterns stay open" =
   check
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type option['a] = None | Some of 'a
 let pair p = match p with (`A, `B) -> 1
 let inner v = match v with `A `B -> 1

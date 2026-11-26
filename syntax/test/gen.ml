@@ -438,7 +438,7 @@ and toplevel t : Toplevel.t =
      | 11 when t.size > 0 ->
        t.size <- t.size - 1;
        (match toplevel t with
-        | { txt = Attribute _; _ } as floating -> floating
+        | { txt = Attribute _ as floating; _ } -> floating
         | toplevel -> Attributed (toplevel, attribute t))
      | 12 -> Attribute (attribute t)
      | _ -> Let (name t, [], Annot.none, expr t))

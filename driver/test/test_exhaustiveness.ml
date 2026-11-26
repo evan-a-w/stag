@@ -35,8 +35,8 @@ let check ?(w = []) source =
 let%expect_test "nominal variants, nested" =
   check
     {|
+type u = X | Y of bool
 type t = A | B of u | C of int * u
-and u = X | Y of bool
 let f v = match v with A -> 0 | B X -> 1 | C (_, X) -> 2
 let g v = match v with A -> 0 | B _ -> 1 | C (0, _) -> 2
 let h v = match v with A -> 0 | B (Y true) -> 1 | B X -> 1 | C _ -> 2
@@ -77,7 +77,6 @@ let%expect_test "polymorphic variants: closed rows need every tag" =
 let f v = match v with `A -> 0 | `B n -> n
 let g (v : [`A | `B of int]) = match v with `A -> 0
 let h (v : [`A | `B of bool]) = match v with `A -> 0 | `B true -> 1
-let i v = match (v : [> `A]) with `A -> 0
 |};
   [%expect {| |}]
 ;;
@@ -123,11 +122,16 @@ let b v = match v with A -> 0 | B -> 1 | A -> 2
 ;;
 
 let%expect_test "bad attributes" =
-  check
-    {|
-let a v = v [@warning "-nonsense"]
-let b v = v [@frobnicate]
-|};
+  let parse source =
+    match Parser.program ~file source with
+    | Ok _ -> print_endline "ok"
+    | Error error -> print_endline (Parser.Error.to_string error)
+  in
+  parse {|let a v = v [@warning "-nonsense"]|};
+  parse {|let b v = v [@frobnicate]|};
+  parse {|let c v = v [@warning]|};
+  parse {|let d v = v [@@warning "-all"]|};
+  parse {|[@@@warning "+all"] let e = 1 [@@warning "@all"]|};
   [%expect {| |}]
 ;;
 

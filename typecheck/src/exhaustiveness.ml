@@ -400,6 +400,10 @@ let is_empty_variant ~variant_constructors scrutinee =
     (match variant_constructors name with
      | Some [] -> true
      | Some (_ :: _) | None -> false)
+  | TVariant _ ->
+    (match Variant_row.of_ty scrutinee with
+     | { tags = []; open_ = false } -> true
+     | { tags = _ :: _; _ } | { open_ = true; _ } -> false)
   | _ -> false
 ;;
 
