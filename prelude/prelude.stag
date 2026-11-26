@@ -248,6 +248,7 @@ module Stag = struct
       | Poly_variant of ptr[string * option[t]]
       | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
       | Exception of ptr[t]
+      | Or of ptr[t * t]
 
     let construct name args = Construct (Path.Name name, args)
 

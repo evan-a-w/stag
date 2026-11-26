@@ -110,6 +110,11 @@ module Kind : sig
     | Misplaced_exception_pattern
     | Match_without_value_cases
     | Duplicate_pattern_variable of string
+    | Or_pattern_variable_missing of string
+    | Or_pattern_variable_type of
+        { name : string
+        ; error : Unification_error.t
+        }
     | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Assign_to_immutable of string

@@ -216,12 +216,13 @@ module Binding : sig
     -> loc:Loc.t
     -> t * t
 
-  (** Bound by a pattern to the part of a block at the end of the path: with the
-      modes of its own components, if known. *)
+  (** Bound by a pattern to the part of a block at the end of the path, or to
+      any of the parts at the paths of an or-pattern's alternatives (at the join
+      of their modes): with the modes of its own components, if known. *)
   val component
     :  Ctx.t
     -> Mode_shape.t
-    -> Mode_shape.Path.t
+    -> Mode_shape.Path.t Nonempty_list.t
     -> loc:Loc.t
     -> t * Mode_shape.t option
 

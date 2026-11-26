@@ -63,6 +63,7 @@ module Pattern : sig
           }
       | Exception of t
       (** Only written, and not at the top of a case, which is misplaced. *)
+      | Or of t * t
   end
 
   val view : t -> View.t

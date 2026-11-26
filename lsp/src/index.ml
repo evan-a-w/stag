@@ -113,6 +113,9 @@ module Syntax_at = struct
        | Closed | Open -> ());
       List.iter fields ~f:(fun (_, p) -> pattern t p)
     | Exception p -> pattern t p
+    | Or (p, q) ->
+      pattern t p;
+      pattern t q
   ;;
 
   let rec expr t (e : Syntax.Expr.t) =
@@ -267,6 +270,10 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       ~ident:(Some ident)
   | Any | Lit _ -> typed ()
   | Error ps -> List.iter ps ~f:recurse
+  | Or (p, q) ->
+    typed ();
+    recurse p;
+    recurse q
   | Deref p ->
     typed ();
     recurse p

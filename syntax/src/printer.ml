@@ -517,6 +517,15 @@ and pattern_desc roots ~prec (p : Pattern.t) =
      | Bind name -> braces ~trailing:false (fields @ [ text (".." ^ name.txt) ]))
   | Exception p ->
     paren_if (prec > 1) (text "exception " ^^ pattern roots ~prec:1 p)
+  | Or (p, q) ->
+    let right =
+      match q.txt with
+      | Or _ -> parens (pattern roots ~prec:0 q)
+      | _ -> pattern roots ~prec:0 q
+    in
+    paren_if
+      (prec > 0)
+      (group (pattern roots ~prec:0 p ^^ line ^^ text "| " ^^ right))
 
 and pattern_doc roots p = pattern roots ~prec:0 p
 
