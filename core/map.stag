@@ -2,18 +2,19 @@
    to each operation ([compare a b] negative, zero or positive as [a] is
    less than, equal to or greater than [b]), as [Int.compare].
 
-   ['p] bounds the provenance of the values: a [t[string, string, external]]
-   may hold C strings, and reading one gives an external value, while a
-   [t[string, string, gc]] holds only values the GC manages, and is usable as
-   the former. The keys are always the GC's, so a comparison of GC values
-   orders any map. An operation returning a map makes its nodes where its caller
-   uses the result: on the heap, or in the caller's region. *)
+   ['p] bounds the provenance of the keys and values: a
+   [t[string, string, external]] may hold C strings, and reading one gives an
+   external value, while a [t[string, string, gc]] holds only values the GC
+   manages, and is usable as the former. The comparison takes keys of the
+   map's provenance, as [String.compare] takes any. An operation returning a
+   map makes its nodes where its caller uses the result: on the heap, or in
+   the caller's region. *)
 
 type t['k, 'v, 'p : mode] = Empty | Node of box[node['k, 'v, 'p]]
 
 type node['k, 'v, 'p : mode] = {
   left : t['k, 'v, 'p];
-  key : 'k @@ gc;
+  key : 'k @@ 'p;
   value : 'v @@ 'p;
   right : t['k, 'v, 'p];
   height : int;

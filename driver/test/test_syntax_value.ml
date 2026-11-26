@@ -270,9 +270,9 @@ let%expect_test "the prelude's signature" =
       end
       module Lru : sig
         type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
-        type entry['a, 'b, 'm0 : mode] = { key : 'a @@ gc; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local -> ('a @ local -> int) @ local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
-        val create : int -> ('a @ local -> ('a @ local -> int) @ local) -> t['a, 'b, 'm0]
+        type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ external local -> ('a @ external local -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        val create : int -> ('a @ external local -> ('a @ external local -> int) @ external local) -> t['a, 'b, 'm0]
         val length : t['a, 'b, 'm0] -> int
         module Internal : sig
           val unlink : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
@@ -289,7 +289,7 @@ let%expect_test "the prelude's signature" =
       end
       module Map : sig
         type t['a, 'b, 'm0 : mode] = Empty | Node of box[node['a, 'b, 'm0]]
-        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a @@ gc; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
+        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a @@ 'm0; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
         val empty : t['a, 'b, 'm0]
         val is_empty : t['a, 'b, 'm0] -> bool
         val height : t['a, 'b, 'm0] -> int

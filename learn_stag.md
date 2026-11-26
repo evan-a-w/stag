@@ -760,12 +760,14 @@ let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage(
 
 `Core.Map` (a persistent AVL tree) and `Core.Lru` (a cache of nodes linked by
 pointers, indexed by a map) are written once for every mode. Their last
-parameter is the provenance of the values held: a map of GC strings is also
-one of possibly external strings (it is covariant), but a cache, being
-mutable, is invariant. What they build goes where the caller wants it, as
-their builders return it with `exclave_`, and `int` values cross every axis.
-A pair's components keep their own modes, so `concat` can match `(l, r)`
-without either map's mode constraining the other's.
+parameter is the provenance of the keys and values held: a map of GC
+strings is also one of possibly external strings (it is covariant), but a
+cache, being mutable, is invariant. What they build goes where the caller
+wants it, as their builders return it with `exclave_`, and `int` values
+cross every axis. A comparison takes keys of any provenance, as
+`Core.String.compare` does. A pair's components keep their own modes, so
+`concat` can match `(l, r)` without either map's mode constraining the
+other's.
 A value used at compile time and lifted into code must be `portable`, and
 at most `gc` (static data can't refer outside the GC heap); the code then
 holds it as a constant (`const static`).
