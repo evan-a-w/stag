@@ -8,6 +8,7 @@ type t =
   | Unit
   | Tuple of t list
   | Ptr of t ref
+  | Box of t
   | Construct of Typed.Constructor_ref.t * t list
   | Record of Typed.Record_type.t * t array
   | Poly_record of t String.Map.t
@@ -50,10 +51,7 @@ let of_prim : Prim.Value.t -> t = function
 let string_list value =
   let rec loop acc : t -> _ = function
     | Construct (_, []) -> This (Prim.Value.String_list (List.rev acc))
-    | Construct (_, [ Ptr cell ]) ->
-      (match !cell with
-       | Tuple [ String s; rest ] -> loop (s :: acc) rest
-       | _ -> Null)
+    | Construct (_, [ Box (Tuple [ String s; rest ]) ]) -> loop (s :: acc) rest
     | _ -> Null
   in
   loop [] value
@@ -68,6 +66,7 @@ let to_prim : t -> Prim.Value.t or_null = function
   | Construct _ as value -> string_list value
   | Tuple _
   | Ptr _
+  | Box _
   | Record _
   | Poly_record _
   | Poly_variant _
@@ -115,12 +114,12 @@ let sexp_of_t value =
         if List.exists pointers ~f:(phys_equal cell)
         then Atom "<cycle>"
         else List [ Atom "Ptr"; sexp (depth + 1) (cell :: pointers) !cell ]
-      | Construct ({ name; _ }, [ Ptr ({ contents = Tuple [ _; _ ] } as cell) ])
-        when String.equal name (Prelude_path.canonical "Cons")
-             && not (List.exists pointers ~f:(phys_equal cell)) ->
-        (match sexp (depth + 1) (cell :: pointers) !cell with
+      | Box value -> List [ Atom "Box"; sexp_of_t value ]
+      | Construct ({ name; _ }, [ Box (Tuple [ _; _ ] as cell) ])
+        when String.equal name (Prelude_path.canonical "Cons") ->
+        (match sexp_of_t cell with
          | List (Atom "Tuple" :: values) -> List (Atom "Cons" :: values)
-         | payload -> List [ Atom "Cons"; List [ Atom "Ptr"; payload ] ])
+         | payload -> List [ Atom "Cons"; List [ Atom "Box"; payload ] ])
       | Construct ({ name; _ }, values) ->
         List
           (Atom (Prelude_path.to_string_hum name)
@@ -194,6 +193,9 @@ let to_string_hum ?max_length value =
         add "Ptr.make ";
         argument !cell;
         pointers := previous)
+    | Box value ->
+      add "Box.make ";
+      argument value
     | Construct ({ name; _ }, []) -> add (Prelude_path.to_string_hum name)
     | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
       add (Prelude_path.to_string_hum name);
@@ -246,7 +248,7 @@ let to_string_hum ?max_length value =
     match value with
     | Construct (_, []) | Poly_variant (_, Unit) -> value_ value
     | Ptr cell when List.exists !pointers ~f:(phys_equal cell) -> value_ value
-    | Ptr _ | Construct _ | Poly_variant _ ->
+    | Ptr _ | Box _ | Construct _ | Poly_variant _ ->
       add "(";
       value_ value;
       add ")"

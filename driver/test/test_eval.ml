@@ -164,7 +164,7 @@ type s = {x : bool}
   List.iter
     [ "N.r", "{x = 1; y = Some (Ptr.make {x = -2; y = None})}"
     ; "N.t", "N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"
-    ; "list[N.t]", "Cons (Ptr.make (N.A {x = 5; y = None}, Nil))"
+    ; "list[N.t]", "Cons (Box.make (N.A {x = 5; y = None}, Nil))"
     ; "[`C of N.r]", "`C {x = 6; y = None}"
     ]
     ~f:(fun (ty, e) ->
@@ -183,8 +183,8 @@ type s = {x : bool}
      ("{N.x = 1; y = Some (Ptr.make {N.x = -2; y = None})}"))
     (("N.B ({`a = {N.x = 3; y = None}}, {N.x = 4; y = None})")
      ("N.B ({`a = {N.x = 3; y = None}}, {N.x = 4; y = None})"))
-    (("Cons (Ptr.make (N.A {N.x = 5; y = None}, Nil))")
-     ("Cons (Ptr.make (N.A {N.x = 5; y = None}, Nil))"))
+    (("Cons (Box.make (N.A {N.x = 5; y = None}, Nil))")
+     ("Cons (Box.make (N.A {N.x = 5; y = None}, Nil))"))
     (("`C {N.x = 6; y = None}") ("`C {N.x = 6; y = None}"))
     |}]
 ;;

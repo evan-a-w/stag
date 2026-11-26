@@ -23,11 +23,11 @@ let g u = (fun (x : int) -> x : int -> int)
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val a : string
     val b : int
-    val c : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
-    val d : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1
-    val e : string @ 'm0 -> int @ 'm1 with local <= 'm0
-    val f : int @ 'm0 -> int @ 'm1
-    val g : 'a @ 'm0 -> (int -> int) @ 'm1
+    val c : 'a @ _ -> string @ 'm0 with external <= 'm0
+    val d : 'a @ _ -> string @ 'm0 with nonportable gc <= 'm0
+    val e : string @ 'm0 -> int @ _ with local <= 'm0
+    val f : int @ _ -> int @ _
+    val g : 'a @ _ -> (int -> int) @ _
     |}];
   show
     {|
@@ -35,17 +35,17 @@ let ext (x : string) = let y @ external = x in y
 let bad u = (ext "s" @ gc)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:3:13-20), but must be at most gc, because it is annotated gc (at t.stag:3:23-25) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:3:13-20), but must be at most gc, because it is annotated gc (at t.stag:3:23-25) |}];
   show {|
 let bad = (Int.to_string 1 : string @ const)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:2:11-26), but must be at most const, because it is annotated const (at t.stag:2:38-43) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:2:11-26), but must be at most const, because it is annotated const (at t.stag:2:38-43) |}];
   show {|
 let bad = (1 : string)
 |};
   [%expect
-    {| This expression has type string but an expression was expected of type int |}]
+    {| This expression has type int but an expression was expected of type string |}]
 ;;
 
 let%expect_test "an annotation only checks" =
@@ -59,7 +59,7 @@ let t (u : unit) = exclave_ (stack_ (Ptr.make 1) @ local)
     {|
     val one : int
     val n : int
-    val t : unit @ 'm0 -> ptr[int @@ 'm2] @ 'm1 with nonportable gc local <= 'm1
+    val t : unit @ _ -> ptr[int @@ _] @ 'm0 with nonportable gc local <= 'm0
     |}];
   show {|
 let s u = (stack_ (Ptr.make 1) @ local)
@@ -79,7 +79,7 @@ let erased = Stag.Code.erase .< (Int.add 1 2 : int @ portable) >.
   [%expect
     {|
     val q : <int>{..'a}
-    val r : <string @ 'm0 -> int @ 'm1>{..'a} with local <= 'm0
+    val r : <string @ 'm0 -> int @ _>{..'a} with local <= 'm0
     val s : int
     val erased : Stag.Expr.t
     |}]

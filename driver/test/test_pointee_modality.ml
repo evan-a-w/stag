@@ -81,7 +81,7 @@ let gc_only (p : ptr[string @@ external]) = let s @ gc = first p in s
 |}
     );
   [%expect
-    {| This is external, because it is read from a pointer's cell, which may hold it (at t.stag:4:56-57), then s is used (at t.stag:4:61-62), then the function returns it (at t.stag:4:42-62), then the function types are unified, then the function returns it (at t.stag:5:57-64), then it is bound by an annotated let (at t.stag:5:52-54), but must be at most gc, because it is annotated gc (at t.stag:5:52-54) |}]
+    {| This is external, because it is read from a pointer's cell, which may hold it (at t.stag:4:56-57), then s is used (at t.stag:4:61-62), then the function returns it (at t.stag:4:42-62), then a function is used at a type with other modes, then the function returns it (at t.stag:5:57-64), then it is bound by an annotated let (at t.stag:5:52-54), but must be at most gc, because it is annotated gc (at t.stag:5:52-54) |}]
 ;;
 
 let%expect_test "[Ptr.make] infers what its cell holds" =
@@ -100,10 +100,10 @@ let weak_ext = Ptr.make (ext "a")
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val from_init : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with external <= 'm2 and nonportable gc <= 'm1
-    val from_store : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with external <= 'm2 and nonportable gc <= 'm1
-    val from_read : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with 'm2 <= gc and nonportable gc <= 'm1
-    val unconstrained : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with nonportable gc <= 'm1
+    val from_init : 'a @ _ -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0
+    val from_store : 'a @ _ -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0
+    val from_read : 'a @ _ -> ptr[string @@ 'm1] @ 'm0 with 'm1 <= gc and nonportable gc <= 'm0
+    val unconstrained : 'a @ _ -> ptr[string @@ _] @ 'm0 with nonportable gc <= 'm0
     val weak : ptr[string]
     val weak_ext : ptr[string @@ external]
     |}];
@@ -115,14 +115,14 @@ let weak = Ptr.make "a"
 let later u = weak.* <- ext "b"
 |});
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:5:24-31), then it is stored into a cell, which holds only what fits its modality (at t.stag:5:24-31), but must be at most gc, because weak is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:24-31), then it is stored into a cell, which holds only what fits its modality (at t.stag:5:24-31), but must be at most gc, because weak is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
   provenance
     (ext
      ^ {|
 let clash u = let p = Ptr.make (ext "a") in let s @ gc = p.* in s
 |});
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:31-40), then it is passed to a function (at t.stag:4:22-40), then the function types are unified, then Ptr.make holds it, then it is read from a pointer's cell, which may hold it (at t.stag:4:57-60), then it is dereferenced (at t.stag:4:57-60), then it is bound by an annotated let (at t.stag:4:52-54), but must be at most gc, because it is annotated gc (at t.stag:4:52-54) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:4:31-40), then it is passed to a function (at t.stag:4:22-40), then a function is used at a type with other modes, then Ptr.make holds it, then it is read from a pointer's cell, which may hold it (at t.stag:4:57-60), then it is dereferenced (at t.stag:4:57-60), then it is bound by an annotated let (at t.stag:4:52-54), but must be at most gc, because it is annotated gc (at t.stag:4:52-54) |}]
 ;;
 
 let%expect_test "stores into a record held by a [ptr[t @@ external]]" =
@@ -143,11 +143,11 @@ let rename_any (p : ptr[r @@ 'm]) s = p.*.name <- s
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { name : string; n : int }
     val cell : ptr[r @@ external]
-    val rename : 'a @ 'm0 -> unit @ 'm1
-    val renumber : 'a @ 'm0 -> unit @ 'm1
+    val rename : 'a @ _ -> unit @ _
+    val renumber : 'a @ _ -> unit @ _
     val plain : ptr[r]
-    val renumber_plain : 'a @ 'm0 -> unit @ 'm1
-    val rename_any : ptr[r @@ 'm1] @ 'm0 -> (string @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val renumber_plain : 'a @ _ -> unit @ _
+    val rename_any : ptr[r @@ 'm1] @ 'm0 -> (string @ 'm3 -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     |}];
   provenance
     (ext
@@ -158,7 +158,7 @@ let rename_plain u = plain.*.name <- ext "b"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:37-44), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:37-44), but must be at most gc, because plain is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:37-44), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:37-44), but must be at most gc, because plain is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
 ;;
 
 let%expect_test "stores through an external pointer to a gc cell" =
@@ -171,7 +171,7 @@ let f u = let p = ext (Ptr.make "a") in p.* <- Int.to_string 1
   [%expect
     {|
     val ext : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val f : 'a @ 'm0 -> unit @ 'm1
+    val f : 'a @ _ -> unit @ _
     |}]
 ;;
 
@@ -219,13 +219,13 @@ let use u =
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val get : ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
-    val set : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
-    val swap : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2
+    val get : ptr['a @@ 'm0] @ _ -> 'a @ 'm1 with 'm0 <= 'm1
+    val set : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val swap : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] @ _ -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2
     val ints : ptr[int]
     val strings : ptr[string @@ external]
     val plain : ptr[string]
-    val use : 'a @ 'm0 -> int @ 'm1
+    val use : 'a @ _ -> int @ _
     |}];
   provenance
     (ext
@@ -236,7 +236,7 @@ let bad u = let g @ gc = get strings in g
 |}
     );
   [%expect
-    {| This is external, because the types are unified, then it is read from a pointer's cell, which may hold it (at t.stag:4:12-15), then it is dereferenced (at t.stag:4:12-15), then the function returns it (at t.stag:4:12-15), then the function types are unified, then the function returns it (at t.stag:6:25-36), then it is bound by an annotated let (at t.stag:6:20-22), but must be at most gc, because it is annotated gc (at t.stag:6:20-22) |}];
+    {| This is external, because the types are unified, then it is read from a pointer's cell, which may hold it (at t.stag:4:12-15), then it is dereferenced (at t.stag:4:12-15), then the function returns it (at t.stag:4:12-15), then a function is used at a type with other modes, then the function returns it (at t.stag:6:25-36), then it is bound by an annotated let (at t.stag:6:20-22), but must be at most gc, because it is annotated gc (at t.stag:6:20-22) |}];
   provenance
     (ext
      ^ {|
@@ -246,7 +246,7 @@ let bad u = set plain (ext "b")
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:22-31), then it is passed to a function (at t.stag:6:12-31), but must be at most gc, because plain is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then the types are unified, then it is stored into a cell, which holds only what fits its modality (at t.stag:4:21-22), then v is used (at t.stag:4:21-22), then v is passed to the function (at t.stag:4:14-22), then the function types are unified |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:22-31), then it is passed to a function (at t.stag:6:12-31), but must be at most gc, because plain is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then the types are unified, then it is stored into a cell, which holds only what fits its modality (at t.stag:4:21-22), then v is used (at t.stag:4:21-22), then v is passed to the function (at t.stag:4:14-22), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "printed types read back" =
@@ -279,7 +279,7 @@ let id_cell (p : ptr['a @@ 'm]) = p
     type alias['a] = ptr['a @@ external]
     type poly['a, 'b] = ptr['a]
     val via_alias : ptr[int @@ external]
-    val get : ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
+    val get : ptr['a @@ 'm0] @ _ -> 'a @ 'm1 with 'm0 <= 'm1
     val id_cell : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2)
     |}]
 ;;
@@ -319,7 +319,7 @@ let local_store u = cell.* <- stack_ (fun (x : int) -> Int.add x 1)
 let c : ptr[int @@ external] @ portable = Ptr.make 1
 |};
   [%expect
-    {| This is nonportable, because Ptr.make allocates it at run time, then the function types are unified, then the function returns it (at t.stag:2:42-52), but must be at most portable, because it is annotated portable (at t.stag:2:31-39), then it is bound by an annotated let (at t.stag:2:31-39) |}]
+    {| This is nonportable, because Ptr.make allocates it at run time, then a function is used at a type with other modes, then the function returns it (at t.stag:2:42-52), but must be at most portable, because it is annotated portable (at t.stag:2:31-39), then it is bound by an annotated let (at t.stag:2:31-39) |}]
 ;;
 
 let%expect_test "in quotes" =

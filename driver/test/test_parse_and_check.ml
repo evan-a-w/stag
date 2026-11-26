@@ -4,7 +4,7 @@ open Helpers
 
 let type_decls =
   {|type nat = Z | S of ptr[nat]
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 type option['a] = None | Some of 'a
 type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
 |}
@@ -93,7 +93,7 @@ type abstract
   [%expect
     {|
     type nat = Z | S of ptr[nat]
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type option['a] = None | Some of 'a
     type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
     type point = {`x : int; `y : int}
@@ -144,13 +144,13 @@ let%expect_test "the staged power example" =
     Source_helpers.parse_exn
       {|
       type nat = Z | S of ptr[nat]
-      type list['a] = Nil | Cons of ptr['a * list['a]]
+      type list['a] = Nil | Cons of box['a * list['a]]
 
       (* [power n c] is a list of [n] copies of [c]. *)
       let power n c =
         match n with
         | Z -> .< Nil >.
-        | S * m -> .< Cons (Ptr.make ( (.~c, .~(power m c)))) >.
+        | S * m -> .< Cons (Box.make ( (.~c, .~(power m c)))) >.
 
       let three = S (Ptr.make (S (Ptr.make (S (Ptr.make Z)))))
       let cube x = .~(power three .<x>.)
@@ -166,7 +166,7 @@ let%expect_test "the staged power example" =
     {|
     ("Program.equal (List.take program 3) [nat; list; power]" false)
     type nat = Z | S of ptr[nat]
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
     val three : nat
     val cube : 'a -> list['a]
@@ -175,7 +175,7 @@ let%expect_test "the staged power example" =
     (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     (cube <fun>)
     (used
-     (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Nil)))))))))))
+     (Cons (Box (Tuple 7 (Cons (Box (Tuple 7 (Cons (Box (Tuple 7 (Nil)))))))))))
     |}]
 ;;
 

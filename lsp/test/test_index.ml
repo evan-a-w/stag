@@ -10,7 +10,7 @@ let%expect_test "an include's expression is indexed, not what it generates" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+        , {|let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let x = 1
 include .~(value "y" (Stag.Expr.var "x"))
 let z = y
@@ -44,7 +44,7 @@ let%expect_test "a spliced module" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+        , {|let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let y = "written"
 module M = .~(value "y" (Stag.Expr.int 1))
 let z = M.y
@@ -77,7 +77,7 @@ let%expect_test "a written declaration shadowed by an included one" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+        , {|let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let y = "written"
 module N = struct
   include .~(value "y" (Stag.Expr.int 1))
@@ -143,7 +143,7 @@ let%expect_test "inline expansions" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+        , {|let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 include%inline .~(value "x" (Stag.Expr.int 1))
   let x = 1
 end%inline
@@ -226,7 +226,7 @@ let w = s
         0:15+1 Parameter (declaration) "e"
         0:17+1 Operator "="
         0:19+4 Enum_member "Cons"
-        0:25+3 Namespace "Ptr"
+        0:25+3 Namespace "Box"
         0:29+4 Function "make"
         0:37+4 Namespace "Stag"
         0:42+8 Namespace "Toplevel"
@@ -296,7 +296,7 @@ let%expect_test "a declaration with type splices" =
     ~files:
       [ ( "a.stag"
         , {|let int_ty = Stag.Type_expr.con "int" Nil
-let kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil))))
+let kind = Stag.Type_decl.Kind.Variant (Cons (Box.make ( (("A", Nil), Nil))))
 let f (n : .~int_ty) = Int.add n 1
 type t = .~kind
 let a = A

@@ -115,6 +115,7 @@ module Kind : sig
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
+    | Store_into_box (** A [Store] through a [box], which is immutable. *)
     | Exclave_not_in_tail_position
     (** [exclave_ e] other than as the result of a function body. *)
     | Mutable_captured_in_exclave of string
@@ -186,6 +187,8 @@ module Kind : sig
     | Mode_parameter_on_arrow of string
     (** A declaration's mode parameter as one of its arrows' modes, which are
         fixed. *)
+    | Anonymous_mode_in_constraint
+    (** [_] in a [with] constraint, which would relate nothing else. *)
     | Invalid_mode of string
     (** A mode whose atoms contradict each other, as [const external], or a
         [with] constraint on no mode variable. *)

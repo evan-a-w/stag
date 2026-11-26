@@ -157,9 +157,11 @@ let boom = f 1                      (* Error: Match failure *)
 
 ## Pointers
 
-`ptr[t]` is the one pointer type, `Ptr.make e` allocates, `p.*` (or `*p`)
-reads, `p.* <- v` stores. Recursive types must go through a pointer (or a
-function): the prelude's `list` is `Nil | Cons of ptr['a * list['a]]`.
+`ptr[t]` is the mutable pointer type, `Ptr.make e` allocates, `p.*` (or `*p`)
+reads, `p.* <- v` stores. `box[t]` is its immutable counterpart: `Box.make e`
+allocates, `b.*` and `*b` read, and nothing can store into it. Recursive types
+must go through a pointer or a box (or a function): the prelude's `list` is
+`Nil | Cons of box['a * list['a]]`.
 
 ```stag
 let p = Ptr.make 1                  (* val p : ptr[int] *)
@@ -186,6 +188,19 @@ let total = rec_sum tree            (* val total : int = 6 *)
 
 ```stag-error
 type bad = Bad of int * bad        (* Error: recursive *)
+```
+
+```stag
+let b = Box.make (1, 2)             (* val b : box[int * int] *)
+let pair = b.*                      (* val pair : int * int = (1, 2) *)
+(* An unannotated dereference is of a ptr: annotate a box you are given. *)
+let first (b : box[int * int]) = match b.* with (x, _) -> x
+```
+
+```stag-error
+let b = Box.make 1
+let bad (u : unit) = b.* <- 2
+(* Error: A box is immutable *)
 ```
 
 ## Mutable variables
@@ -584,10 +599,44 @@ let gc_cell : cell[string, gc] = { value = "x" }
 let read_cell (c : cell['a, 'p]) = c.value
 ```
 
+### Variance
+
+Where a value is used at a type (an argument, an annotation, a binding's or a
+field's type), only the types' shapes must match: their modes need only fit,
+each as its position says. A function taking more, or returning less, may be
+used as one that doesn't: arguments are *contravariant*, results, immutable
+fields and a `box`'s contents *covariant*. A pointer's contents are
+*invariant*, as every alias of the cell must agree. A type's mode parameter
+gets the variance of where it is used. Where nothing is used as the other, as
+a match's arms, types are equal.
+
+```stag
+let apply (f : string -> int) = f "a"
+let local_ok = apply (fun (s @ local) -> String.length s)  (* val local_ok : int = 1 *)
+let fs : list[string -> int] = [fun (s @ local) -> String.length s]
+
+type tagged['p : mode] = { payload : string @@ 'p }
+let widen (t : tagged[gc]) : tagged[external] = t
+```
+
+```stag-error
+let apply (f : string @ local -> int) = f "a"
+let bad = apply (fun (s : string) -> let g @ global = s in String.length g)
+(* Error: must be at most global *)
+```
+
+```stag-error
+let p : ptr[string] = Ptr.make "a"
+let widen (q : ptr[string @@ external]) = q
+let bad = widen p
+(* Error: This expression has type ptr[string] but an expression was expected of type ptr[string @@ external] *)
+```
+
 ### Reading printed signatures
 
 With modes printed, each arrow side gets a variable, `'m0`, `'m1`, ... and a
-`with` clause lists the constraints between them. Read `a <= b` as "a flows
+`with` clause lists the constraints between them. A variable written
+once and constrained by nothing prints as `_`, which reads back as any mode. Read `a <= b` as "a flows
 into b". A plain `'m0 <= 'm1` holds on every axis; `stage(..)`, `provenance(..)`,
 `locality(..)` pick one axis; `meet(x, c)` caps by a modality `c`; `release(x)`
 is a regional value seen once its region ends (it becomes `local`);
@@ -607,7 +656,7 @@ let embed (x @ portable) = .< x >.
 (* val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1 *)
 
 let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
-(* val mk : ptr[int] @ 'm0 -> ptr[int @@ 'm2] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
+(* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
 
 let same (x : string @ 'm) : string @ 'm = x
 (* val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0) *)

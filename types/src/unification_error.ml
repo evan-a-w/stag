@@ -1,7 +1,7 @@
 open! Import
 
 module Type_mismatch_reason = struct
-  type t =
+  type t = Type.type_mismatch_reason =
     | Base_types_not_equal of string * string
     | Args_length_mismatch of int * int
     | Mismatch_arg_kind of Type.arg * Type.arg
@@ -11,7 +11,7 @@ module Type_mismatch_reason = struct
 end
 
 module Row_mismatch_reason = struct
-  type t =
+  type t = Type.row_mismatch_reason =
     | Missing_label of string
     | Presence_mismatch of string
     | Assigned of string
@@ -20,11 +20,12 @@ module Row_mismatch_reason = struct
   [@@deriving sexp_of]
 end
 
-type t =
+type t = Type.unification_error =
   | Type_mismatch of Type.ty * Type.ty * Type_mismatch_reason.t
   | Row_mismatch of Type.row * Type.row * Row_mismatch_reason.t
   | Occurs_check_failed of Type.arg
   | Assigned_in_record of string * Type.row
+  | Bound_var of Mode.Error.t
 [@@deriving sexp_of]
 
 let snapshot t =
@@ -40,4 +41,5 @@ let snapshot t =
     Occurs_check_failed (Type.Snapshot.arg snapshot arg)
   | Assigned_in_record (name, row) ->
     Assigned_in_record (name, Type.Snapshot.row snapshot row)
+  | Bound_var _ -> t
 ;;

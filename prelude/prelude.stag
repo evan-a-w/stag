@@ -1,7 +1,11 @@
 (* The prelude, in scope in every program, outside its root module, so the
    program's declarations shadow it. *)
 
-type list['a] = Nil | Cons of ptr['a * list['a]]
+(* An immutable block holding its contents: [Box.make x], read as [b.*] or the
+   pattern [*x]. Unlike a [ptr], it is covariant in its contents' modes. *)
+type box['a]
+
+type list['a] = Nil | Cons of box['a * list['a]]
 type option['a] = None | Some of 'a
 type result['a, 'e] = Ok of 'a | Error of 'e
 
@@ -14,6 +18,10 @@ let raise = Intrinsic.raise
 
 module Ptr = struct
   let make = Intrinsic.ptr_make
+end
+
+module Box = struct
+  let make = Intrinsic.box_make
 end
 
 module Unsafe = struct
@@ -30,12 +38,12 @@ module Stag = struct
   let map f l =
     match l with
     | [] -> []
-    | Cons *(x, rest) -> Cons (Ptr.make (f x, map f rest))
+    | Cons *(x, rest) -> Cons (Box.make (f x, map f rest))
 
   let append l tail =
     match l with
     | Nil -> tail
-    | Cons *(x, rest) -> Cons (Ptr.make (x, append rest tail))
+    | Cons *(x, rest) -> Cons (Box.make (x, append rest tail))
 
   (* Declared types, constructors and fields, by identity: a ref names the
      same declaration wherever it is spliced, whatever is in scope there. Only
@@ -91,10 +99,10 @@ module Stag = struct
 
     let cons = constructor .< [()] >.
     let nil = constructor .< [] >.
-    let ptr_make =
-      match Intrinsic.erase .< Ptr.make >. with
+    let box_make =
+      match Intrinsic.erase .< Box.make >. with
       | Expr.Var (ref_, _) -> ref_
-      | _ -> raise (Failure "Stag.Internal.ptr_make")
+      | _ -> raise (Failure "Stag.Internal.box_make")
   end
 
   module Lit = struct
@@ -307,7 +315,7 @@ module Stag = struct
       match es with
       | [] -> Construct (Internal.nil, [])
       | Cons *(e, rest) ->
-        Construct (Internal.cons, [App (Ptr.make (Var (Internal.ptr_make, Annot.none), Tuple [e; list rest]))])
+        Construct (Internal.cons, [App (Ptr.make (Var (Internal.box_make, Annot.none), Tuple [e; list rest]))])
 
     (* [apply f [x; y]] is [f x y]. *)
     let apply f args =

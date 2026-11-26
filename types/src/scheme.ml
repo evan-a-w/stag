@@ -58,15 +58,16 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
   let rows = Int.Table.create () in
   let modes = Mode.Var.Instance.create (Fresh.modes fresh) ~rank in
   let presences = Int.Table.create () in
-  let inst table (var : _ Type.Var.t) ~wrap ~bounds =
+  let inst table (var : _ Type.Var.t) ~create ~wrap ~bounds =
     match var.state with
     | Unbound _ | Link _ -> wrap var
     | Generic ->
       (match Hashtbl.find table var.id with
        | Some instance -> instance
        | None ->
-         let var' = Fresh.var fresh ~rank in
+         let (var' : _ Type.Var.t) = create () in
          var'.in_record <- var.in_record;
+         var'.watchers <- Watcher.instantiate var.watchers @ var'.watchers;
          let instance = wrap var' in
          Hashtbl.set table ~key:var.id ~data:instance;
          bounds var var';
@@ -75,12 +76,18 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
   in
   { ty =
       (fun var ->
-        inst tys var ~wrap:(fun var -> Type.TVar var) ~bounds:(fun _ _ -> ()))
+        inst
+          tys
+          var
+          ~create:(fun () -> Unify.join_var fresh ~rank)
+          ~wrap:(fun var -> Type.TVar var)
+          ~bounds:(fun _ _ -> ()))
   ; row =
       (fun var ->
         inst
           rows
           var
+          ~create:(fun () -> Fresh.var fresh ~rank)
           ~wrap:(fun var -> Type.RVar var)
           ~bounds:(fun var var' ->
             Queue.enqueue pending (Row_bounds (var, var'))))
@@ -89,6 +96,7 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
         inst
           presences
           var
+          ~create:(fun () -> Fresh.var fresh ~rank)
           ~wrap:(fun var -> Type.PVar var)
           ~bounds:(fun var var' ->
             Queue.enqueue pending (Presence_bounds (var, var'))))
@@ -166,12 +174,100 @@ let instantiate fresh ~rank =
     ty
 ;;
 
-let newly_generalized ~rank (var : _ Type.Var.t) =
-  match var.state with
-  | Unbound rank' when rank' > rank ->
-    var.state <- Generic;
-    true
-  | Unbound _ | Generic | Link _ -> false
+module Visitor = struct
+  type t =
+    { ty : (Type.ty, Nothing.t) Type.Var.t -> unit
+    ; row : (Type.row, Type.bound) Type.Var.t -> unit
+    ; presence : Presence_var.t -> unit
+    ; mode : Mode.Var.t -> unit
+    }
+end
+
+(* Visits, once each, the variables [generalize] generalizes: those unbound of
+   [tys] with rank greater than [rank], with those reached through their bounds,
+   and the mode variables of rank greater than [rank]. *)
+let iter_generalizable ~rank tys (visitor : Visitor.t) =
+  let seen = Int.Hash_set.create () in
+  let first (var : _ Type.Var.t) =
+    match var.state with
+    | Unbound rank' when rank' > rank ->
+      Hash_set.strict_add seen var.id |> Hash_set.Ok_or_duplicate.is_ok
+    | Unbound _ | Generic | Link _ -> false
+  in
+  let rec iter : Nothing.t Type.Iter.t =
+    { ty =
+        (fun ~guarded:_ var ->
+          if first var then visitor.ty var;
+          Ok ())
+    ; row =
+        (fun ~guarded:_ var ->
+          if first var
+          then (
+            visitor.row var;
+            List.fold_result
+              var.bounds
+              ~init:()
+              ~f:(fun () (bound : Type.bound) -> Type.iter_row iter bound.row))
+          else Ok ())
+    ; presence =
+        (fun ~guarded var ->
+          if first var
+          then (
+            visitor.presence var;
+            List.fold_result var.bounds ~init:() ~f:(fun () bound ->
+              match bound with
+              | At_most _ | At_least _ ->
+                (match Type.presence_bound_var bound with
+                 | Some other -> iter.presence ~guarded other
+                 | None -> Ok ())
+              | If_present (ty1, ty2) ->
+                let%bind.Result () = Type.iter_ty iter ty1 in
+                Type.iter_ty iter ty2))
+          else Ok ())
+    ; mode =
+        (fun var ->
+          (match Mode.Var.rank var with
+           | Some rank' when rank' > rank -> visitor.mode var
+           | Some _ | None -> ());
+          Ok ())
+    }
+  in
+  match
+    List.fold_result tys ~init:() ~f:(fun () ty -> Type.iter_ty iter ty)
+  with
+  | Ok () -> ()
+  | Error _ -> .
+;;
+
+let generalize_watchers ~rank tys =
+  let errors = Queue.create () in
+  iter_generalizable
+    ~rank
+    tys
+    { ty =
+        (fun var -> Queue.enqueue_all errors (Watcher.generalize var.watchers))
+    ; row =
+        (fun var -> Queue.enqueue_all errors (Watcher.generalize var.watchers))
+    ; presence =
+        (fun var -> Queue.enqueue_all errors (Watcher.generalize var.watchers))
+    ; mode = ignore
+    };
+  Queue.to_list errors
+;;
+
+let fix_joins fresh tys =
+  let errors = Queue.create () in
+  iter_generalizable
+    ~rank:Int.min_value
+    tys
+    { ty =
+        (fun var ->
+          Result.iter_error (Unify.fix_join fresh var) ~f:(Queue.enqueue errors))
+    ; row = ignore
+    ; presence = ignore
+    ; mode = ignore
+    };
+  Queue.to_list errors
 ;;
 
 let uppers (var : Presence_var.t) =
@@ -1261,57 +1357,24 @@ let generalize fresh ~rank tys =
   let modes = Int.Table.create () in
   let generalized = Int.Hash_set.create () in
   let generalize (var : _ Type.Var.t) =
-    newly_generalized ~rank var
-    &&
-    (Hash_set.add generalized var.id;
-     Queue.enqueue in_bounds_of var.in_bounds_of;
-     true)
+    var.state <- Generic;
+    Hash_set.add generalized var.id;
+    Queue.enqueue in_bounds_of var.in_bounds_of
   in
-  let rec generalizer : Nothing.t Type.Iter.t =
-    { ty =
-        (fun ~guarded:_ var ->
-          ignore (generalize var : bool);
-          Ok ())
+  iter_generalizable
+    ~rank
+    tys
+    { ty = generalize
     ; row =
-        (fun ~guarded:_ var ->
-          if generalize var
-          then (
-            Queue.enqueue rows var;
-            List.fold_result
-              var.bounds
-              ~init:()
-              ~f:(fun () (bound : Type.bound) ->
-                Type.iter_row generalizer bound.row))
-          else Ok ())
-    ; presence =
-        (fun ~guarded var ->
-          if generalize var
-          then (
-            Queue.enqueue presences var;
-            List.fold_result var.bounds ~init:() ~f:(fun () bound ->
-              match bound with
-              | At_most _ | At_least _ ->
-                (match Type.presence_bound_var bound with
-                 | Some other -> generalizer.presence ~guarded other
-                 | None -> Ok ())
-              | If_present (ty1, ty2) ->
-                let%bind.Result () = Type.iter_ty generalizer ty1 in
-                Type.iter_ty generalizer ty2))
-          else Ok ())
-    ; mode =
         (fun var ->
-          (match Mode.Var.rank var with
-           | Some rank' when rank' > rank ->
-             Hashtbl.set modes ~key:(Mode.Var.id var) ~data:var
-           | Some _ | None -> ());
-          Ok ())
-    }
-  in
-  (match
-     List.fold_result tys ~init:() ~f:(fun () ty -> Type.iter_ty generalizer ty)
-   with
-   | Ok () -> ()
-   | Error _ -> .);
+          generalize var;
+          Queue.enqueue rows var)
+    ; presence =
+        (fun var ->
+          generalize var;
+          Queue.enqueue presences var)
+    ; mode = (fun var -> Hashtbl.set modes ~key:(Mode.Var.id var) ~data:var)
+    };
   let is_generalized = Hash_set.mem generalized in
   Mode.Var.generalize
     (Hashtbl.data modes

@@ -60,7 +60,7 @@ module Make (B : Builder) = struct
     | Some _, _ -> B.con name [ B.ptr (B.tuple args) ]
   ;;
 
-  let cons x xs = con "Cons" [ B.ptr (B.tuple [ x; xs ]) ]
+  let cons x xs = con "Cons" [ B.box (B.tuple [ x; xs ]) ]
 
   let list f xs =
     List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail -> cons (f x) tail)

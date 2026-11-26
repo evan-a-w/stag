@@ -306,21 +306,23 @@ let q = .< (a, b) >.
 let%expect_test "a cycle in an argument prints without parentheses" =
   run
     {|
-exception E of list[int]
-let cyc = Cons (Ptr.make (1, Nil))
+type chain = Link of ptr[int * chain] | End
+exception E of chain
+let cyc = Link (Ptr.make (1, End))
 let main =
   match cyc with
-  | Cons q -> q.* <- (1, Cons q); raise (E cyc)
-  | Nil -> ()
+  | Link q -> q.* <- (1, Link q); raise (E cyc)
+  | End -> ()
 |};
   [%expect
     {|
-    exception E of list[int]
-    val cyc : list[int]
+    type chain = Link of ptr[int * chain] | End
+    exception E of chain
+    val cyc : chain
     val main : unit
     -- evaluated at compile time
     -- evaluated
-    (cyc (Cons 1 (Cons <cycle>)))
-    ("Uncaught exception E (Cons (Ptr.make (1, Cons <cycle>)))" @ t.stag:6:34-47)
+    (cyc (Link (Ptr (Tuple 1 (Link <cycle>)))))
+    ("Uncaught exception E (Link (Ptr.make (1, Link <cycle>)))" @ t.stag:7:34-47)
     |}]
 ;;

@@ -43,14 +43,14 @@ let qualified = forget used in .< Int.add 1 2 >.
 |};
   [%expect
     {|
-    val argument : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
-    val inside : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
-    val two : 'a @ 'm0 -> ('b @ 'm2 -> <int>{x : int; y : int; ..'c} @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val filled : 'a @ 'm0 -> <int>{x : int; ..'b} @ 'm1
+    val argument : 'a @ _ -> <'b>{x : 'b; ..'c} @ _
+    val inside : 'a @ _ -> <'b>{x : 'b; ..'c} @ _
+    val two : 'a @ 'm0 -> ('b @ _ -> <int>{x : int; y : int; ..'c} @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val filled : 'a @ _ -> <int>{x : int; ..'b} @ _
     val used : int
-    val spliced : int @ 'm0 -> int @ 'm1
-    val rebound : 'a @ 'm0 -> <int>{..'b} @ 'm1
-    val nested : 'a @ 'm0 -> <<'b>{x : 'b; ..'c}>{..'d} @ 'm1
+    val spliced : int @ _ -> int @ _
+    val rebound : 'a @ _ -> <int>{..'b} @ _
+    val nested : 'a @ _ -> <<'b>{x : 'b; ..'c}>{..'d} @ _
     val toplevel_forgotten : <'a>{used : 'a; ..'b}
     val qualified : <int>{..'a}
     |}]
@@ -75,7 +75,7 @@ let shadow x = let y = 1 in forget y in let y = 2 in y
     x is not in scope here: it was forgotten by [forget x in ...]
     used is not in scope here: it was forgotten by [forget used in ...]
     x is forgotten twice
-    val shadow : 'a @ 'm0 -> int @ 'm1
+    val shadow : 'a @ _ -> int @ _
     |}]
 ;;
 
@@ -90,7 +90,7 @@ let rechecked = .~(code)
   [%expect
     {|
     val code : Stag.Expr.t
-    val rechecked : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
+    val rechecked : 'a @ _ -> <'b>{x : 'b; ..'c} @ _
     |}]
 ;;
 
@@ -147,11 +147,11 @@ let%expect_test "toplevels by symbol in recursive generators" =
   show {|
 let gen n = forget n in .< let _ = gen in n >.
 |};
-  [%expect {| val gen : 'a @ 'm0 -> <'b>{n : 'b; ..'c} @ 'm1 |}];
+  [%expect {| val gen : 'a @ _ -> <'b>{n : 'b; ..'c} @ _ |}];
   show {|
 let gen n = forget n in .< gen n >.
 |};
-  [%expect {| The type variable '_a occurs inside its own definition |}];
+  [%expect {| The type variable 'a occurs inside its own definition |}];
   (* [code] is finished before [f], whose splice uses it: its use of [f] is
      checked once [f] is. *)
   eval
@@ -175,7 +175,7 @@ let a = .< b >.
 let b = .< a >.
 |};
   [%expect
-    {| In this instance of b, a use in its quote is wrong: The type variable '_a occurs inside its own definition |}]
+    {| In this instance of b, a use in its quote is wrong: The type variable 'a occurs inside its own definition |}]
 ;;
 
 let%expect_test "spliced code's free variables pass mutable locals by" =
@@ -197,11 +197,11 @@ let%expect_test "forget in a quote doesn't hide names from splices back out" =
   show {|
 let f (x : int) = .< forget x in .~(Some x; .< 1 >.) >.
 |};
-  [%expect {| val f : int @ 'm0 -> <int>{..'a} @ 'm1 with gc <= 'm1 |}];
+  [%expect {| val f : int @ _ -> <int>{..'a} @ 'm0 with gc <= 'm0 |}];
   show {|
 let g (x : int) = .< forget x in .~(.< x >.) >.
 |};
-  [%expect {| val g : int @ 'm0 -> <'a>{x : 'a; ..'b} @ 'm1 |}];
+  [%expect {| val g : int @ _ -> <'a>{x : 'a; ..'b} @ _ |}];
   (* Written at level 0, it hides [x] in splices back to level 0. *)
   show {|
 let h (x : int) = forget x in .< .~(Some x; .< 1 >.) >.
@@ -260,8 +260,8 @@ let c = .< f >.
 |};
   [%expect
     {|
-    val f : int @ 'm0 -> int @ 'm1
-    val c : <int @ 'm0 -> int @ 'm1>{..'a}
+    val f : int @ _ -> int @ _
+    val c : <int @ _ -> int @ _>{..'a}
     |}];
   show {|
 let f (x : int) : int = x
@@ -269,8 +269,8 @@ let c = .< f >.
 |};
   [%expect
     {|
-    val f : int @ 'm0 -> int @ 'm1
-    val c : <int @ 'm0 -> int @ 'm1>{..'a}
+    val f : int @ _ -> int @ _
+    val c : <int @ _ -> int @ _>{..'a}
     |}];
   (* Each use is of an instance. *)
   show
@@ -289,7 +289,7 @@ let%expect_test "a quote's use of a toplevel of its component is a recursive \
                  one"
   =
   (* [c] uses [f] directly too, so is checked with it: its quote's use is
-     unified with [f]'s type before it is generalized. *)
+     related to [f]'s type before it is generalized. *)
   show {|
 let f x = let _ = c in x
 let c (u : unit) = (f u, .< f >.)
@@ -297,7 +297,7 @@ let c (u : unit) = (f u, .< f >.)
   [%expect
     {|
     val f : unit @ 'm0 -> unit @ 'm1 with portable <= 'm0 and 'm1 <= regional
-    val c : unit @ 'm0 -> unit * <unit @ 'm2 -> unit @ 'm3>{..'a} @ 'm1 with portable <= 'm2 and 'm3 <= 'm1 and release(locality('m3)) <= locality('m1) and 'm3 <= regional
+    val c : unit @ _ -> unit * <unit @ _ -> unit @ _>{..'a} @ _
     |}];
   show
     {|
@@ -317,7 +317,7 @@ let c (u : unit) = .< (f 1, f "s") >.
   [%expect
     {|
     val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val c : unit @ 'm0 -> <int * string>{..'a} @ 'm1
+    val c : unit @ _ -> <int * string>{..'a} @ _
     |}]
 ;;
 
@@ -380,7 +380,7 @@ let y = let _ = b in fun a -> a
   show
     {|
 let b = let _ = M.zz in 1
-module M = .~(let _ = .< y >. in Cons (Ptr.make (Stag.Toplevel.let_ "zz" Nil (Stag.Expr.int 1), Nil)))
+module M = .~(let _ = .< y >. in Cons (Box.make (Stag.Toplevel.let_ "zz" Nil (Stag.Expr.int 1), Nil)))
 let y = let _ = b in fun a -> a
 |};
   [%expect
@@ -406,9 +406,9 @@ let both = n ()
 |};
   [%expect
     {|
-    val k : int @ 'm0 -> int @ 'm1
+    val k : int @ _ -> int @ _
     val m : <int>{..'a} @ 'm0 -> <int>{..'b} @ 'm1 where ..'a <= {..'b} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
-    val n : unit @ 'm0 -> <<int>{..'a}>{..'b} @ 'm1
+    val n : unit @ _ -> <<int>{..'a}>{..'b} @ _
     val both : <<int>{..'_a}>{..'_b}
     |}];
   show
@@ -435,7 +435,7 @@ let c (_ : int) = .< ident "s" >.
     {|
     val ident : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val p : int
-    val c : int @ 'm0 -> <string>{..'a} @ 'm1
+    val c : int @ _ -> <string>{..'a} @ _
     |}];
   show
     {|
@@ -448,7 +448,7 @@ let q = .~(let _ = (fun (u : int) -> p) in .< 1 >.)
     {|
     val ident : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val p : int
-    val c : int @ 'm0 -> <string>{..'a} @ 'm1
+    val c : int @ _ -> <string>{..'a} @ _
     val q : int
     |}]
 ;;
@@ -541,8 +541,8 @@ let b z = let _ = a z in .< ident >.
   [%expect
     {|
     val ident : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val a : 'a @ 'm0 -> <string @ 'm2 -> string @ 'm3>{..'b} @ 'm1 with portable <= 'm0 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
-    val b : 'a @ 'm0 -> <string @ 'm2 -> string @ 'm3>{..'b} @ 'm1 with 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
+    val a : 'a @ 'm0 -> <string @ 'm1 -> string @ 'm2>{..'b} @ _ with portable <= 'm0 and 'm1 <= 'm2 and release(locality('m1)) <= locality('m2)
+    val b : 'a @ _ -> <string @ 'm0 -> string @ 'm1>{..'b} @ _ with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     |}]
 ;;
 
@@ -559,7 +559,7 @@ let h (u : unit) = (c .< 1 >., c .< "s" >.)
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val c : <'a>{..'b} @ 'm0 -> <'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
-    val h : unit @ 'm0 -> <int>{..'a} * <string>{..'b} @ 'm1 with gc <= 'm1
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
     |}];
   show
     {|
@@ -569,4 +569,28 @@ let h (u : unit) = let f = c in (f .< 1 >., f .< "s" >.)
 |};
   [%expect
     {| This expression has type string but an expression was expected of type int |}]
+;;
+
+let%expect_test "an awaiting scheme's joins are refined in place, in either \
+                 order"
+  =
+  (* [c] is finished before [ident]: its arms join code types with modes, and
+     the refinement keeps what the join had either way round. *)
+  let program ~arms =
+    sprintf
+      {|
+let ident x = .~(let _ = c 0 .< 1 >. .< 2 >. in .< x >.)
+let c (n : int) y z = let j = match n with %s in .< ident .~j >.
+|}
+      arms
+  in
+  show (program ~arms:"| 0 -> y | _ -> z");
+  show (program ~arms:"| 0 -> z | _ -> y");
+  [%expect
+    {|
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : int @ 'm0 -> (<'a>{..'b} @ 'm2 -> (<'a>{..'b} @ 'm4 -> <'a>{..'c} @ 'm5) @ 'm3) @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm5 and gc <= 'm3 and gc <= 'm1
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : int @ 'm0 -> (<'a>{..'b} @ 'm2 -> (<'a>{..'b} @ 'm4 -> <'a>{..'c} @ 'm5) @ 'm3) @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm5 and gc <= 'm3 and gc <= 'm1
+    |}]
 ;;

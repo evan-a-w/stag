@@ -23,7 +23,8 @@ let%expect_test "the prelude's signature" =
     (Signature.to_string_hum ~of_prelude:true (Lazy.force prelude_signature));
   [%expect
     {|
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type box['a]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type option['a] = None | Some of 'a
     type result['a, 'b] = Ok of 'a | Error of 'b
     exception Division_by_zero
@@ -32,6 +33,9 @@ let%expect_test "the prelude's signature" =
     val raise : exn -> 'a
     module Ptr : sig
       val make : 'a -> ptr['a]
+    end
+    module Box : sig
+      val make : 'a -> box['a]
     end
     module Unsafe : sig
       val assume_global : 'a @ local -> 'a
@@ -66,7 +70,7 @@ let%expect_test "the prelude's signature" =
         val constructor : <'a>{..'b} -> Path.t[Constructor_ref.t]
         val cons : Path.t[Constructor_ref.t]
         val nil : Path.t[Constructor_ref.t]
-        val ptr_make : Path.t[Value_ref.t]
+        val box_make : Path.t[Value_ref.t]
       end
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
@@ -337,6 +341,7 @@ let%expect_test "the prelude's signature" =
         val string_of_sexp : t -> result[string, Of_sexp_error.t]
         val sexp_of_list : ('a -> t) -> list['a] -> t
         val sexp_of_ptr : ('a -> 'b) -> ptr['a] -> 'b
+        val sexp_of_box : ('a -> 'b) -> box['a] -> 'b
         val list_of_sexp : (t -> result['a, Of_sexp_error.t]) -> t -> result[list['a], Of_sexp_error.t]
         val sexp_of_option : ('a -> t) -> option['a] -> t
         val option_of_sexp : (t -> result['a, Of_sexp_error.t]) -> t -> result[option['a], Of_sexp_error.t]
@@ -356,6 +361,8 @@ let%expect_test "the prelude's signature" =
         val list_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> t -> list['a]
         val ptr_of_sexp : ('a -> result['b, 'c]) -> 'a -> result[ptr['b], 'c]
         val ptr_of_sexp_exn : ('a -> result['b, Of_sexp_error.t]) -> 'a -> ptr['b]
+        val box_of_sexp : ('a -> result['b, 'c]) -> 'a -> result[box['b], 'c]
+        val box_of_sexp_exn : ('a -> result['b, Of_sexp_error.t]) -> 'a -> box['b]
         val option_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> t -> option['a]
         val result_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result['a, 'b]
         val t_of_sexp_exn : t -> t
@@ -568,13 +575,14 @@ let rec constructors_of (value : Treewalk.Value.t) =
   | Tuple values -> union values
   | Poly_record fields -> union (Map.data fields)
   | Ptr cell -> constructors_of !cell
+  | Box value -> constructors_of value
   | _ -> String.Map.empty
 ;;
 
 let round_trip_sources =
   [ {|
 type nat = Z | S of nat
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 type with_x[{..'r}] = {`x : int; ..'r}
 type point = {x : int; y : M.t}
 type void = |
@@ -771,8 +779,8 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Cons (Ptr.make (Stag.Toplevel.Let ("f", Cons (Ptr.make (("x", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), {`mode = None; `ty = None}, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", {`mode = None; `ty = None}))))), Nil))
-    Cons (Ptr.make (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make (("A", Nil), Cons (Ptr.make (("B", Cons (Ptr.make (Stag.Type_expr.Var "a", Cons (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Ptr.make (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil))), Nil))))), Nil))))); `name = "t"; `params = Cons (Ptr.make (Stag.Type_decl.Param.Ty "a", Nil))}, Nil))
+    Cons (Box.make (Stag.Toplevel.Let ("f", Cons (Box.make (("x", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), {`mode = None; `ty = None}, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", {`mode = None; `ty = None}))))), Nil))
+    Cons (Box.make (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (Box.make (("A", Nil), Cons (Box.make (("B", Cons (Box.make (Stag.Type_expr.Var "a", Cons (Box.make (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Box.make (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil))), Nil))))), Nil))))); `name = "t"; `params = Cons (Box.make (Stag.Type_decl.Param.Ty "a", Nil))}, Nil))
     |}]
 ;;
 
@@ -817,7 +825,7 @@ let%expect_test "an update of fields by ref round trips" =
    | Error error -> print_error error);
   [%expect
     {|
-    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", {`mode = None; `ty = None}), Cons (Ptr.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Ptr.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
+    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", {`mode = None; `ty = None}), Cons (Box.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Box.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
     (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
     (equal true)
     |}]
@@ -851,40 +859,40 @@ let constructor name = (name, Nil)
 
 (* type t = <names>  let to_string x = match x with <name> -> "<name>" ... *)
 let enum names =
-  Cons (Ptr.make (
+  Cons (Box.make (
     ( Stag.Toplevel.Type
         {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names)}
-    , Cons (Ptr.make (
+    , Cons (Box.make (
         ( Stag.Toplevel.let_
             "to_string"
-            (Cons (Ptr.make ( ("x", Nil))))
+            (Cons (Box.make ( ("x", Nil))))
             (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "x", Stag.map arm names))))
         , Nil ))) )))
 
-let names = Cons (Ptr.make ( ("Red", Cons (Ptr.make ( ("Green", Cons (Ptr.make ( ("Blue", Nil)))))))))
+let names = Cons (Box.make ( ("Red", Cons (Box.make ( ("Green", Cons (Box.make ( ("Blue", Nil)))))))))
 let decls = enum names
-let bad = enum (Cons (Ptr.make ( ("Red", Cons (Ptr.make ( ("light blue", Nil)))))))
-let keyword = Cons (Ptr.make ( (Stag.Toplevel.let_ "match" Nil (Stag.Expr.var "x"), Nil)))
-let bad_path = Cons (Ptr.make ( (Stag.Toplevel.let_ "x" Nil (Stag.Expr.var "M..y"), Nil)))
+let bad = enum (Cons (Box.make ( ("Red", Cons (Box.make ( ("light blue", Nil)))))))
+let keyword = Cons (Box.make ( (Stag.Toplevel.let_ "match" Nil (Stag.Expr.var "x"), Nil)))
+let bad_path = Cons (Box.make ( (Stag.Toplevel.let_ "x" Nil (Stag.Expr.var "M..y"), Nil)))
 
 (* Shapes the parser does not make itself, eg. a constructor of one tuple. *)
-let make e = Stag.Expr.apply (Stag.Expr.var "Ptr.make") (Cons (Ptr.make ( (e, Nil))))
-let pair = Stag.Expr.Tuple (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (make (Stag.Expr.construct "D" (Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))), Nil)))))))
-let one_tuple = Stag.Expr.construct "C" (Cons (Ptr.make ( (pair, Nil))))
+let make e = Stag.Expr.apply (Stag.Expr.var "Ptr.make") (Cons (Box.make ( (e, Nil))))
+let pair = Stag.Expr.Tuple (Cons (Box.make ( (Stag.Expr.int 1, Cons (Box.make ( (make (Stag.Expr.construct "D" (Cons (Box.make ( (Stag.Expr.int 2, Nil))))), Nil)))))))
+let one_tuple = Stag.Expr.construct "C" (Cons (Box.make ( (pair, Nil))))
 let var x = Stag.Pattern.Var x
-let pair_pattern = Stag.Pattern.Tuple (Cons (Ptr.make ( (var "a", Cons (Ptr.make ( (var "b", Nil)))))))
+let pair_pattern = Stag.Pattern.Tuple (Cons (Box.make ( (var "a", Cons (Box.make ( (var "b", Nil)))))))
 let first =
   Stag.Expr.Match (Ptr.make (
     ( Stag.Expr.var "one_tuple"
-    , Cons (Ptr.make ( ((Stag.Pattern.construct "C" (Cons (Ptr.make ( (pair_pattern, Nil)))), Stag.Expr.var "a"), Nil))) )))
+    , Cons (Box.make ( ((Stag.Pattern.construct "C" (Cons (Box.make ( (pair_pattern, Nil)))), Stag.Expr.var "a"), Nil))) )))
 let int = Stag.Type_expr.con "int" Nil
 let shapes =
-  Cons (Ptr.make (
+  Cons (Box.make (
     ( Stag.Toplevel.Type
-        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("C", Cons (Ptr.make ( (Stag.Type_expr.Tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (Stag.Type_expr.con "ptr" (Cons (Ptr.make ( (Stag.Type_expr.con "t" Nil, Nil)))), Nil))))))), Nil)))), Cons (Ptr.make ( (("D", Cons (Ptr.make ( (int, Nil)))), Nil)))))))}
-    , Cons (Ptr.make (
+        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Box.make ( (("C", Cons (Box.make ( (Stag.Type_expr.Tuple (Cons (Box.make ( (int, Cons (Box.make ( (Stag.Type_expr.con "ptr" (Cons (Box.make ( (Stag.Type_expr.con "t" Nil, Nil)))), Nil))))))), Nil)))), Cons (Box.make ( (("D", Cons (Box.make ( (int, Nil)))), Nil)))))))}
+    , Cons (Box.make (
         ( Stag.Toplevel.let_ "one_tuple" Nil one_tuple
-        , Cons (Ptr.make (
+        , Cons (Box.make (
             ( Stag.Toplevel.let_ "first" Nil first
             , Nil ))) ))) )))
 |}
@@ -1028,7 +1036,7 @@ let%expect_test "malformed values" =
       ~file:"other.stag"
       {|
 module Mine = struct type option['a] = None | Some of 'a end
-let decls = Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.none, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
+let decls = Cons (Box.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.none, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
 let other = Mine.Some 1
 |}
   in
@@ -1067,12 +1075,14 @@ let%expect_test "malformed values made otherwise" =
     | Tuple values -> Tuple (List.map values ~f:(edit ~name ~f))
     | Poly_record fields -> Poly_record (Map.map fields ~f:(edit ~name ~f))
     | Ptr cell -> Ptr (ref (edit !cell ~name ~f))
+    | Box value -> Box (edit value ~name ~f)
     | value -> value
   in
   (* The value a pointer-bearing constructor holds. *)
   let payload (args : Treewalk.Value.t list) ~default =
     match args with
     | [ Ptr cell ] -> !cell
+    | [ Box value ] -> value
     | _ -> default
   in
   (* Wrong arity. *)
@@ -1115,13 +1125,10 @@ let%expect_test "malformed values made otherwise" =
        ~f:(fun ref args ->
          match payload args ~default:Unit with
          | Tuple [ name; rest ] ->
-           Construct
-             ( ref
-             , [ Ptr (Stdlib.ref (Treewalk.Value.Tuple [ name; rest; rest ])) ]
-             )
+           Construct (ref, [ Box (Treewalk.Value.Tuple [ name; rest; rest ]) ])
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a list cell's pair, got (("x", {`mode = None; `ty = None}), Cons (Ptr.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), Cons (Ptr.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil))), within Stag.Expr.Let argument 1 |}];
+    {| Malformed syntax: expected a list cell's pair, got (("x", {`mode = None; `ty = None}), Cons (Box.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), Cons (Box.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil))), within Stag.Expr.Let argument 1 |}];
   (* A list ending in something else. *)
   print_expr (edit (expr "(a, b, c)") ~name:"prelude.Nil" ~f:(fun _ _ -> Unit));
   [%expect
@@ -1333,7 +1340,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     Malformed syntax: expected at least two components, got Nil, within Stag.Expr.Tuple
-    Malformed syntax: expected at least two components, got Cons (Ptr.make (Stag.Expr.Lit Stag.Lit.Unit, Nil)), within Stag.Expr.Tuple
+    Malformed syntax: expected at least two components, got Cons (Box.make (Stag.Expr.Lit Stag.Lit.Unit, Nil)), within Stag.Expr.Tuple
     (Tuple ((Lit Unit) (Lit Unit)))
     |}];
   List.iter
@@ -1342,7 +1349,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     Malformed syntax: expected at least two components, got Nil, within Stag.Pattern.Tuple
-    Malformed syntax: expected at least two components, got Cons (Ptr.make (Stag.Pattern.Any, Nil)), within Stag.Pattern.Tuple
+    Malformed syntax: expected at least two components, got Cons (Box.make (Stag.Pattern.Any, Nil)), within Stag.Pattern.Tuple
     (Tuple (Any Any))
     |}];
   List.iter
@@ -1351,7 +1358,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     (Tuple ())
-    Malformed syntax: expected no components or at least two, got Cons (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within Stag.Type_expr.Tuple
+    Malformed syntax: expected no components or at least two, got Cons (Box.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within Stag.Type_expr.Tuple
     (Tuple ((Con int ()) (Con int ())))
     |}];
   expr (at (Syntax.Expr.Record []));
@@ -1420,19 +1427,19 @@ let%expect_test "modes and modalities only where the parser puts them" =
     {|
     int @ local -> int @ local
     (int @ local -> int) -> (int -> int) @ local
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Tuple > element 0
-    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within Stag.Type_expr.Arrow argument 0
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))))
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Arrow argument 0 > Stag.Type_expr.Moded argument 0
-    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil)))))
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Tuple > element 0
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Global, Nil))))), within Stag.Type_expr.Arrow argument 0
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))))
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Arrow argument 0 > Stag.Type_expr.Moded argument 0
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Global, Nil)))))
     |}];
   program (var { ty = Some (moded int); mode = None });
   program (var { ty = Some (moded int); mode = Some local });
   program (var { ty = Some (arrow int (moded int)); mode = Some local });
   [%expect
     {|
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
     let v = (x : (int -> int @ local) @ local)
     |}];
   program (type_decl (Record [ at "x", global (arrow (moded int) int) ]));
@@ -1447,14 +1454,14 @@ let%expect_test "modes and modalities only where the parser puts them" =
     {|
     type t = {x : (int @ local -> int) @@ global}
 
-    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1 > Stag.Type_expr.Modality argument 0
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1 > Stag.Type_expr.Modality argument 0
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1
     type t = A of int @@ global * int
 
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Variant > element 0 > component 1 > element 0
-    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
-    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
-    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Exception argument 1 > element 0
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Variant > element 0 > component 1 > element 0
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Exception argument 1 > element 0
     |}];
   let m = at (Syntax.Mode_expr.Var "m") in
   let constrained ?(lower = m) ?(upper = local) ty =
@@ -1474,11 +1481,11 @@ let%expect_test "modes and modalities only where the parser puts them" =
     {|
     let v = (x : int @ 'm with 'm <= local)
 
-    Malformed syntax: expected a well-formed mode constraint (a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= portable`), got (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
+    Malformed syntax: expected a well-formed mode constraint (a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= portable`), got (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
     Malformed syntax: expected at least one mode constraint, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil))))
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil))))
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     |}]
 ;;
 
@@ -1490,17 +1497,17 @@ let%expect_test "shapes left to the typechecker" =
 let unit = Stag.Type_expr.con "unit" Nil
 let int = Stag.Type_expr.con "int" Nil
 let decls =
-  Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
-  Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
-     `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("P", Cons (Ptr.make ( (Stag.Type_expr.Tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (int, Nil))))))), Nil)))), Nil))))},
-  Cons (Ptr.make ( (Stag.Toplevel.Let ("absurd", Cons (Ptr.make ( (("v", Stag.Annot.ty (Stag.Type_expr.con "void" Nil)), Nil))), Stag.Annot.ty int,
+  Cons (Box.make ( (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
+  Cons (Box.make ( (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
+     `kind = Stag.Type_decl.Kind.Variant (Cons (Box.make ( (("P", Cons (Box.make ( (Stag.Type_expr.Tuple (Cons (Box.make ( (int, Cons (Box.make ( (int, Nil))))))), Nil)))), Nil))))},
+  Cons (Box.make ( (Stag.Toplevel.Let ("absurd", Cons (Box.make ( (("v", Stag.Annot.ty (Stag.Type_expr.con "void" Nil)), Nil))), Stag.Annot.ty int,
      Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "v", Nil)))),
-  Cons (Ptr.make ( (Stag.Toplevel.let_ "p" Nil
-     (Stag.Expr.construct "P" (Cons (Ptr.make ( (Stag.Expr.Tuple (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))), Nil))))),
-  Cons (Ptr.make ( (Stag.Toplevel.let_ "first" (Cons (Ptr.make ( ("p", Nil))))
-     (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "p", Cons (Ptr.make ( ((Stag.Pattern.construct "P" (Cons (Ptr.make ( (Stag.Pattern.Var "q", Nil)))), Stag.Expr.var "q"), Nil))))))),
-  Cons (Ptr.make ( (Stag.Toplevel.let_ "extended" Nil (Stag.Expr.Poly_extend (Ptr.make ( (Nil, Stag.Expr.Poly_record (Cons (Ptr.make ( (("x", Stag.Expr.int 1), Nil)))))))),
-  Cons (Ptr.make ( (Stag.Toplevel.let_ "updated" Nil (Stag.Expr.Poly_update (Ptr.make ( (Stag.Expr.var "extended", Nil)))),
+  Cons (Box.make ( (Stag.Toplevel.let_ "p" Nil
+     (Stag.Expr.construct "P" (Cons (Box.make ( (Stag.Expr.Tuple (Cons (Box.make ( (Stag.Expr.int 1, Cons (Box.make ( (Stag.Expr.int 2, Nil))))))), Nil))))),
+  Cons (Box.make ( (Stag.Toplevel.let_ "first" (Cons (Box.make ( ("p", Nil))))
+     (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "p", Cons (Box.make ( ((Stag.Pattern.construct "P" (Cons (Box.make ( (Stag.Pattern.Var "q", Nil)))), Stag.Expr.var "q"), Nil))))))),
+  Cons (Box.make ( (Stag.Toplevel.let_ "extended" Nil (Stag.Expr.Poly_extend (Ptr.make ( (Nil, Stag.Expr.Poly_record (Cons (Box.make ( (("x", Stag.Expr.int 1), Nil)))))))),
+  Cons (Box.make ( (Stag.Toplevel.let_ "updated" Nil (Stag.Expr.Poly_update (Ptr.make ( (Stag.Expr.var "extended", Nil)))),
   Nil)))))))))))))))))))))
 |}
   in
@@ -1578,7 +1585,7 @@ let%expect_test "negative int literals" =
   let values =
     eval_values
       {|
-let decls = Cons (Ptr.make ( (Stag.Toplevel.let_ "minus_one" Nil (Stag.Expr.int (Int.neg 1)), Nil)))
+let decls = Cons (Box.make ( (Stag.Toplevel.let_ "minus_one" Nil (Stag.Expr.int (Int.neg 1)), Nil)))
 |}
   in
   let program =
@@ -1607,30 +1614,30 @@ let%expect_test "prelude helpers" =
       {|
 let int = Stag.Type_expr.con "int" Nil
 let types =
-  Cons (Ptr.make ( (Stag.Type_expr.tuple Nil,
-  Cons (Ptr.make ( (Stag.Type_expr.tuple (Cons (Ptr.make ( (int, Nil)))),
-  Cons (Ptr.make ( (Stag.Type_expr.tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (int, Nil))))))),
-  Cons (Ptr.make ( (Stag.Type_expr.con "list" (Cons (Ptr.make ( (int, Nil)))), Nil))))))))))))
+  Cons (Box.make ( (Stag.Type_expr.tuple Nil,
+  Cons (Box.make ( (Stag.Type_expr.tuple (Cons (Box.make ( (int, Nil)))),
+  Cons (Box.make ( (Stag.Type_expr.tuple (Cons (Box.make ( (int, Cons (Box.make ( (int, Nil))))))),
+  Cons (Box.make ( (Stag.Type_expr.con "list" (Cons (Box.make ( (int, Nil)))), Nil))))))))))))
 let patterns =
-  Cons (Ptr.make ( (Stag.Pattern.tuple Nil,
-  Cons (Ptr.make ( (Stag.Pattern.tuple (Cons (Ptr.make ( (Stag.Pattern.Any, Nil)))),
-  Cons (Ptr.make ( (Stag.Pattern.tuple (Cons (Ptr.make ( (Stag.Pattern.Var "a", Cons (Ptr.make ( (Stag.Pattern.Var "b", Nil))))))), Nil)))))))))
+  Cons (Box.make ( (Stag.Pattern.tuple Nil,
+  Cons (Box.make ( (Stag.Pattern.tuple (Cons (Box.make ( (Stag.Pattern.Any, Nil)))),
+  Cons (Box.make ( (Stag.Pattern.tuple (Cons (Box.make ( (Stag.Pattern.Var "a", Cons (Box.make ( (Stag.Pattern.Var "b", Nil))))))), Nil)))))))))
 let one = Stag.Expr.int 1
 let exprs =
-  Cons (Ptr.make ( (Stag.Expr.tuple Nil,
-  Cons (Ptr.make ( (Stag.Expr.tuple (Cons (Ptr.make ( (one, Nil)))),
-  Cons (Ptr.make ( (Stag.Expr.tuple (Cons (Ptr.make ( (one, Cons (Ptr.make ( (Stag.Expr.string "s", Nil))))))),
-  Cons (Ptr.make ( (Stag.Expr.apply (Stag.Expr.var "f") Nil,
-  Cons (Ptr.make ( (Stag.Expr.apply (Stag.Expr.var "f") (Cons (Ptr.make ( (one, Cons (Ptr.make ( (Stag.Expr.var "x", Nil))))))), Nil)))))))))))))))
+  Cons (Box.make ( (Stag.Expr.tuple Nil,
+  Cons (Box.make ( (Stag.Expr.tuple (Cons (Box.make ( (one, Nil)))),
+  Cons (Box.make ( (Stag.Expr.tuple (Cons (Box.make ( (one, Cons (Box.make ( (Stag.Expr.string "s", Nil))))))),
+  Cons (Box.make ( (Stag.Expr.apply (Stag.Expr.var "f") Nil,
+  Cons (Box.make ( (Stag.Expr.apply (Stag.Expr.var "f") (Cons (Box.make ( (one, Cons (Box.make ( (Stag.Expr.var "x", Nil))))))), Nil)))))))))))))))
 let decls =
-  Cons (Ptr.make ( (Stag.Toplevel.let_ "add" (Cons (Ptr.make ( ("x", Cons (Ptr.make ( ("y", Nil)))))))
-    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Ptr.make ( (Stag.Expr.var "x", Cons (Ptr.make ( (Stag.Expr.var "y", Nil)))))))),
-  Cons (Ptr.make ( (Stag.Toplevel.let_ "seven" Nil
-    (Stag.Expr.let_ "double" (Cons (Ptr.make ( ("n", Nil))))
-       (Stag.Expr.apply (Stag.Expr.var "add") (Cons (Ptr.make ( (Stag.Expr.var "n", Cons (Ptr.make ( (Stag.Expr.var "n", Nil))))))))
-       (Stag.Expr.Match (Ptr.make ( (Stag.Expr.tuple (Cons (Ptr.make ( (Stag.Expr.int 3, Cons (Ptr.make ( (one, Nil))))))),
-          Cons (Ptr.make ( ((Stag.Pattern.tuple (Cons (Ptr.make ( (Stag.Pattern.Var "a", Cons (Ptr.make ( (Stag.Pattern.Var "b", Nil))))))),
-                      Stag.Expr.apply (Stag.Expr.var "add") (Cons (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "double", Stag.Expr.var "a"))), Cons (Ptr.make ( (Stag.Expr.var "b", Nil)))))))),
+  Cons (Box.make ( (Stag.Toplevel.let_ "add" (Cons (Box.make ( ("x", Cons (Box.make ( ("y", Nil)))))))
+    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Box.make ( (Stag.Expr.var "x", Cons (Box.make ( (Stag.Expr.var "y", Nil)))))))),
+  Cons (Box.make ( (Stag.Toplevel.let_ "seven" Nil
+    (Stag.Expr.let_ "double" (Cons (Box.make ( ("n", Nil))))
+       (Stag.Expr.apply (Stag.Expr.var "add") (Cons (Box.make ( (Stag.Expr.var "n", Cons (Box.make ( (Stag.Expr.var "n", Nil))))))))
+       (Stag.Expr.Match (Ptr.make ( (Stag.Expr.tuple (Cons (Box.make ( (Stag.Expr.int 3, Cons (Box.make ( (one, Nil))))))),
+          Cons (Box.make ( ((Stag.Pattern.tuple (Cons (Box.make ( (Stag.Pattern.Var "a", Cons (Box.make ( (Stag.Pattern.Var "b", Nil))))))),
+                      Stag.Expr.apply (Stag.Expr.var "add") (Cons (Box.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "double", Stag.Expr.var "a"))), Cons (Box.make ( (Stag.Expr.var "b", Nil)))))))),
                      Nil)))))))),
   Nil))))))
 |}
@@ -1638,8 +1645,8 @@ let decls =
   let each of_value sexp_of name =
     let rec elements (value : Treewalk.Value.t) =
       match value with
-      | Construct ({ name = "prelude.Cons"; _ }, [ Ptr cell ]) ->
-        (match !cell with
+      | Construct ({ name = "prelude.Cons"; _ }, [ Box cell ]) ->
+        (match cell with
          | Tuple [ x; rest ] -> x :: elements rest
          | _ -> [])
       | _ -> []

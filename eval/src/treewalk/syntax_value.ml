@@ -54,14 +54,15 @@ module To_value = struct
       let char c = Value.Char c
       let tuple vs = Value.Tuple vs
       let ptr v = Value.Ptr (ref v)
+      let box v = Value.Box v
       let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
       let ref_ kind name = Value.Ref { kind; name }
 
       let rec append (xs : Value.t) ys =
         match xs with
-        | Construct ({ name; _ }, [ Ptr { contents = Tuple [ x; rest ] } ])
+        | Construct ({ name; _ }, [ Box (Tuple [ x; rest ]) ])
           when String.equal name (Prelude_path.canonical "Cons") ->
-          con "Cons" [ ptr (tuple [ x; append rest ys ]) ]
+          con "Cons" [ box (tuple [ x; append rest ys ]) ]
         | Construct ({ name; _ }, [])
           when String.equal name (Prelude_path.canonical "Nil") -> ys
         | _ ->
@@ -214,8 +215,8 @@ module Of_value = struct
     let rec loop i acc value =
       match constructor "list" value with
       | "Nil", { values = [||]; _ } -> List.rev acc
-      | "Cons", { values = [| Ptr cell |]; _ } ->
-        (match !cell with
+      | "Cons", { values = [| Box cell |]; _ } ->
+        (match cell with
          | Tuple [ x; tail ] ->
            loop (i + 1) (within (Element i) f x :: acc) tail
          | other -> unexpected ~expected:"a list cell's pair" other)

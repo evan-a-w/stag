@@ -1954,3 +1954,53 @@ let%expect_test "a reopened scheme is refined in place" =
     ('_a * '_a * <int>{..'_b}) * <int>{..'_c} where ..'_c <= {..'_b}
     |}]
 ;;
+
+let%expect_test "joins settle through each other, the binding unification \
+                 getting their error and the next unification none"
+  =
+  let fresh = Fresh.create () in
+  let join () = TVar (Unify.join_var fresh ~rank:1) in
+  let returning locality =
+    TArrow
+      ( int
+      , string
+      , { Arrow_modes.default with
+          res = Fixed { Arrow_modes.default_const with locality }
+        } )
+  in
+  let a = join () in
+  let b = join () in
+  let c = join () in
+  let sub ~lower ~upper =
+    print_s
+      [%sexp
+        (Unify.sub_ty fresh ~lower ~upper
+         : (unit, Unification_error.t) Result.t)]
+  in
+  sub ~lower:a ~upper:b;
+  sub ~lower:b ~upper:c;
+  (* Binding [c] settles [b <= c], whose binding of [b] settles [a <= b]. *)
+  unify_ty fresh ~ty1:c ~ty2:(returning Global);
+  print_endline (Type.to_string_hum (TTuple [ a; b; c ]));
+  unify_ty fresh ~ty1:a ~ty2:(returning Local);
+  unify_ty fresh ~ty1:(tvar fresh ~rank:1) ~ty2:int;
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (int -> string) * (int -> string) * (int -> string)
+    (Error
+     (Type_mismatch (TArrow (TCon int ()) (TCon string ()))
+      (TArrow (TCon int ()) (TCon string ())
+       (res ((stage Nonportable) (provenance Gc) (locality Local))))
+      (Modes
+       ("Mode mismatch" (var m2) (axis locality) (lower Local) (upper Global)
+        (lower_because
+         ("a function type fixes it, as the function types are unified"))
+        (upper_because
+         ("a function type fixes it, as a function is used at a type with other modes"
+          "a function is used at a type with other modes"))))))
+    (Ok ())
+    |}]
+;;

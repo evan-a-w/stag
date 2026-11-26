@@ -32,7 +32,7 @@ type r = { g : ptr[int] @@ global; l : ptr[int] }
 let l (r @ local) = Ptr.make r.l
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:11-16), then r is passed to the function (at t.stag:3:20-32), then r is used (at t.stag:3:29-30), then its field is read (at t.stag:3:29-32), then it is passed to a function (at t.stag:3:20-32), but must be at most global, because Ptr.make holds it, then the function types are unified |}];
+    {| This is regional, because it is annotated local (at t.stag:3:11-16), then r is passed to the function (at t.stag:3:20-32), then r is used (at t.stag:3:29-30), then its field is read (at t.stag:3:29-32), then it is passed to a function (at t.stag:3:20-32), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}];
   (* Stage: what a [@@ portable] field holds is portable, whatever else the
      record holds. *)
   check
@@ -44,8 +44,8 @@ let p u = let f @ portable = (make ()).p in f
   [%expect
     {|
     type r = { p : (string -> string) @@ portable; n : string -> string }
-    val make : 'a @ 'm0 -> r @ 'm1 with nonportable gc <= 'm1
-    val p : 'a @ 'm0 -> (string -> string) @ 'm1 with gc <= 'm1
+    val make : 'a @ _ -> r @ 'm0 with nonportable gc <= 'm0
+    val p : 'a @ _ -> (string -> string) @ 'm0 with gc <= 'm0
     |}];
   check
     {|
@@ -54,14 +54,14 @@ let make u = { p = (fun x -> x); n = (let n = Int.to_string 3 in fun x -> String
 let n u = let f @ portable = (make ()).n in f
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then the function types are unified, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then a function is used at a type with other modes, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
   check
     {|
 type r = { p : string -> string @@ portable }
 let bad u = { p = (let n = Int.to_string 3 in fun x -> String.append x n) }
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:27-42), then n is bound (at t.stag:3:18-73), but must be at most portable, because it is held by a field or argument with a modality (at t.stag:3:18-73) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:27-42), then n is bound (at t.stag:3:18-73), but must be at most portable, because it is held by a field or argument with a modality (at t.stag:3:18-73) |}];
   (* Provenance: a [@@ gc] field is gc even when the record holds external
      values. *)
   check
@@ -76,8 +76,8 @@ let owned u = let s @ gc = (make ()).owned in s
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { owned : string @@ gc; borrowed : string }
-    val make : 'a @ 'm0 -> r @ 'm1 with external <= 'm1
-    val owned : 'a @ 'm0 -> string @ 'm1 with gc <= 'm1
+    val make : 'a @ _ -> r @ 'm0 with external <= 'm0
+    val owned : 'a @ _ -> string @ 'm0 with gc <= 'm0
     |}];
   check
     (ext
@@ -88,7 +88,7 @@ let borrowed u = let s @ gc = (make ()).borrowed in s
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:5:39-46), then the function returns it (at t.stag:5:13-48), then the function types are unified, then the function returns it (at t.stag:6:30-39), then its field is read (at t.stag:6:30-48), then it is bound by an annotated let (at t.stag:6:25-27), but must be at most gc, because it is annotated gc (at t.stag:6:25-27) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-46), then the function returns it (at t.stag:5:13-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:30-39), then its field is read (at t.stag:6:30-48), then it is bound by an annotated let (at t.stag:6:25-27), but must be at most gc, because it is annotated gc (at t.stag:6:25-27) |}];
   check
     (ext
      ^ {|
@@ -96,7 +96,7 @@ type r = { owned : string @@ gc }
 let bad u = { owned = ext "a" }
 |});
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:5:22-29), but must be at most gc, because it is held by a field or argument with a modality (at t.stag:5:22-29) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:22-29), but must be at most gc, because it is held by a field or argument with a modality (at t.stag:5:22-29) |}];
   (* Several axes at once, and as constructor arguments. *)
   check
     (ext
@@ -126,7 +126,7 @@ let read u = let s @ static = r.s in s
     {|
     type r = { s : string @@ portable }
     val r : r
-    val read : 'a @ 'm0 -> string @ 'm1
+    val read : 'a @ _ -> string @ _
     |}];
   (* Read through a pointer, it is what the cell's [@@] says, whatever the
      pointer's own mode: a cell's aliases may store anything that fits. *)
@@ -163,7 +163,7 @@ let set_any u = p.*.any <- ext "c"
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { owned : string @@ gc; any : string }
     val p : ptr[r @@ external]
-    val set_any : 'a @ 'm0 -> unit @ 'm1
+    val set_any : 'a @ _ -> unit @ _
     |}];
   check
     {|
@@ -182,7 +182,7 @@ let set_owned u = p.*.owned <- ext "c"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:31-38), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:6:31-38) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:31-38), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:6:31-38) |}];
   check
     {|
 type r = { owned : string @@ gc; any : string }
@@ -193,7 +193,7 @@ let read_owned u = let s @ gc = p.*.owned in s
     {|
     type r = { owned : string @@ gc; any : string }
     val p : ptr[r @@ external]
-    val read_owned : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1
+    val read_owned : 'a @ _ -> string @ 'm0 with nonportable gc <= 'm0
     |}];
   (* Only the last cell's [@@] says what is stored: the earlier ones hold the
      pointer to it. *)
@@ -208,7 +208,7 @@ let set u = p.*.* <- ext "b"
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val p : ptr[ptr[string @@ external]]
-    val set : 'a @ 'm0 -> unit @ 'm1
+    val set : 'a @ _ -> unit @ _
     |}]
 ;;
 
@@ -222,8 +222,8 @@ let store u = p.* <- (fun x -> String.append x x)
   [%expect
     {|
     val p : ptr[(string -> string) @@ portable]
-    val read : 'a @ 'm0 -> (string -> string) @ 'm1 with gc <= 'm1
-    val store : 'a @ 'm0 -> unit @ 'm1
+    val read : 'a @ _ -> (string -> string) @ 'm0 with gc <= 'm0
+    val store : 'a @ _ -> unit @ _
     |}];
   check
     {|
@@ -231,7 +231,7 @@ let p : ptr[(string -> string) @@ portable] = Ptr.make (fun x -> x)
 let store u = p.* <- (let n = Int.to_string 3 in fun x -> String.append x n)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:30-45), then n is bound (at t.stag:3:21-76), but must be at most portable, because it is stored into a cell, which holds only what fits its modality (at t.stag:3:21-76) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:30-45), then n is bound (at t.stag:3:21-76), but must be at most portable, because it is stored into a cell, which holds only what fits its modality (at t.stag:3:21-76) |}];
   check
     {|
 let p : ptr[string -> string] = Ptr.make (fun x -> x)
@@ -269,12 +269,12 @@ let static_tagged : tagged[static] = { tag = 1; payload = "a" }
     {|
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type tagged['m0 : mode] = { tag : int; payload : string @@ 'm0 }
-    val get : cell['a, 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
-    val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val get : cell['a, 'm0] @ _ -> 'a @ 'm1 with 'm0 <= 'm1
+    val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext_cell : cell[string, external]
     val portable_cell : cell[string, portable]
     val gc_cell : cell[string, gc]
-    val tag : tagged['m1] @ 'm0 -> int @ 'm2
+    val tag : tagged[_] @ _ -> int @ _
     val payload : tagged['m1] @ 'm0 -> string @ 'm2 with release(locality('m0)) <= locality('m2) and 'm1 <= 'm2
     val static_tagged : tagged[static]
     |}]
@@ -294,7 +294,7 @@ let ok u = c.v.* <- ext "b"
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     val c : cell[string, external]
-    val ok : 'a @ 'm0 -> unit @ 'm1
+    val ok : 'a @ _ -> unit @ _
     |}];
   check
     (ext
@@ -305,7 +305,7 @@ let bad u = c.v.* <- ext "b"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:21-28), but must be at most gc, because the types are unified |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:21-28), but must be at most gc, because the types are unified |}];
   check
     {|
 type tagged['p : mode] = { tag : int; payload : string @@ 'p }
@@ -459,7 +459,7 @@ let read u = let s @ portable = p.* in .< s >.
   [%expect
     {|
     val p : ptr[string @@ portable]
-    val read : 'a @ 'm0 -> <string>{..'b} @ 'm1 with gc <= 'm1
+    val read : 'a @ _ -> <string>{..'b} @ 'm0 with gc <= 'm0
     |}];
   (* A cell may change between evaluations, so what is read from it is never
      [const], even from a [const] cell. *)
@@ -489,7 +489,7 @@ let constrained = .< fun (r : r) -> let s @ gc = r.any in s >.
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type r = { owned : string @@ gc; any : string }
-    val code : <cell[string, external] @ 'm0 -> unit @ 'm1>{..'a}
+    val code : <cell[string, external] @ _ -> unit @ _>{..'a}
     val fields : <r @ 'm0 -> string @ 'm1>{..'a} with stage('m0) <= stage('m1) and release(locality('m0)) <= locality('m1) and gc <= 'm1
     val constrained : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= gc and gc <= 'm1
     |}]
@@ -507,7 +507,7 @@ let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
     |}];
   check
     {|
@@ -520,10 +520,10 @@ let use (x @ local) = let r @ global = f x gb in r
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
     val gb : box[gc]
-    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and stage('m3) <= stage('m4) and provenance('m3) <= provenance('m4) and gc <= 'm1
-    val use : string @ 'm0 -> string @ 'm1 with local <= 'm0 and 'm0 <= gc and nonportable gc <= 'm1
+    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m4) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and 'm3 <= 'm4 and gc <= 'm1
+    val use : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
     |}]
 ;;
 
@@ -546,7 +546,7 @@ let get_f : r -> (string @ nonportable gc global -> string @ nonportable gc glob
 let use (x @ local) = get_f {f = fun s -> s} x
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48), then the function types are unified |}]
+    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "printing: a variable's relation to itself" =
@@ -558,7 +558,7 @@ let s : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('m) = fun x ->
   [%expect
     {|
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : 'a @ 'm0 -> 'a @ 'm1 with release(locality('m0)) <= locality('m0)
+    val s : 'a @ 'm0 -> 'a @ _ with release(locality('m0)) <= locality('m0)
     |}]
 ;;
 
@@ -604,7 +604,7 @@ let s : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with release(locality('m0)) <= locality('m3) and 'm2 <= 'm3
+    val s : 'a @ 'm0 -> box['m1] @ _ -> 'a @ 'm2 with release(locality('m0)) <= locality('m2) and 'm1 <= 'm2
     |}];
   check
     {|
@@ -614,7 +614,7 @@ let s : box['m3] -> unit with 'm3 <= local = fun x -> ()
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val s : box['m0] -> unit
+    val s : box[_] -> unit
     |}];
   (* A plain relation relates every axis, so locality through ['m3] too. *)
   round_trip
@@ -628,7 +628,7 @@ let s : box['m3] @ 'm2 -> 'a @ 'm0 -> 'a @ 'm4
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : box['m1] @ 'm0 -> 'a @ 'm2 -> 'a @ 'm3 with 'm1 <= 'm3 and 'm2 <= 'm1
+    val s : box['m0] @ _ -> 'a @ 'm1 -> 'a @ 'm2 with 'm0 <= 'm2 and 'm1 <= 'm0
     |}]
 ;;
 
@@ -650,8 +650,8 @@ let u : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with locality('m0) <= locality('m3)
-    val t : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with 'm0 <= 'm2 and locality('m0) <= locality('m3)
+    val s : 'a @ 'm0 -> box[_] @ _ -> 'a @ 'm1 with locality('m0) <= locality('m1)
+    val t : 'a @ 'm0 -> box['m1] @ _ -> 'a @ 'm2 with 'm0 <= 'm1 and locality('m0) <= locality('m2)
     val u : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with 'm0 <= 'm2 and 'm1 <= 'm2 and 'm2 <= 'm3
     |}]
 ;;
@@ -700,7 +700,7 @@ let read = let z @ const = b.v in z
     {|
     This is portable, because b is a parameter, which may differ between calls (at t.stag:8:16-40), then b is used (at t.stag:8:32-33), then its field is read (at t.stag:8:32-35), then it is bound by an annotated let (at t.stag:8:24-29), but must be at most const, because it is annotated const (at t.stag:8:24-29)
     This is portable, because b is a parameter, which may differ between calls (at t.stag:9:25-49), then b is used (at t.stag:9:41-42), then its field is read (at t.stag:9:41-44), then it is bound by an annotated let (at t.stag:9:33-38), but must be at most const, because it is annotated const (at t.stag:9:33-38)
-    This is nonportable, because Ptr.make allocates it at run time, then the function types are unified, then the function returns it (at t.stag:10:14-24), then it is held by a field or argument with a modality (at t.stag:10:14-24), then the types are unified, then its field is read (at t.stag:11:27-30), then it is bound by an annotated let (at t.stag:11:19-24), but must be at most const, because it is annotated const (at t.stag:11:19-24)
+    This is nonportable, because Ptr.make allocates it at run time, then a function is used at a type with other modes, then the function returns it (at t.stag:10:14-24), then it is held by a field or argument with a modality (at t.stag:10:14-24), then the types are unified, then its field is read (at t.stag:11:27-30), then it is bound by an annotated let (at t.stag:11:19-24), but must be at most const, because it is annotated const (at t.stag:11:19-24)
     |}]
 ;;
 
@@ -721,7 +721,7 @@ let f (x : string @ 'p) (b : box['p]) = { v = x }
   [%expect
     {|
     type box['m0 : mode] = { v : string @@ 'm0 }
-    val f : string @ 'm0 -> (box['m0] @ 'm2 -> box['m4] @ 'm3) @ 'm1 with 'm0 <= 'm4 and 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and portable <= 'm4 and gc <= 'm1
+    val f : string @ 'm0 -> (box['m0] @ _ -> box['m3] @ 'm2) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and portable <= 'm3 and gc <= 'm1
     |}]
 ;;
 

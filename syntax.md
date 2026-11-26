@@ -238,6 +238,15 @@ evaluating `e : t`. Both `p.*` and `*p` read that value. In a pattern,
 tightly than function application; for example, `f *p` calls `f` with the
 pointee, not with the pointer.
 
+`Box.make e` allocates an immutable `box[t]`, read the same way (`b.*`,
+`*b`, and `*p` in patterns) but never stored to. A box is covariant in its
+contents' modes, a pointer invariant; the prelude's `list` is built of boxes.
+An unannotated dereference is of a `ptr`, so a function dereferencing a
+box it is given annotates it: `let get (b : box['a]) = b.*`.
+
+A mode written `_` (`t @ _`, `cell[t, _]`) is a fresh variable, related to
+nothing: a `with` constraint can't name it, and a declaration can't use it.
+
 `ptr[t @@ m]` says what stage and provenance (see [Modes](#modes)) the
 values in the pointer's cell may have, as atoms (`portable external`) or a
 mode variable, as in

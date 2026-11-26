@@ -21,6 +21,7 @@ type ('a, 'bound) var =
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
   ; mutable in_record : bool
+  ; mutable watchers : ('a, unification_error) Watcher.t list
   }
 
 and ty =
@@ -103,6 +104,28 @@ and kept =
       ; ty2 : ty
       }
 
+(** Why unifying failed: see [Unification_error], which re-exports it. A
+    watcher's errors are these too, as binding a variable is part of unifying. *)
+and unification_error =
+  | Type_mismatch of ty * ty * type_mismatch_reason
+  | Row_mismatch of row * row * row_mismatch_reason
+  | Occurs_check_failed of arg
+  | Assigned_in_record of string * row
+  | Bound_var of Mode.Error.t
+
+and type_mismatch_reason =
+  | Base_types_not_equal of string * string
+  | Args_length_mismatch of int * int
+  | Mismatch_arg_kind of arg * arg
+  | Structural_mismatch
+  | Modes of Mode.Error.t
+
+and row_mismatch_reason =
+  | Missing_label of string
+  | Presence_mismatch of string
+  | Assigned of string
+  | Cyclic_row
+
 val kept_id : kept -> id
 
 module Var : sig
@@ -118,6 +141,7 @@ module Var : sig
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     ; mutable in_record : bool
+    ; mutable watchers : ('a, unification_error) Watcher.t list
     }
 
   val create : id -> 'a state -> ('a, _) t
@@ -174,6 +198,17 @@ val ptr : ?held:Mode_arg.t -> ty -> ty
 
 (** Of a pointer type, with what it points to. *)
 val of_ptr : ty -> (ty * Mode_arg.t) option
+
+val box_name : string
+
+(** [ptr] or [box]: a pointer, through which types may be recursive. *)
+val is_pointer_name : string -> bool
+
+(** [box[contents]]: an immutable block holding [contents], read as a part of
+    the box (at most the box's mode). *)
+val box : ty -> ty
+
+val of_box : ty -> ty option
 
 (** Copies of types as they are now, unaffected by later unification, eg. for an
     error to show them as they were when it arose. Variables keep their ids, and
@@ -265,9 +300,6 @@ end
 
 val iter_ty : 'e Iter.t @ local -> ty -> (unit, 'e) Result.t
 val iter_row : 'e Iter.t @ local -> row -> (unit, 'e) Result.t
-
-(** The variables of what the cells of the pointers in the type may hold. *)
-val iter_held : ty -> f:(Mode.Var.t -> unit) @ local -> unit
 
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are

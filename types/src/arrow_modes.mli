@@ -47,3 +47,8 @@ val map : t -> f:(Mode.Var.t -> Mode.Var.t) -> t
 
 (** Whether the modes are the same: equal fixed modes, or the same variables. *)
 val same : t -> t -> bool
+
+(** Constrains the arrow of modes [lower] to be usable as one of modes [upper]:
+    its argument takes at least what [upper]'s does, its result is at most
+    [upper]'s. [curry] is equated. *)
+val sub : lower:t -> upper:t -> (unit, Mode.Error.t) Result.t

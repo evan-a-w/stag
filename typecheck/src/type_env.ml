@@ -38,6 +38,7 @@ module Decl = struct
     ; mutable prepared :
         (Signature.Type_decl.Kind.t * Reflected_decl.Kind.t option) option
     ; mutable value_parameters : Int.Set.t option
+    ; mutable variances : Variance.t list option
     ; mutable checked : Signature.Type_decl.t option
     ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
@@ -303,12 +304,22 @@ module Annotation_vars = struct
   let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
 
   let mode t name ~loc =
-    only_kind
-      name
-      ~loc
-      ~in_:t.modes
-      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
-      ~default:(fun () -> fresh_mode t)
+    if String.equal name "_"
+    then Ok (fresh_mode t)
+    else
+      only_kind
+        name
+        ~loc
+        ~in_:t.modes
+        ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
+        ~default:(fun () -> fresh_mode t)
+  ;;
+
+  (* In a constraint, [_] would relate nothing else. *)
+  let related t name ~loc =
+    if String.equal name "_"
+    then Error (Typecheck_error.create ~loc Anonymous_mode_in_constraint)
+    else mode t name ~loc
   ;;
 end
 
@@ -522,7 +533,7 @@ module Vars = struct
     in
     match expr with
     | Axis (on, { txt = Var name; loc }) ->
-      let%map var = Annotation_vars.mode vars name ~loc in
+      let%map var = Annotation_vars.related vars name ~loc in
       var, Mode.Morphism.identity (axis on)
     | Meet (t, atom) ->
       let (T (on, point)) = Mode_atoms.point atom in
@@ -573,11 +584,11 @@ module Vars = struct
        | Atoms _, Atoms _ ->
          error ~loc (Invalid_mode "a constraint must be on a mode variable")
        | Var lower_name, Var upper_name ->
-         let%bind.Result lower = Annotation_vars.mode vars lower_name ~loc in
-         let%bind.Result upper = Annotation_vars.mode vars upper_name ~loc in
+         let%bind.Result lower = Annotation_vars.related vars lower_name ~loc in
+         let%bind.Result upper = Annotation_vars.related vars upper_name ~loc in
          checked (Mode.Var.submode lower upper reason)
        | Var lower, Atoms atoms ->
-         let%bind.Result var = Annotation_vars.mode vars lower ~loc in
+         let%bind.Result var = Annotation_vars.related vars lower ~loc in
          checked
            (bound
               atoms
@@ -585,7 +596,7 @@ module Vars = struct
                 { f = (fun axis point -> Mode.Var.at_most var axis point reason)
                 })
        | Atoms atoms, Var upper ->
-         let%bind.Result var = Annotation_vars.mode vars upper ~loc in
+         let%bind.Result var = Annotation_vars.related vars upper ~loc in
          checked
            (bound
               atoms
@@ -1043,6 +1054,7 @@ let declare
       ; used_while_defined = false
       ; prepared = None
       ; value_parameters = None
+      ; variances = None
       ; checked = None
       ; failed =
           (match decl.kind with
@@ -1291,6 +1303,54 @@ let value_parameters t (root : Decl.t) =
   visit root
 ;;
 
+(* A recursive group is solved by iterating from [Bivariant] until nothing
+   changes. Only the outermost declaration's result is cached, as the others'
+   depend on assumptions about it. *)
+let variances t =
+  let assumed = String.Table.create () in
+  let rec lookup name =
+    match name with
+    | name when String.equal name Type.ptr_name ->
+      Some [ Variance.Invariant; Invariant ]
+    | name when String.equal name Type.box_name -> Some [ Variance.Covariant ]
+    | _ -> Option.map (Hashtbl.find t.types name) ~f:of_decl
+  and of_decl (decl : Decl.t) =
+    match decl.variances with
+    | Some variances -> variances
+    | None ->
+      let invariant () =
+        List.map (Decl.params decl) ~f:(fun _ -> Variance.Invariant)
+      in
+      (match Hashtbl.find assumed decl.name with
+       | Some variances -> variances
+       | None ->
+         (match prepare t decl with
+          | Error _ -> invariant ()
+          | Ok (kind, _) ->
+            let outermost = Hashtbl.is_empty assumed in
+            let rec solve assumption =
+              Hashtbl.set assumed ~key:decl.name ~data:assumption;
+              let variances =
+                Param_variance.compute
+                  ~con:lookup
+                  ~params:(Decl.params decl)
+                  kind
+              in
+              if [%equal: Variance.t list] variances assumption
+              then variances
+              else solve variances
+            in
+            let variances =
+              solve
+                (List.map (Decl.params decl) ~f:(fun _ -> Variance.Bivariant))
+            in
+            Hashtbl.remove assumed decl.name;
+            if outermost then decl.variances <- Some variances;
+            variances))
+  in
+  lookup
+;;
+
 let create ?(record_references = false) fresh ~report =
   let t = create_tables fresh ~record_references ~report in
   Fresh.set_value_parameters fresh (fun name ->
@@ -1298,6 +1358,7 @@ let create ?(record_references = false) fresh ~report =
       match value_parameters t decl with
       | Ok params -> params
       | Error _ -> None));
+  Fresh.set_variances fresh (variances t);
   t
 ;;
 
@@ -1560,7 +1621,7 @@ let pointer_free t ty =
       (match Type.canonical_ty ty with
        | TVar _ | TArrow _ | TCode _ -> false
        | TCon (("int" | "bool" | "char" | "unit"), []) -> true
-       | TCon (name, _) when String.equal name Type.ptr_name -> false
+       | TCon (name, _) when Type.is_pointer_name name -> false
        | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
        | TTuple tys -> List.for_all tys ~f:(ty_ params)
        | TRecord { id; row } | TVariant { id; row } ->

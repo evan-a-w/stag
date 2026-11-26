@@ -61,7 +61,7 @@ let argument_mismatch v = match v with `A 1 -> 1 | `A -> 2
     val repeated : [`A of int] -> int
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 45 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 50 1)))
        (Missing_label C)))
      @ t.stag:3:18-20)
     (Unification_error
@@ -131,7 +131,7 @@ let%expect_test "residuals of a catch-all" =
     val open_ended : [`A of 'a | `B of 'a; ..'b] -> ([..'b] -> 'a) -> 'a
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 115 1)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 122 1)))
       (Missing_label C)))
     |}]
 ;;
@@ -319,12 +319,12 @@ let maybe_c v =
      @ t.stag:2:32-41)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 35 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 37 1)))
        (Missing_label C)))
      @ t.stag:2:13-44)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 41 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 44 1)))
        (Missing_label C)))
      @ t.stag:4:2-22)
     |}]
@@ -474,18 +474,18 @@ let two = T (`Cons (1, Ptr.make (T `Nil)))
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 22 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 25 1))))) @
      t.stag:2:27-33)
     ((Unification_error
       (Row_mismatch
        (RExtend A Present (TCon unit ())
         (RVar
          (Link
-          (RExtend A (PVar (Unbound 36 1)) (TCon unit ()) (RVar (Unbound 37 1))))))
+          (RExtend A (PVar (Unbound 39 1)) (TCon unit ()) (RVar (Unbound 40 1))))))
        (RExtend B Present (TCon unit ())
         (RVar
          (Link
-          (RExtend A (PVar (Unbound 36 1)) (TCon unit ()) (RVar (Unbound 37 1))))))
+          (RExtend A (PVar (Unbound 39 1)) (TCon unit ()) (RVar (Unbound 40 1))))))
        Cyclic_row))
      @ t.stag:2:59-60)
     ((Infinite_type_layout t) @ t.stag:2:5-6)

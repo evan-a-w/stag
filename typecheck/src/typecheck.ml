@@ -674,6 +674,7 @@ module Scope = struct
   ;;
 
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
+  let join_ty ids t = Type.TVar (Unify.join_var ids ~rank:t.rank)
   let fresh_row ids t = Type.RVar (Fresh.var ids ~rank:t.rank)
   let fresh_presence ids t = Type.PVar (Fresh.var ids ~rank:t.rank)
   let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
@@ -710,7 +711,7 @@ module Scope = struct
         match error with
         | Mode.Error.Mismatch { upper_because; _ } ->
           Sexp.to_string [%sexp (upper_because : Mode.Reason.t list)]
-        | Unequal _ -> Sexp.to_string [%sexp (error : Mode.Error.t)]
+        | Unequal _ | Exceeds _ -> Sexp.to_string [%sexp (error : Mode.Error.t)]
       in
       report t ~once (Typecheck_error.create ~loc (Mode_error error));
       false
@@ -738,6 +739,16 @@ module Scope = struct
   (* Whether they unify: if not, what checked is to become [Error]. *)
   let unifies ids t ~ty1 ~ty2 ~loc =
     match Unify.unify_ty ids ~ty1 ~ty2 with
+    | Ok () -> true
+    | Error error ->
+      report t (Typecheck_error.unification_error ~loc error);
+      false
+  ;;
+
+  (* Like [unifies], but what has [lower] may be used as an [upper]: the modes
+     in them are related by variance. *)
+  let subtypes ids t ~lower ~upper ~loc =
+    match Unify.sub_ty ids ~lower ~upper with
     | Ok () -> true
     | Error error ->
       report t (Typecheck_error.unification_error ~loc error);
@@ -1468,14 +1479,21 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     node (Var ident) ty, [ var ]
   | Lit lit -> node (Lit lit) (Syntax.Lit.ty lit), []
   | Deref inner ->
-    let held, expected =
-      match Option.bind expected ~f:Type.of_ptr with
-      | Some (pointee, held) -> held, Some pointee
-      | None -> Mode_rules.fresh_held (Scope.modes scope), None
-    in
-    let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
-    ( node (Deref inner) (Type.ptr ~held inner.ty)
-    , Pattern_var.under (Modality.of_cell held) bindings )
+    (match Option.bind expected ~f:Type.of_box with
+     | Some contents ->
+       let inner, bindings =
+         pattern_type t scope ~pattern:inner ~expected:contents
+       in
+       node (Deref inner) (Type.box inner.ty), bindings
+     | None ->
+       let held, expected =
+         match Option.bind expected ~f:Type.of_ptr with
+         | Some (pointee, held) -> held, Some pointee
+         | None -> Mode_rules.fresh_held (Scope.modes scope), None
+       in
+       let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
+       ( node (Deref inner) (Type.ptr ~held inner.ty)
+       , Pattern_var.under (Modality.of_cell held) bindings ))
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
@@ -1702,7 +1720,7 @@ let add_quoted_use (scope : Scope.t) (use : Quoted_use.t) =
 ;;
 
 let quoted_use t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
-  let ty = Type.TVar (Fresh.var t ~rank:scope.rank) in
+  let ty = Scope.join_ty t scope in
   add_quoted_use
     scope
     { awaited = toplevel.ident
@@ -2038,11 +2056,12 @@ let has_failed (toplevel : Toplevel.t) =
   | Unchecked | In_progress _ -> false
 ;;
 
-(* Unifies [use]'s type with [ty], the type of the toplevel it uses, reporting
-   if they differ. In an instance of a scheme that failed, eg. as its own use of
-   the toplevel differs, the error was reported there. *)
-let unify_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
-  match Unify.unify_ty t ~ty1:use.ty ~ty2:ty with
+(* Relates [ty], the type of the toplevel [use] is of, to [use]'s type by
+   variance, as a use of a finished toplevel is, reporting if they differ. In an
+   instance of a scheme that failed, eg. as its own use of the toplevel differs,
+   the error was reported there. *)
+let relate_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
+  match Unify.sub_ty t ~lower:ty ~upper:use.ty with
   | Ok () -> true
   | Error error ->
     if List.exists use.via ~f:(fun via ->
@@ -2087,6 +2106,20 @@ let instance_for_use t (awaited : Toplevel.t) (use : Quoted_use.t) ~rank ~on_use
            ~reporter:use.reporter))
 ;;
 
+(* Fixes the mode arguments of [ty], of toplevel [name] not generalized, each by
+   where it occurs: [None] if in several ways. *)
+let default_mode_args t ty ~name =
+  let positions = Int.Table.create () in
+  Mode_arg_position.iter ~con:(Fresh.variances t) ty ~f:(fun var position ->
+    Hashtbl.update positions (Mode.Var.id var) ~f:(function
+      | None -> var, Some position
+      | Some (var, Some before) when Mode_arg_position.equal before position ->
+        var, Some position
+      | Some (var, _) -> var, None));
+  Hashtbl.iter positions ~f:(fun (var, position) ->
+    Mode_rules.default_mode_arg var position ~name)
+;;
+
 (* Refines [awaiting]'s schemes by the finished toplevels it uses. *)
 let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
   let awaited (use : Quoted_use.t) =
@@ -2123,14 +2156,22 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
           ~rank:Scc_frame.toplevel_rank
           ~on_use:(fun added_use -> added := added_use :: !added)
       in
-      ignore (unify_use t program use ~ty : bool));
+      ignore (relate_use t program use ~ty : bool));
     let uses = remaining @ List.rev !added in
+    let errors =
+      Scheme.generalize_watchers
+        ~rank:0
+        (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty))
+    in
+    (match finished with
+     | use :: _ -> List.iter errors ~f:(Program_env.report_use program use)
+     | [] -> ());
     Scheme.generalize
       t
       ~rank:0
       (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty));
     List.iter awaiting.schemes ~f:(fun (name, ty) ->
-      Type.iter_held ty ~f:(Mode_rules.default_held ~name));
+      default_mode_args t ty ~name);
     awaiting.uses <- uses;
     List.iter uses ~f:(fun use -> await awaiting (awaited use)))
 ;;
@@ -2155,7 +2196,7 @@ let settle t (program : Program_env.t) (members : Toplevel.t list) =
             let awaited = Program_env.toplevel program added.awaited.name in
             awaited.pending_uses <- added :: awaited.pending_uses)
         in
-        ignore (unify_use t program use ~ty : bool))))
+        ignore (relate_use t program use ~ty : bool))))
 ;;
 
 (* [quoting] are the uses the component's code made of toplevels being checked.
@@ -2187,7 +2228,7 @@ let finish_scc
     List.fold own ~init:true ~f:(fun unified (use : Quoted_use.t) ->
       let quoted = Program_env.toplevel program use.awaited.name in
       match quoted.state with
-      | In_progress { ty; _ } -> unify_use t program use ~ty && unified
+      | In_progress { ty; _ } -> relate_use t program use ~ty && unified
       | Unchecked | Done _ ->
         raise_s
           [%message
@@ -2268,6 +2309,22 @@ let finish_scc
         raise_s
           [%message "finish_scc: member not checked" (member : Toplevel.t)])
   in
+  (* What generalizing does to the join variables, or, if [tys] are not
+     generalized, so fixed, its equivalent. *)
+  let settle_joins ty =
+    if generalize
+    then Scheme.generalize_watchers ~rank:0 [ ty ]
+    else Scheme.fix_joins t [ ty ]
+  in
+  List.iter2_exn members tys ~f:(fun member ty ->
+    List.iter (settle_joins ty) ~f:(fun error ->
+      Program_env.report
+        program
+        (Module_scope.within
+           member.module_
+           (Typecheck_error.unification_error ~loc:member.expr.loc error))));
+  List.iter others ~f:(fun (use : Quoted_use.t) ->
+    List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
   let awaiting =
     if generalize
     then (
@@ -2295,7 +2352,7 @@ let finish_scc
   if failed then Component.fail component;
   Component.finish component;
   List.iter2_exn members tys ~f:(fun member ty ->
-    Type.iter_held ty ~f:(Mode_rules.default_held ~name:member.ident.name));
+    default_mode_args t ty ~name:member.ident.name);
   let members =
     List.map2_exn members tys ~f:(fun member ty ->
       match member.state with
@@ -2359,6 +2416,13 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
     Type.TArrow
       ( pointee
       , Type.ptr ~held pointee
+      , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
+  | Box_make ->
+    let contents = Scope.fresh_ty t scope in
+    let arg, res = Mode_rules.box_make (Scope.modes scope) in
+    Type.TArrow
+      ( contents
+      , Type.box contents
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
   | _ ->
     Intrinsic.ty
@@ -2956,7 +3020,7 @@ and expr_type
                    match Type.canonical_ty b with
                    | TVar _ -> true
                    | _ -> false) ->
-        Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
+        Scope.subtypes t scope ~lower:b ~upper:expected ~loc
       | Some _ | None -> true
     in
     let result_matches = ref true in
@@ -2988,9 +3052,10 @@ and expr_type
           check_expr t scope ~at ~expr:x ~ty:a)
     in
     (match f.desc with
-     | Var (Intrinsic Ptr_make) -> Mode_rules.Alloc.pointer at
+     | Var (Intrinsic (Ptr_make | Box_make)) -> Mode_rules.Alloc.pointer at
      | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
+       when String.equal ident.name (Prelude_path.canonical "Ptr.make")
+            || String.equal ident.name (Prelude_path.canonical "Box.make") ->
        Mode_rules.Alloc.pointer at
      | _ -> ());
     if !result_matches
@@ -3056,7 +3121,12 @@ and expr_type
     let args = List.map arg_types ~f:fst in
     let generalized = generalizes scope mode ~is_function ~loc in
     if generalized
-    then Scheme.generalize t ~rank:scope.rank [ ty ]
+    then (
+      List.iter
+        (Scheme.generalize_watchers ~rank:scope.rank [ ty ])
+        ~f:(fun error ->
+          Scope.report scope (Typecheck_error.unification_error ~loc error));
+      Scheme.generalize t ~rank:scope.rank [ ty ])
     else Unify.lower_ty ~rank:scope.rank ty;
     let in_ =
       Env.with_bindings
@@ -3255,11 +3325,15 @@ and expr_type
     let { Function_type.args; annots; ty; _ } = fn in
     (* The parameters' types are known before the body is checked where they are
        expected, so that what crosses modes by its type does: [f (fun x -> ...)]
-       with [f]'s type known. A mismatch is left to the caller to report. *)
-    (match expected with
+       with [f]'s type known. Used at it by variance, as the caller will: made
+       equal, a later arm would be bound to an earlier one's modes. A mismatch
+       is left to the caller to report. *)
+    (match
+       Option.bind expected ~f:(fun expected -> either_known expected None)
+     with
      | Some expected
        when Expectation.is_required hint && not (Unify.clash expected ty) ->
-       ignore (Unify.unify_ty t ~ty1:expected ~ty2:ty : (unit, _) Result.t)
+       ignore (Unify.sub_ty t ~lower:ty ~upper:expected : (unit, _) Result.t)
      | Some _ | None -> ());
     let body =
       Mode_rules.Alloc.closure modes at ~loc (fun closure ->
@@ -3459,7 +3533,8 @@ and expr_type
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
-    (* What a pointer points to is global, as it is stored global. *)
+    (* What a pointer points to is global, as it is stored global. A box's
+       contents are a part of it, read at most at its mode. *)
     let pointee, pointer, held =
       Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
         let fresh_held = Mode_rules.fresh_held modes in
@@ -3472,19 +3547,30 @@ and expr_type
             ?expected:(Option.map expected ~f:(Type.ptr ~held:fresh_held))
             ~hint:Hint
         in
-        let held =
-          Option.value_map (Type.of_ptr pointer.ty) ~default:fresh_held ~f:snd
-        in
-        let pointee =
-          match expected with
-          | Some expected when Expectation.is_required hint -> expected
-          | Some _ | None -> Scope.fresh_ty t scope
-        in
-        (pointee, pointer, held), Modality.of_cell held)
+        match Type.of_box pointer.ty with
+        | Some contents -> (contents, pointer, None), Modality.id
+        | None ->
+          let held =
+            Option.value_map (Type.of_ptr pointer.ty) ~default:fresh_held ~f:snd
+          in
+          let pointee =
+            match expected with
+            | Some expected when Expectation.is_required hint -> expected
+            | Some _ | None -> Scope.fresh_ty t scope
+          in
+          (pointee, pointer, Some held), Modality.of_cell held)
     in
-    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(Type.ptr ~held pointee) ~loc
-    then node (Deref pointer) pointee
-    else node (Error [ pointer ]) Type.error
+    (match held with
+     | None -> node (Deref pointer) pointee
+     | Some held ->
+       if Scope.unifies
+            t
+            scope
+            ~ty1:pointer.ty
+            ~ty2:(Type.ptr ~held pointee)
+            ~loc
+       then node (Deref pointer) pointee
+       else node (Error [ pointer ]) Type.error)
   | Store (target, value) ->
     let rec under_deref (expr : Source.Expr.t) =
       match Source.Expr.view expr with
@@ -3522,6 +3608,14 @@ and expr_type
           ~loc
           ~target:(fun at ->
             let target = expr_type t scope ~at ~expr:target in
+            let rec through_box (expr : Typed.Expr.t) =
+              match expr.desc with
+              | Deref pointer -> Option.is_some (Type.of_box pointer.ty)
+              | Field (inner, _) | Poly_field (inner, _) -> through_box inner
+              | _ -> false
+            in
+            if through_box target
+            then Scope.report scope (Typecheck_error.create ~loc Store_into_box);
             target, stored target)
           ~value:(fun at ~ty -> check_expr t scope ~at ~expr:value ~ty)
       in
@@ -3703,7 +3797,7 @@ and expr_type
       Mode_rules.evaluate modes at ~loc ~why:"it is matched on" (fun at ->
         expr_type t scope ~at ~expr)
     in
-    let result = Scope.fresh_ty t scope in
+    let result = Scope.join_ty t scope in
     (* Closing the scrutinee to patterns in error would only add errors. *)
     let patterns_failed = ref false in
     let counting_errors f =
@@ -3745,19 +3839,32 @@ and expr_type
              ( var.ident.name
              , Scope.entry scope ~ident:var.ident ~scheme:var.ty ~mode )))
           ~f:(fun () ->
-            check_expr
-              t
-              scope
-              ~at:(Mode_rules.Expected.whole at)
-              ~expr:body
-              ~ty:result
-              ?expected:(either_known result expected)
-              ~hint:
-                (match Type.canonical_ty result with
-                 | TVar _ -> hint
-                 | _ ->
-                   (* An earlier case's type, which this one must have. *)
-                   Required))
+            (* Typed on its own, as the expected type would make it the
+               result's, then used at the result: the join of the cases. *)
+            let body =
+              check_expr
+                t
+                scope
+                ~at:(Mode_rules.Expected.whole at)
+                ~expr:body
+                ~ty:(Scope.fresh_ty t scope)
+                ?expected:(either_known result expected)
+                ~hint:
+                  (match Type.canonical_ty result with
+                   | TVar _ -> hint
+                   | _ ->
+                     (* An earlier case's type, which this one must have. *)
+                     Required)
+            in
+            if Type.is_error body.ty
+               || Scope.subtypes
+                    t
+                    scope
+                    ~lower:body.ty
+                    ~upper:result
+                    ~loc:body.loc
+            then body
+            else { desc = Error [ body ]; ty = Type.error; loc = body.loc })
       in
       (pattern, body), unified
     in
@@ -3891,12 +3998,12 @@ and annotate
     (match Scope.elaborate_resolved scope ty with
      | Ok (annot_ty, resolved) ->
        let annotated =
-         { var with
-           desc = Annotated (var, { annot with ty = Some resolved })
+         { Typed.Expr.desc = Annotated (var, { annot with ty = Some resolved })
+         ; ty = (if Type.is_error var.ty then var.ty else annot_ty)
          ; loc
          }
        in
-       if Scope.unifies t scope ~ty1:var.ty ~ty2:annot_ty ~loc
+       if Scope.subtypes t scope ~lower:var.ty ~upper:annot_ty ~loc
        then annotated
        else { desc = Error [ annotated ]; ty = Type.error; loc }
      | Error error ->
@@ -4085,7 +4192,7 @@ and check_expr ?expected ?hint t scope ~at ~expr ~ty =
       ~expected:(Option.value expected ~default:ty)
       ?hint
   in
-  if Scope.unifies t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc
+  if Scope.subtypes t scope ~lower:expr.ty ~upper:ty ~loc:expr.loc
   then expr
   else { desc = Error [ expr ]; ty = Type.error; loc = expr.loc }
 

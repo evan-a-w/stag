@@ -1,4 +1,5 @@
 include Core
+module Arrow_modes = Stag_types.Arrow_modes
 module Fresh = Stag_types.Fresh
 module Id_pair = Stag_types.Id_pair
 module Scheme = Stag_types.Scheme

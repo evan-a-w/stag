@@ -125,3 +125,36 @@ let same_side (a : Side.t) (b : Side.t) =
 let same t t' =
   same_side t.arg t'.arg && same_side t.res t'.res && same_side t.curry t'.curry
 ;;
+
+let sub_reason =
+  Mode.Reason.create "a function is used at a type with other modes"
+;;
+
+let sub_fixed_reason =
+  Mode.Reason.create
+    "a function type fixes it, as a function is used at a type with other modes"
+;;
+
+let sub_side (lower : Side.t) (upper : Side.t) =
+  match lower, upper with
+  | Fixed lower, Fixed upper ->
+    let on axis =
+      Mode.Error.le_on
+        axis
+        ~lower:(Mode.Const.get lower axis)
+        ~upper:(Mode.Const.get upper axis)
+        sub_reason
+    in
+    let%bind.Result () = on Stage in
+    let%bind.Result () = on Provenance in
+    on Locality
+  | Var var, Fixed const -> Mode.Var.at_most_const var const sub_fixed_reason
+  | Fixed const, Var var -> Mode.Var.at_least_const var const sub_fixed_reason
+  | Var lower, Var upper -> Mode.Var.submode lower upper sub_reason
+;;
+
+let sub ~lower ~upper =
+  let%bind.Result () = sub_side upper.arg lower.arg in
+  let%bind.Result () = sub_side lower.res upper.res in
+  equate_side lower.curry upper.curry ~reason:curry_reason
+;;

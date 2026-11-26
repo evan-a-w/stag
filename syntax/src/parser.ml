@@ -291,6 +291,9 @@ let starts_external t =
 let mode_expr t : Mode_expr.t =
   let start = loc t in
   match peek t with
+  | Underscore ->
+    advance t;
+    since t start (Mode_expr.Var "_")
   | Tyvar _ | Weak_tyvar _ ->
     let var = tyvar t in
     located ~loc:var.loc (Mode_expr.Var var.txt)
@@ -494,6 +497,8 @@ and type_arg t : Type_expr.arg =
   | first when is_atom first && is_atom (peek_at t 1) -> Mode (mode_expr t)
   (* A keyword, so never a type. *)
   | External -> Mode (mode_expr t)
+  (* Types have no wildcard: an anonymous mode. *)
+  | Underscore -> Mode (mode_expr t)
   | _ ->
     let ty = type_expr t in
     if is t At_at

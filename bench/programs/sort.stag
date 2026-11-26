@@ -3,7 +3,7 @@
 let rev_append l acc =
   match l with
   | [] -> acc
-  | Cons *(x, rest) -> rev_append rest (Cons (Ptr.make (x, acc)))
+  | Cons *(x, rest) -> rev_append rest (Cons (Box.make (x, acc)))
 
 let split l =
   match l with
@@ -11,7 +11,7 @@ let split l =
   | [x] -> ([x], [])
   | Cons *(x, Cons *(y, rest)) ->
     match split rest with
-    | a, b -> (Cons (Ptr.make (x, a)), Cons (Ptr.make (y, b)))
+    | a, b -> (Cons (Box.make (x, a)), Cons (Box.make (y, b)))
 
 let merge a b =
   match (a, b) with
@@ -19,8 +19,8 @@ let merge a b =
   | a, [] -> a
   | Cons *(x, xs), Cons *(y, ys) ->
     match Int.le x y with
-    | true -> Cons (Ptr.make (x, merge xs b))
-    | false -> Cons (Ptr.make (y, merge a ys))
+    | true -> Cons (Box.make (x, merge xs b))
+    | false -> Cons (Box.make (y, merge a ys))
 
 let sort l =
   match l with
@@ -35,7 +35,7 @@ let random_list n =
     | true -> acc
     | false ->
       let next = Int.rem (Int.add (Int.mul seed 1103515245) 12345) 1000003 in
-      go (Int.sub n 1) next (Cons (Ptr.make (next, acc)))
+      go (Int.sub n 1) next (Cons (Box.make (next, acc)))
   in
   go n 42 []
 
@@ -50,7 +50,7 @@ let sorted l =
   | [_] -> true
   | Cons *(x, Cons *(y, rest)) ->
     match Int.le x y with
-    | true -> sorted (Cons (Ptr.make (y, rest)))
+    | true -> sorted (Cons (Box.make (y, rest)))
     | false -> false
 
 let list_100 = random_list 100

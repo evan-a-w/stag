@@ -101,6 +101,7 @@ module Kind = struct
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
+    | Store_into_box (** A [Store] through a [box], which is immutable. *)
     | Exclave_not_in_tail_position
     (** [exclave_ e] other than as the result of a function body. *)
     | Mutable_captured_in_exclave of string
@@ -141,6 +142,7 @@ module Kind = struct
     | Relative_locality_modality
     | Mode_variable_in_declaration of string
     | Mode_parameter_on_arrow of string
+    | Anonymous_mode_in_constraint
     | Invalid_mode of string
     | Invalid_external of
         { symbol : string
@@ -286,6 +288,12 @@ let mode_message (error : Mode.Error.t) =
       (point axis first)
       (point axis second)
       (reason because)
+  | Exceeds { axis; lower; upper; because } ->
+    sprintf
+      "This is %s, but must be at most %s, because %s"
+      (point axis lower)
+      (point axis upper)
+      (reason because)
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =
@@ -350,6 +358,13 @@ let unification_message (error : Unification_error.t) ~show_type =
         expected
         reason
     | Occurs_check_failed var ->
+      (* Named as the variable of the scheme it would be in, not as weak. *)
+      let var : Type.arg =
+        match var with
+        | ATy (TVar var) -> ATy (TVar { var with state = Generic })
+        | ARow (RVar var) -> ARow (RVar { var with state = Generic })
+        | ATy _ | ARow _ | AMode _ -> var
+      in
       sprintf "The type variable %s occurs inside its own definition" (arg var)
     | Assigned_in_record (name, assigned) ->
       sprintf
@@ -357,6 +372,7 @@ let unification_message (error : Unification_error.t) ~show_type =
          record or variant, whose entries can't be [mut]"
         (row assigned)
         name
+    | Bound_var error -> mode_message error
   in
   message ^ Type.Printer.where printer
 ;;
@@ -546,6 +562,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
       "The mutable variable %s is captured by a closure in an [exclave_], but \
        lives in the region the [exclave_] ends"
       name
+  | Store_into_box ->
+    "A box is immutable: only a pointer ([ptr]) can be stored to"
   | Store_not_through_pointer ->
     "Only a pointer can be stored to: [p.* <- v], or a field of it, as in \
      [p.*.x <- v]. Records are values, so a field is stored through a pointer \
@@ -600,6 +618,13 @@ let rec kind_message (kind : Kind.t) ~show_type =
        be provided by a variable bound by [let mut] or a mutable toplevel"
       name
       name
+  | Mode_variable_in_declaration "_" ->
+    "The anonymous mode _ is not allowed in a declaration: its arrows have \
+     fixed modes, written as atoms like [local], or a mode parameter declared \
+     ['p : mode]"
+  | Anonymous_mode_in_constraint ->
+    "The anonymous mode _ can't be constrained: name a mode variable like 'm \
+     instead"
   | Mode_variable_in_declaration var ->
     sprintf
       "The mode variable '%s is not allowed in a declaration unless it is a \

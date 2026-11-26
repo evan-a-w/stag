@@ -6,7 +6,7 @@ let%expect_test "items mirror the program" =
     ~prelude:false
     {|
 let first = M.N.Leaf
-type list['a] = Nil | Cons of ptr['a * list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 type stmt[{..'r}, 'a] = Stmt of <'a>{..'r}
 type point = {x : int; y : list[int]}
 type pair['b, 'a] = 'a * 'b
@@ -27,7 +27,7 @@ let code c = .<.~c>.
   [%expect
     {|
     val first : M.N.tree
-    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type list['a] = Nil | Cons of box['a * list['a]]
     type stmt[{..'a}, 'b] = Stmt of <'b>{..'a}
     type point = { x : int; y : list[int] }
     type pair['a, 'b] = 'b * 'a

@@ -314,7 +314,7 @@ let mut counter = 0
 let incr u = counter <- Int.add counter 1
 let after = incr (); incr (); counter
 let mut log : list[string] = []
-let push s = log <- Cons (Ptr.make ( (s, log)))
+let push s = log <- Cons (Box.make ( (s, log)))
 let logged = push "a"; push "b"; log
 let mut weak = []
 let fixed = weak <- [true]; weak
@@ -970,7 +970,10 @@ let f (c : <unit>{..'r}) = let _ = (c : <unit>{y : mut int}) in fun (r : {..'r})
     val fine : <unit>{x : mut int}
     ((Unification_error
       (Assigned_in_record y
-       (RVar (Link (RExtend y Present Assigned (TCon int ()) REmpty)))))
+       (RVar
+        (Link
+         (RExtend y (PVar (Link Present)) Assigned (TCon int ())
+          (RVar (Link REmpty)))))))
      @ t.stag:2:73-79)
     |}]
 ;;

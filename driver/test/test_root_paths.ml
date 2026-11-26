@@ -24,7 +24,7 @@ module M = struct
 end
 let a : .int = 1
 let b : .option[.int] = .None
-let f (x : .int) : .list[.int] = Cons (Ptr.make ( (x, Nil)))
+let f (x : .int) : .list[.int] = Cons (Box.make ( (x, Nil)))
 let s = .String.length "abc"
 let t = .Core.Int.to_string 3
 let caught =
@@ -138,7 +138,7 @@ module B = struct let x = "inner" end|}
     ; ( "b.stag"
       , {|let x = "b"
 let y = .Int.add .A.x 1
-let z = .Core.String.concat "" (Cons (Ptr.make ( (.B.x, Cons (Ptr.make ( (A.B.x, Nil)))))))|}
+let z = .Core.String.concat "" (Cons (Box.make ( (.B.x, Cons (Box.make ( (A.B.x, Nil)))))))|}
       )
     ];
   [%expect
@@ -180,11 +180,11 @@ let%expect_test "generated root paths" =
   check
     ~run:true
     {|
-let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 type option = Some | None
 let raise = 0
 include .~(value "x" (Stag.Expr.var ".raise"))
-include .~(value "y" (Stag.Expr.construct ".Some" (Cons (Ptr.make ( (Stag.Expr.int 1, Nil))))))
+include .~(value "y" (Stag.Expr.construct ".Some" (Cons (Box.make ( (Stag.Expr.int 1, Nil))))))
 include .~(value "z" (Stag.Expr.var ".A.raise"))
 let shown = print_endline (.Core.Int.to_string z)
 |};
@@ -204,7 +204,7 @@ let shown = print_endline (.Core.Int.to_string z)
     |}];
   check
     {|
-let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+let value name e = Cons (Box.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 include .~(value "bad" (Stag.Expr.var ".a.b"))
 |};
   [%expect
@@ -222,7 +222,7 @@ let gen =
 let r = .< raise >.
 let captured = .< fun raise -> (raise, .~r, Some 1, String.length "s") >.
 let declare name code =
-  Cons (Ptr.make (
+  Cons (Box.make (
     ( Stag.Toplevel.let_ name Nil
         (Stag.Expr.App (Ptr.make ( (Stag.Expr.int 0, Stag.Code.erase code))))
     , Nil )))

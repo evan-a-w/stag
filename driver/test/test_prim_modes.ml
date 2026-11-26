@@ -19,10 +19,10 @@ let concat (l : list[string] @ local) = String.concat ", " l
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val len : string @ 'm0 -> int @ 'm1 with local <= 'm0
-    val len_ext : 'a @ 'm0 -> int @ 'm1
+    val len : string @ 'm0 -> int @ _ with local <= 'm0
+    val len_ext : 'a @ _ -> int @ _
     val sub : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
-    val print : string @ 'm0 -> unit @ 'm1 with local <= 'm0
+    val print : string @ 'm0 -> unit @ _ with local <= 'm0
     val concat : list[string] @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
     |}]
 ;;
@@ -46,23 +46,23 @@ let int_part (n : int @ local) = Int.add n
 |};
   [%expect
     {|
-    val app : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val part : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
-    val part_local : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
-    val int_part : int @ 'm0 -> (int @ 'm2 -> int) @ 'm1 with local <= 'm0 and gc <= 'm1
+    val app : string @ 'm0 -> (string @ _ -> string) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val part : string @ 'm0 -> (string @ _ -> string) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val part_local : string @ 'm0 -> (string @ _ -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
+    val int_part : int @ 'm0 -> (int @ _ -> int) @ 'm1 with local <= 'm0 and gc <= 'm1
     |}];
   show {|
 let returned (s : string @ local) = String.append s
 |};
   [%expect
-    {| val returned : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1 |}];
+    {| val returned : string @ 'm0 -> (string @ _ -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1 |}];
   show
     {|
 let stored = Ptr.make (String.append "a")
 let store (s : string @ local) = stored.* <- String.append s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:24-29), then s is passed to the function (at t.stag:3:33-60), then s is used (at t.stag:3:59-60), then it is passed to a function (at t.stag:3:45-60), then the function types are unified, then a partial application holds it, then the function types are unified, then the function returns it (at t.stag:3:45-60), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:45-60) |}]
+    {| This is regional, because it is annotated local (at t.stag:3:24-29), then s is passed to the function (at t.stag:3:33-60), then s is used (at t.stag:3:59-60), then it is passed to a function (at t.stag:3:45-60), then a function is used at a type with other modes, then a partial application holds it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:45-60), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:45-60) |}]
 ;;
 
 let%expect_test "core's functions take local arguments" =
@@ -78,12 +78,12 @@ let set (n : ptr[int] @ local) = Core.List.iter (fun x -> n.* <- x) [1; 2]
 |};
   [%expect
     {|
-    val is_empty : string @ 'm0 -> bool @ 'm1 with local <= 'm0
-    val equal : string @ 'm0 -> (string @ 'm2 -> bool @ 'm3) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and local <= 'm2 and gc <= 'm1
+    val is_empty : string @ 'm0 -> bool @ _ with local <= 'm0
+    val equal : string @ 'm0 -> (string @ 'm2 -> bool @ _) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and local <= 'm2 and gc <= 'm1
     val upper : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
-    val iter : string @ 'm0 -> unit @ 'm1 with local <= 'm0
-    val count : string @ 'm0 -> int @ 'm1 with local <= 'm0
+    val iter : string @ 'm0 -> unit @ _ with local <= 'm0
+    val count : string @ 'm0 -> int @ _ with local <= 'm0
     val lengths : list[string] @ 'm0 -> list[int] @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
-    val set : ptr[int] @ 'm0 -> unit @ 'm1 with local <= 'm0
+    val set : ptr[int] @ 'm0 -> unit @ _ with local <= 'm0
     |}]
 ;;
