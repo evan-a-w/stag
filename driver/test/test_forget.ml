@@ -765,6 +765,94 @@ let h (u : unit) = %s
     |}]
 ;;
 
+let%expect_test "in splices, a local bound to an awaiting instance is checked \
+                 as its toplevel used directly"
+  =
+  (* Each body is checked twice: with [X] a use of [c] directly, and of [f], a
+     local bound to it, [let f = 0 in] and [let f = c in] being as long so both
+     report at the same places. *)
+  let program ~bound x ~body =
+    sprintf
+      {|
+let ident (x : int) = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let h (u : unit) = let f = %s in %s
+|}
+      bound
+      (String.substr_replace_all body ~pattern:"X" ~with_:x)
+  in
+  let errors source =
+    match Mode_helpers.located_errors source with
+    | Ok () -> [ "ok" ]
+    | Error errors ->
+      List.map errors ~f:(fun (loc, message) ->
+        sprintf "%s: %s" (Sexp.to_string [%sexp (loc : Loc.t)]) message)
+  in
+  List.iter
+    ~f:(fun body ->
+      print_endline body;
+      let direct = errors (program ~bound:"0" "c" ~body) in
+      let alias = errors (program ~bound:"c" "f" ~body) in
+      List.iter direct ~f:(printf "  %s\n");
+      if not ([%equal: string list] direct alias)
+      then (
+        print_endline "  but as a local:";
+        List.iter alias ~f:(printf "    %s\n")))
+    [ {|.~(.< X .< "s" >. >.)|}
+    ; {|.~(.< X .< 1 >. >.)|}
+    ; {|.~(match false with | true -> .< let _ = X .< "s" >. in 0 >. | false -> .< 0 >.)|}
+    ; {|.~(match false with | true -> .< let _ = X .< "s" >. in 0 >. | false -> .< let f = 1 in f >.)|}
+      (* A free variable of a quote has one type, here shared by both arms: the
+         use in the other arm is an instance at [string] too. *)
+    ; {|.~(match false with | true -> .< let _ = X .< "s" >. in 0 >. | false -> .< let _ = X in 0 >.)|}
+    ; {|.~(let _ = .< X .< "s" >. >. in .< 0 >.)|}
+    ; {|.~(let _ = .< X .< "s" >. >. in raise (Failure "x"))|}
+    ; {|.~(.< .~(.< X .< "s" >. >.) >.)|}
+    ; {|.~(.< fun (z : unit) -> X .< "s" >. >.)|}
+      (* Likewise [g] is not polymorphic in the quote, as [f] is a free variable
+         of it, but is in the expansion. *)
+    ; {|.~(.< let g = X in g .< "s" >. >.)|}
+      (* Spliced where another [f] binds the quote's: rejected all the same, as
+         the quote is checked where it is written. *)
+    ; {|.~(let q = .< X .< "s" >. >. in .< let f = fun (y : <string>{}) -> y in .~q >.)|}
+    ; {|let x = .~(.< X >.) in x .< "s" >.|}
+    ];
+  [%expect
+    {|
+    .~(.< X .< "s" >. >.)
+      t.stag:4:38-39: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(.< X .< 1 >. >.)
+      ok
+    .~(match false with | true -> .< let _ = X .< "s" >. in 0 >. | false -> .< 0 >.)
+      t.stag:4:73-74: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(match false with | true -> .< let _ = X .< "s" >. in 0 >. | false -> .< let f = 1 in f >.)
+      t.stag:4:73-74: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(match false with | true -> .< let _ = X .< "s" >. in 0 >. | false -> .< let _ = X in 0 >.)
+      t.stag:4:73-74: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+      but as a local:
+        t.stag:4:73-74: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+        t.stag:4:115-116: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(let _ = .< X .< "s" >. >. in .< 0 >.)
+      t.stag:4:46-47: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(let _ = .< X .< "s" >. >. in raise (Failure "x"))
+      t.stag:4:32-84: This toplevel splice failed at compile time: Uncaught exception Failure "x"
+      t.stag:4:46-47: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(.< .~(.< X .< "s" >. >.) >.)
+      t.stag:4:44-45: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(.< fun (z : unit) -> X .< "s" >. >.)
+      t.stag:4:56-57: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(.< let g = X in g .< "s" >. >.)
+      t.stag:4:51-52: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+      but as a local:
+        t.stag:4:46-47: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+        t.stag:4:51-52: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(let q = .< X .< "s" >. >. in .< let f = fun (y : <string>{}) -> y in .~q >.)
+      t.stag:4:46-47: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    let x = .~(.< X >.) in x .< "s" >.
+      t.stag:4:55-56: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    |}]
+;;
+
 let%expect_test "a local bound to an awaiting instance in the splice of the \
                  toplevel awaited"
   =

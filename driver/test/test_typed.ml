@@ -1022,3 +1022,76 @@ let h (u : unit) = let f = fun v -> c v in f .< 1 >.
           (expansion (Var (Bound (Local x/15)) : int)) : int))))))
     |}]
 ;;
+
+let%expect_test "refining an awaited scheme refines the schemes of the locals \
+                 generalized with uses of it"
+  =
+  (* [f]'s scheme relates [v]'s row to [k]'s, which is [c]'s: only reopening
+     [f]'s scheme with the uses keeps that once [ident] is finished. *)
+  print
+    {|
+let ident x = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let h (u : unit) = let f = fun v -> let k = c v in (k, (v : <'a>{..'r})) in f .< 1 >.
+|};
+  [%expect
+    {|
+    ((members
+      (((ident c/5) (kind (Function (y/21))) (scheme "<'a>{..'b} -> <'a>{..'c}")
+        (body
+         (Quote
+          (App (Var (Persistent (Toplevel ident/4)) : "'a -> 'a")
+           (Splice (code (Var (Bound (Local y/21)) : <'a>{..'b}))
+            (subs (Implicit ())) : 'a)
+           : 'a)
+          : <'a>{..'c}))
+        (where "..'b <= {..'c}")))))
+    ((members
+      (((ident h/6) (kind (Function (u/17)))
+        (scheme "unit -> <int>{..'a} * <int>{..'b}")
+        (body
+         (Let (ident f/18) (args ()) (generalized true)
+          (body
+           (Fun (args (v/19))
+            (body
+             (Let (ident k/20) (args ()) (generalized false)
+              (body
+               (App (Var (Bound (Toplevel c/5)) : "<int>{..'b} -> <int>{..'c}")
+                (Var (Bound (Local v/19)) : <int>{..'b}) : <int>{..'c}))
+              (in_
+               (Tuple
+                ((Var (Bound (Local k/20)) : <int>{..'c})
+                 (Annotated (Var (Bound (Local v/19)) : <int>{..'b})
+                  ((ty
+                    ((Code (inner ((Var a) @ t.stag:4:61-63))
+                      (context ((Var (r @ t.stag:4:67-69)) @ t.stag:4:64-70)))
+                     @ t.stag:4:60-70)))
+                  : <int>{..'b}))
+                : "<int>{..'c} * <int>{..'b}"))
+              : "<int>{..'c} * <int>{..'b}"))
+            : "<int>{..'b} -> <int>{..'c} * <int>{..'b}"))
+          (in_
+           (App
+            (Var (Bound (Local f/18)) :
+             "<int>{..'b} -> <int>{..'a} * <int>{..'b}")
+            (Quote (Lit (Int 1) : int) : <int>{..'b}) :
+            "<int>{..'a} * <int>{..'b}"))
+          : "<int>{..'a} * <int>{..'b}"))
+        (where "..'b <= {..'c}, ..'b <= {..'a}")))))
+    ((members
+      (((ident ident/4) (kind (Function (x/15))) (scheme "'a -> 'a")
+        (body
+         (Toplevel_splice
+          (code
+           (Let (ident _/16) (args ()) (generalized false)
+            (body
+             (App
+              (Var (Bound (Toplevel h/6)) :
+               "unit -> <int>{..'_b} * <int>{..'_c}")
+              (Lit Unit : unit) : "<int>{..'_b} * <int>{..'_c}"))
+            (in_ (Quote (Var (Free x) : 'a) : "<'a>{x : immut 'a}")) :
+            "<'a>{x : immut 'a}"))
+          (expansion (Var (Bound (Local x/15)) : 'a)) : 'a))
+        (where "..'_c <= {..'_d}, ..'_c <= {..'_b}")))))
+    |}]
+;;

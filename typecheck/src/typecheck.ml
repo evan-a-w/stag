@@ -2309,13 +2309,13 @@ and substitute_entry
         ~mutable_:(binder_is_mutable scope entry.binder)
         ~loc
     in
-    let instance =
-      match scope.quote with
-      | None -> Uses.instantiate_captured t scope entry ~loc
-      | Some _ -> Uses.instantiate_entry t scope entry ~loc
-    in
     let%map.Result () =
-      Unify.unify_if_present t ~presence ~ty1:ty ~ty2:instance |> lift ~loc
+      Unify.unify_if_present
+        t
+        ~presence
+        ~ty1:ty
+        ~ty2:(Uses.instantiate_captured t scope entry ~loc)
+      |> lift ~loc
     in
     Some entry.binder
   | Local _ ->

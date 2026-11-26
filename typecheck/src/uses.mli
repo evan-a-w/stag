@@ -36,10 +36,10 @@ val instantiate_entry
   -> loc:Loc.t
   -> Type.ty
 
-(** An instance of [entry]'s scheme alone, for code spliced here at once that
-    may use it: the expansion's uses of it are checked in its place, with
-    instances of their own of the uses its scheme awaits or was generalized
-    with. *)
+(** An instance of [entry]'s scheme alone, for code spliced here that may use
+    it. Captures carry no uses of their own: those of code written in [entry]'s
+    scope were made where it uses it (see [resolution_type]), and the expansion,
+    once checked in place, makes those of the code it ends up as. *)
 val instantiate_captured
   :  Fresh.t
   -> Scope.t
@@ -75,7 +75,9 @@ val use_free
 val generalizes : Scope.t -> Mode.Var.t -> is_function:bool -> loc:Loc.t -> bool
 
 (** [name] is the context entry the variable is provided as, if it becomes a
-    free variable of the quote. *)
+    free variable of the quote. If a local of this scope binds it, the quote
+    uses it there as an instance of it would, with instances of the uses it was
+    generalized with (see [Local_uses]). *)
 val resolution_type
   :  Fresh.t
   -> Scope.t
