@@ -582,8 +582,345 @@ level the code is spliced at, never one crossing a lock, so the provider's
 value mode is checked against `m` as for any assignment there.
 
 Later: `&x` of a mutable variable, and writes through pointers, need a
-writable/read-only distinction on pointers; and with mutation, effect purity
-(eg. a `const fn` may not assign a global) starts to matter.
+writable/read-only distinction on pointers (see [Access](#access)); and with
+mutation, effect purity (eg. a `const fn` may not assign a global) starts to
+matter.
+
+## Access
+
+Design, not implemented yet (steps L1 to L6 of the
+[Implementation plan](#implementation-plan)). A fourth kind of mode, which
+replaces `box`: `box[t]` becomes `ptr[t] @ immutable`.
+
+```
+          read
+         /    \
+immutable      read_write
+```
+
+(`a <= b` as on every axis: an `a` may be used where a `b` is expected.)
+
+- `read_write`: what is reachable from the value may be written through it.
+- `read`: nothing reachable from it is written through it (others may).
+- `immutable`: nothing reachable from it is ever written, by anyone.
+
+It is not a chain: an `immutable` value used as `read_write` could be written
+while other aliases rely on it not changing, and a `read_write` one used as
+`immutable` could change under the alias relying on it. Either may be
+weakened to `read`.
+
+It is deep, like provenance: what is reachable from a value (through blocks,
+cells and the captures of closures) has at least its access, up to the
+modalities on the way, which the types keep (see [Modalities](#access-modalities)).
+Toplevels are referred to by symbol, not reached: a function assigning a
+mutable global or storing into a toplevel cell writes nothing reachable from
+it. That is an effect, left to effect purity (see [Later](#later)).
+
+### Encoding: two chains
+
+The solver's axes are chains: bounds are indices, a morphism's adjoint is
+checked and composed on them, and the printer's written forms are a chain per
+pair of axes. Rather than generalise all of it to finite lattices (as
+OxCaml's solver is), access is the product of two two-point chains, each an
+axis of the solver:
+
+| | permission (`writable <= readonly`) | mutability (`immutable <= mutable`) |
+| --- | --- | --- |
+| `read_write` | writable | mutable |
+| `read` | readonly | mutable |
+| `immutable` | readonly | immutable |
+| (bottom, unnamed) | writable | immutable |
+
+Permission is about this reference, a capability ("may I write?"),
+mutability about every reference, a promise ("may anyone write?").
+
+The product has a fourth point, its bottom: writable *and* immutable. No value
+with cells has it: it could be written and relied on not to change. It is
+what a type that crosses access has (see [Crossing](#access-crossing)), and the
+lower bound of a variable nothing flows into. Excluding it is a disjunction
+(readonly or mutable), which bounds and monotone morphisms can't state (the
+map would be antitone), so the solver gets a built-in rule, on every variable
+of a value whose type may have cells (guarded by its layout, as crossing
+constraints are):
+
+- once its upper permission is `writable` (it is written through), its lower
+  mutability is raised to `mutable`: it is `read_write`;
+- once its upper mutability is `immutable` (something relies on it), its
+  lower permission is raised to `readonly`: it is `immutable`.
+
+Both at once is an error ("immutable, because ..., but written through here"). Bounds
+only tighten, so this is order independent and atomic like the rest. It is
+implicit in every variable, so never printed (as `const` implying `static`).
+A variable still allowing both when defaulted (monomorphisation) takes
+`immutable` if its upper bound allows it, else `read_write`.
+
+Rejected: a three point chain (both orders are unsound, above);
+`may_write × may_be_written` with the bottom excluded by a morphism (it would
+be antitone); a general lattice solver (possible later: only the printing of
+per-axis constraints depends on the encoding).
+
+### Rules
+
+| expression | access |
+| --- | --- |
+| literal, toplevel constant, anything `const` | `immutable` |
+| `Ptr.make v` (at `a`, of `ptr[t @@ h]`) | chosen by its uses (the rule above): `immutable` unless written through or holding mutable data; `v <= μh(a)` |
+| `Box.make v` | `Ptr.make v` at `immutable` exactly: `v` must be immutable |
+| block (tuple, record, constructor), closure | at least what it holds or captures |
+| part of a block at `a`, through modality `m` | `μm(a)` |
+| `p.*`, `*p` pattern (`p : ptr[t @@ h] @ a`) | `μh(a)` |
+| `p.* <- v` | `a <= read_write`, `v <= h` |
+| `&x` | of a `let mut`: `read_write`; of a `let`: `immutable` |
+
+An allocation's access is chosen by its uses as its locality is: one a
+function returns follows the function's result, so `List.map` makes an
+immutable list, or one whose cells may be written, as each caller uses it.
+
+#### Access modalities
+
+A modality `m` on a field, constructor argument or cell maps the block's (or
+the pointer's) access `a` to its part's:
+`μm(a) = (permission(a) ⊔ permission(m), mutability(a) ⊓ mutability(m))`.
+Permission joins (OxCaml's past-axis modality): a modality only takes write
+away, so no part of a `read` value is writable, and `@@ read_write` is no
+escape. Mutability meets (the existing `meet_with`): a part may promise more
+than its block. The identity is `read_write`, the default when unwritten, so
+unwritten modalities make access deep:
+
+- `t @@ read`: read only, whatever the block: `μ(read_write) = read`,
+  `μ(immutable) = immutable`.
+- `t @@ immutable`: always immutable, so what is put there must be
+  (`ptr[map @@ immutable]` is a cell holding immutable maps, replaced by
+  stores, the usual way to keep functional state in a cell).
+
+What is put in is at most what is read back: a field's value fits its
+modality's mutability, and the block is at least it (as provenance); an
+allocation's contents are at most `μh(a)`; a store, through a
+`read_write` view, at most `h`. So `immutable` stays deep through cells: an
+`immutable` allocation holds only immutable values (`μh(immutable)` is
+`immutable` whatever `h`), and is never stored to.
+
+#### Closures and arrows
+
+Arrow sides carry access as every axis (arguments contravariant, results
+covariant). A closure's own access is the join of its captures, so one
+capturing only immutable values is `immutable` (and may be `portable`).
+
+Calling a closure may write what it captures, which a `read` view must not
+allow, and a view can't tell (`read_write <= read`: the closure's own mode can
+be weakened). So an arrow's type also says what its body does with its
+captures, its environment access `e` (on permission only, `read` or
+`read_write`), written `t -[read_write]-> u`:
+
+- the body sees its captures at `μe` (at `read`, it can't write through them,
+  nor assign a captured `let mut`);
+- a call requires the function's permission at most `e`'s: through a `read`
+  view, only functions that don't write their captures can be called;
+- `e` is contravariant: it is the mode of the environment, an implicit
+  argument;
+- a partial application's `e` is the function's (calling it calls the
+  function).
+
+#### Mutable variables
+
+`let mut x` is a mutable cell: its held mode includes access, exact,
+inferred from what is assigned and how it is used (`let mut cur = Ptr.make 0`
+holds `read_write` pointers once `cur.* <- 1` writes through one). Assigning a captured one writes a capture (needs
+environment `read_write`); reading one in a `read` environment gives `μread`
+of what it holds. The variable stays always `nonportable`.
+
+#### Exceptions
+
+A payload may be raised at any access; a handler sees it at `read`, as
+`exn` doesn't say.
+
+### Access crossing
+
+The layout becomes a three point chain,
+`pointer_free <= immutable_data <= stateful`, with `immutable_data` for types
+with pointers but no cells or closures (`string`, code, and blocks of them):
+they cross access, and nothing else. `ptr` and arrows never cross: the type of
+`ptr[int] @ immutable` doesn't say it's immutable, and a closure may capture
+cells. `'a : immutable_data` bounds a variable in `with`, as
+`'a : pointer_free`.
+
+So `list[int]` no longer crosses access (it would with a type-level `box`):
+its values carry an access mode, inferred.
+
+### Stage
+
+- Every variable: `mutability <= immutable_if_portable(stage)` (a morphism
+  like `static_if_const`): `portable`, so `const`, implies `immutable`. This
+  replaces "no cell is portable" (`Ptr.make`'s result being `nonportable`): an
+  immutable allocation may be portable, as a box is, a mutable one isn't. What
+  is lifted into code (deeply immutable today by that argument) is now
+  `immutable` by its mode.
+- A cell's reads are at least `portable` only through a mutable view:
+  `portable_if_mutable(mutability(p)) <= stage(p.*)`. Reading a `const`
+  immutable cell is then `const`, as reading a `const` box is.
+- A mode expression naming `const` or `portable` without an access means
+  `immutable` (as OxCaml's `immutable` implies `contended`).
+- Threads (if stag gets them): immutable values would be shareable without
+  locks, as OxCaml's immutable data crosses contention.
+
+### Variance by access
+
+Through a view that can't write (`readonly`: `read` or `immutable`), a
+pointer's contents and cell modality are covariant: nothing is stored through
+it, and a read gives at least what was stored. Through a writable view they
+are invariant, as today. So a type parameter's variance becomes a pair (at
+read-only views, at writable views): `ptr`'s is (covariant, invariant). It
+composes through cells: one with the identity modality keeps the view's
+permission, `@@ read` and `@@ immutable` make what is under them read-only.
+
+Where a value is used at a type, the types are related by the read-only
+variance, and the rest is added once the use's permission's upper bound is
+`writable`: a guard on an upper bound, a new kind of trigger, dual to the
+layouts' (which fire on a lower bound). Order independent, as bounds only
+tighten. A scheme keeps the guards of its variables, and an instance copies
+them, as it does guarded constraints; printed as
+`with 'm3 <= 'm4 if writable('m0)`. The environment access is contravariant,
+unguarded.
+
+So `let wide : Map.t[int, string, external] = m` is accepted as before (unless
+`wide` is written through), and a `Lru.t[_, _, gc]` can be used as a
+`Lru.t[_, _, external] @ read`, through which `Lru.add` can't be called.
+
+### Polymorphism and annotations
+
+- A mode variable covers access. In `with`: `'m <= read`,
+  `immutable <= 'm`, `access('m) <= access('n)`, and per axis
+  `permission('m)` (`writable`, `readonly`) and `mutability('m)`
+  (`immutable`, `mutable`) where the printer needs them: a field `@@ read`
+  read from `'m0` is `readonly <= permission('m1) and mutability('m0) <=
+  mutability('m1)`.
+- Mode parameters (`'p : mode`) cover stage, provenance and access, not
+  locality. In a modality, `'p`'s access is `μ'p`; on an arrow side, a
+  parameter gives only stage and provenance, as today: access is the side's
+  own, like locality.
+- Printing: `ptr[t] @ immutable`, `(x @ read)`, `ptr[t @@ read]`,
+  `string @@ immutable` fields, `t -[read_write]-> u`. Atoms at the default
+  are left out, as on the other axes.
+
+### Defaults
+
+Ordinary code needs no annotation: modes are inferred, and annotations of
+parameters and bindings by type (`(p : ptr[int])`) set no mode.
+
+- Allocations: `immutable`, unless written through or holding mutable data.
+- An arrow side written without access: `read`. A function annotated so takes
+  anything and can't write it; a result so may be anything, which the caller
+  can't write or rely on. Writing through an annotated arrow's argument needs
+  `@ read_write`. (OxCaml's legacy default is `read_write`: here it would
+  reject constants, which are `immutable`, passed to any annotated function
+  taking a `list`, now that `list` doesn't cross.)
+- Environment access: free in an annotation, like `curry`; `read` in a
+  declaration.
+- A modality written without access: `read_write`, the identity (so `ptr[t]`
+  is deep).
+- `const` or `portable` without access: `immutable`.
+- A weak toplevel's access isn't fixed by its definition (later toplevels may
+  write it); its cells' modality is, as other mode arguments (`read_write`
+  unless the definition needs more).
+
+### Merging `box` into `ptr`
+
+`box[t]` becomes `ptr[t]`, `Box.make` `Ptr.make` at `immutable` (an alias
+during migration). What `box` had that `ptr` hasn't:
+
+- Covariance: by access (above).
+- Contents read as a part of the box. Stage and provenance: through `h`,
+  covariant at read-only views, and the stage floor above. Locality: a cell's
+  modality gets a locality, `ptr[t @@ local]` (the identity): its contents may
+  be as local as the cell, read at the view's locality, and stores into it
+  take only `global` values (a store's value then outlives every cell). The
+  default stays `@@ global` (today's `ptr`). `list` is
+  `Nil | Cons of ptr['a * list['a] @@ local]`, so `exclave_` builders (as
+  `Map`'s `to_list`) still build local lists of local parts.
+- `Store_into_box` becomes a mode error at the store; `Type.box`,
+  `Expected.boxed` and the box case of `Deref` patterns go.
+
+Migration (mechanical, apart from the docs' examples):
+
+- `core/map.stag`: `Node of ptr[node[...] @@ local]`, `Box.make` to
+  `Ptr.make`. A map of `read_write` pointers (as `Lru`'s index of entries,
+  which it writes) is `read_write`; others are `immutable`, so still
+  covariant and liftable (`keywords` in learn_stag.md).
+- `core/lru.stag`: `Box.make` to `Ptr.make` in its list builder; its cells
+  keep the identity access. `as_external` in learn_stag.md is then an error
+  only once written through.
+- `core/list.stag`, `sexp.stag`, the prelude, tests and docs: `box[t]` to
+  `ptr[t]` (or `ptr[t] @ immutable` where immutability is wanted),
+  `Box.make` to `Ptr.make`.
+
+### Runtime and compiler
+
+- No representation change: `box` and `ptr` already share one, so access
+  needs no monomorphisation; the compiler uses what holds for every instance.
+- A load through an `immutable` view is invariant: common subexpressions
+  across calls and stores, hoisting out of loops (LLVM `!invariant.load`). A
+  `read` view promises nothing about other writers.
+- `const` implies `immutable`: static data goes in a read-only section.
+  Mutable cells are never `const`, so never static.
+- Immutable cells are never stored to after initialisation: no write
+  barriers.
+- The interpreter is unchanged; a test oracle (as `Region_check`) can mark
+  cells allocated `immutable` and fail on a store to one.
+
+### Comparison with OxCaml
+
+OxCaml has several diamond-shaped axes, solved as general lattices
+([modes intro](https://oxcaml.org/documentation/modes/intro/),
+[reference](https://oxcaml.org/documentation/modes/reference/)):
+
+- *Visibility* (`read_write <= read, write <= immutable`, legacy `read_write`)
+  is a capability on the mutable parts of a value: its `immutable` forbids
+  even reading them. It is close to stag's permission, but stag's `immutable`
+  is a promise about every alias, which OxCaml states in types and kinds
+  instead (immutable data crosses visibility and contention;
+  `immutable_data` kinds). Stag has no type-level immutability once `box` goes,
+  so the promise moves into the mode, as mutability.
+- *Contention* and *portability* are the thread-sharing pair: deeply immutable
+  data crosses contention. Stag's `portable` (stages, not threads) implies
+  `immutable` instead.
+- *Statefulness* is a future axis on functions (`stateless`, `reading`,
+  `writing`, `stateful`), with closures capturing at the matching visibility.
+  Stag puts the same information in the arrow's type, as its environment
+  access, as `ptr` puts its cell's in its type: a mode on the value would need
+  a second, future, axis.
+- Modalities on past axes join and on future axes meet: stag's access
+  modality joins on permission and meets on mutability.
+- OxCaml's mode implications (`immutable` defaulting `contended`) are the model
+  for `portable` defaulting `immutable`.
+
+### Open questions
+
+1. `Box.make` with mutable contents (a list of `read_write` pointers): taken
+   literally, "returns `immutable`" rejects it, as `immutable` is deep. The
+   design has library code use `Ptr.make`, whose access its uses choose, and
+   keeps `Box.make` as `Ptr.make` at `immutable`. Recommended: that, and drop
+   `Box.make` once migrated.
+2. The default access of an unwritten arrow side: `read` (recommended,
+   writes are annotated) or `read_write` (OxCaml's legacy, which rejects
+   immutable values passed to annotated functions).
+3. Closures through `read` views: the environment access in the arrow's type
+   (recommended), a separate future axis on values (OxCaml's statefulness), or
+   no calls through a `read` view at all unless the closure is `immutable` (no
+   type change, but coarse, and a disjunction). And its syntax,
+   `t -[read_write]-> u`.
+4. `list[int]` not crossing access: accepted (recommended; inference covers
+   it), or keep `box` as a type-level immutable cell that crosses, with access
+   only on `ptr`.
+5. Globals: writes to toplevels by symbol aren't governed by access
+   (recommended; effect purity later), or are, as captures.
+6. Printing per-axis `permission(..)` and `mutability(..)`: recommended, as
+   `stage(..)`; or a general lattice solver to print only the three points.
+7. `ptr[t @@ local]` for box-like contents (recommended), or immutable cells
+   whose contents are always as local as the cell (would need the guard of
+   variance by access, and is lost when an `immutable` view is weakened to
+   `read`, so isn't sound without the type saying it).
+8. Freezing a written cell (`read_write` to `immutable`) needs uniqueness;
+   until then only `Unsafe.assume_immutable`. Wanted now?
 
 ## Implementation plan
 
@@ -668,6 +1005,27 @@ Each step is a branch stacked on the previous one.
 - **K. Per-component modes**: a by-value block's components each keep a mode
   (`Mode_shape`) through bindings, patterns, projections and match arms (see
   [Expression modes](#expression-modes)); used as a whole, they are joined.
+- **L1. Access in the solver**: the permission and mutability axes (two-point
+  chains; `Morphism`'s codes assume three axes), the built-in rule excluding
+  their bottom, `immutable_if_portable` per variable and
+  `portable_if_mutable` for cell reads, triggers on upper bounds (kept in
+  schemes), the three-point layout (`immutable_data`). Expect tests.
+- **L2. Syntax**: `read_write`, `read`, `immutable` in modes and modalities,
+  `access(..)`, `permission(..)`, `mutability(..)` in `with`,
+  `t -[e]-> u`, `'a : immutable_data`, `ptr[t @@ local]`. Parsed and
+  printed, ignored.
+- **L3. Access in the typechecker**: allocations (`Ptr.make` chosen,
+  `Box.make` immutable), reads and stores through `μh`, blocks, closures
+  and their environment access, field modalities, `let mut`, `&x`, defaults
+  and implications, crossing by `immutable_data`, printing.
+- **L4. Variance by access**: variance pairs inferred for declarations, uses
+  related at the read-only variance and guarded for writable views, guards in
+  schemes and their printing.
+- **L5. `box` merged into `ptr`**: cell locality modality, the prelude's
+  `list`, `core/` and tests migrated, `box` and `Store_into_box` removed,
+  docs (learn_stag.md, syntax.md, semantics.md).
+- **L6. Compiler**: invariant loads through immutable views, read-only static
+  data, the interpreter's store oracle.
 
 ## Later
 
