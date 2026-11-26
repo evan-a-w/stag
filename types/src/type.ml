@@ -91,6 +91,7 @@ and type_mismatch_reason =
   | Mismatch_arg_kind of arg * arg
   | Structural_mismatch
   | Modes of Mode.Error.t
+  | Unknown_variances of string * Mode.Error.t
 
 and row_mismatch_reason =
   | Missing_label of string
@@ -128,6 +129,9 @@ module Var = struct
     ; watchers = []
     }
   ;;
+
+  let layout_key = Type_equal.Id.create ~name:"layout" sexp_of_opaque
+  let layout t = Watcher.find t.watchers layout_key
 
   let rank_exn t =
     match t.state with
@@ -1000,6 +1004,9 @@ module Printer = struct
         (* Set while rendering only to count how often each presence variable is
            named. *)
     ; modes : Mode_printing.t option (* With [create ~modes:true]. *)
+    ; pointer_free : string Queue.t (* Type variables annotated so. *)
+    ; layout_names : string Int.Table.t
+        (* The names of the variables whose layouts are these, by id. *)
     ; mode_names : string Int.Table.t
     ; name_mode_args : bool
         (* Without [modes], whether a mode argument not known is named rather
@@ -1028,6 +1035,8 @@ module Printer = struct
     ; elided = Int.Hash_set.create ()
     ; counting = None
     ; modes = Option.some_if modes (Mode_printing.create ())
+    ; pointer_free = Queue.create ()
+    ; layout_names = Int.Table.create ()
     ; mode_names = Int.Table.create ()
     ; name_mode_args
     ; declaration
@@ -1070,6 +1079,13 @@ module Printer = struct
     let name = prefix ^ var_name t var in
     if first_appearance
     then (
+      Option.iter (Var.layout var) ~f:(fun layout ->
+        Hashtbl.set
+          t.layout_names
+          ~key:(Mode.Layout.id layout)
+          ~data:(var_name t var);
+        if Option.is_some (Mode.Layout.bound layout)
+        then Queue.enqueue t.pointer_free name);
       if not (List.is_empty var.bounds)
       then Queue.enqueue t.bounded (Bounds (fun () -> bounds name));
       List.iter var.kept ~f:(fun kept ->
@@ -1245,7 +1261,7 @@ module Printer = struct
         (const_atoms const ~default:(Some Arrow_modes.default_const))
     | Var var ->
       (match t.modes with
-       | None -> Option.is_none (lower_atoms var)
+       | None -> (not t.declaration) && Option.is_none (lower_atoms var)
        | Some _ -> false)
   ;;
 
@@ -1262,6 +1278,7 @@ module Printer = struct
        | atoms -> " @ " ^ String.concat ~sep:" " atoms)
     | Var var ->
       (match t.modes, t.counting with
+       | None, _ when t.declaration -> " @ " ^ mode_var_name t var
        | None, _ ->
          Option.value_map (lower_atoms var) ~default:"" ~f:(fun atom ->
            " @ " ^ atom)
@@ -1598,6 +1615,7 @@ module Printer = struct
       ; printing = Hashtbl.copy t.printing
       ; introduced = Hashtbl.copy t.introduced
       ; bounded = Queue.create ()
+      ; pointer_free = Queue.create ()
       ; kept = Hash_set.copy t.kept
       ; elided = Hash_set.copy t.elided
       ; counting = Some counts
@@ -1607,7 +1625,8 @@ module Printer = struct
     ignore (bounds copy : string list);
     (* A declaration's mode variables are its parameters, related to nothing, so
        print by name, and there is no [with] to settle. *)
-    if not t.declaration then Option.iter t.modes ~f:Mode_printing.settle;
+    if not t.declaration
+    then Option.iter t.modes ~f:(fun modes -> Mode_printing.settle modes);
     Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
       if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);
     render t
@@ -1655,7 +1674,17 @@ module Printer = struct
     let modes =
       match t.modes with
       | None -> []
-      | Some modes -> Mode_printing.constraints modes
+      | Some modes ->
+        (* A guard not of a variable printed is of one not in the type. *)
+        let layout_name layout =
+          Hashtbl.find_or_add
+            t.layout_names
+            (Mode.Layout.id layout)
+            ~default:(fun () -> name (next_index t) ~weak:true)
+        in
+        List.map (Queue.to_list t.pointer_free) ~f:(fun name ->
+          name ^ " : pointer_free")
+        @ Mode_printing.constraints modes ~layout_name
     in
     (match bounds t with
      | [] -> ""

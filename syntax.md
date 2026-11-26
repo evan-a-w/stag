@@ -38,7 +38,7 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception external type of module
-  struct end forget`, `true false`, and `stack_ exclave_` (see
+  struct end forget`, `true false`, and `stack_ exclave_ region_` (see
   [Modes](#modes)), so these are not identifiers anywhere, even qualified
   (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
   `external`: it is the `external` mode after `@`, unless it starts a
@@ -442,7 +442,7 @@ that inner code is spliced, not by the substitution, so it is an error too.
 
 The syntax of modes (see [modes.md](modes.md) and
 [semantics.md](semantics.md#modes)), all three axes checked. The interpreter
-allocates everything on its heap, so `stack_`, `exclave_` and `[@nontail]` evaluate as their body.
+allocates everything on its heap, so `stack_`, `exclave_`, `region_` and `[@nontail]` evaluate as their body.
 
 A binding's annotation is the variable's mode: `let x @ m = e` needs `e`'s
 mode to be at most `m`, and `x` is then `m` on the axes `m` names (and `e`'s
@@ -471,6 +471,7 @@ int @ local -> int @ local              (* a function type's argument/result *)
 'a @ 'm -> 'b @ 'n
 stack_ e                                (* allocate e's allocations in the current region *)
 exclave_ e                              (* end the region, then evaluate e *)
+region_ e                               (* evaluate e in a region of its own *)
 f x [@nontail]                          (* not a tail call *)
 type r = {x : int @@ global; y : int}   (* always global, even in a local r *)
 type t = A of int @@ global portable * int
@@ -481,8 +482,8 @@ cell[string, external]   cell['a, gc portable]   cell['a, 'm]
 `@` binds looser than `*` and tighter than `->`: `int * int @ local -> int`
 is `(int * int) @ local -> int`. A mode is written only on a binder, an
 annotation, or a function type's argument or result: `list[int @ local]` and
-`(int @ local) -> int` are errors. `stack_` and `exclave_` extend as far right
-as `fun` does. `[@nontail]` follows an application, but not as a
+`(int @ local) -> int` are errors. `stack_`, `exclave_` and `region_` extend as far
+right as `fun` does. `[@nontail]` follows an application, but not as a
 constructor's argument, where it would read as applying to the construction:
 `C (f x [@nontail])`, not `C (f x) [@nontail]`.
 
@@ -495,6 +496,9 @@ take none. A declaration's mode parameters are declared `'p : mode`, and are
 on stage and provenance only (a locality atom in a mode argument is an
 error); a type argument of several atoms is a mode, and one of one atom or
 a variable is read as a mode or a type by the declaration's parameter. A
+declared arrow's side may name a mode parameter (`{compare : 'k @ 'p -> int}`)
+for its stage and provenance; its locality is `global`, as an unwritten
+side's. No other mode variable is allowed in a declaration. A
 name in an annotation is a mode variable or a type variable, not both.
 
 An annotation's type may end with constraints between mode variables, or
@@ -517,9 +521,14 @@ One between a variable and modes bounds the axes the modes name
 its sides: `meet(t, c)` and `release(t)` on the left of `<=`,
 `static_if_const(t)` and `const_if_static(t)` on the right:
 
+A constraint may instead be a kind, `'a : pointer_free`, on a type variable
+(`..'r` for a row): the type is pointer-free at every instance, so its values
+cross modes (see modes.md, crossing).
+
 ```
 constraint := side <= side                     (every axis, or the atoms' axes)
             | left <= right                    (one axis)
+            | 'a : pointer_free
 side       := mode | 'm
 left       := axis('m) | meet(left, atom) | release(left)
 right      := axis('m) | static_if_const(right) | const_if_static(right)

@@ -289,6 +289,7 @@ module Expr = struct
     | Struct_quote toplevels -> Struct_quote toplevels
     | Stack expr -> Marked (Stack, sub expr)
     | Exclave expr -> Marked (Exclave, sub expr)
+    | Region expr -> Marked (Region, sub expr)
     | Nontail expr -> Marked (Nontail, sub expr)
     | Annotated (expr, annot) -> Annotated (sub expr, annot)
     | Forget (names, expr) -> Forget (names, sub expr)

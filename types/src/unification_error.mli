@@ -7,6 +7,9 @@ module Type_mismatch_reason : sig
     | Mismatch_arg_kind of Type.arg * Type.arg
     | Structural_mismatch
     | Modes of Mode.Error.t
+    | Unknown_variances of string * Mode.Error.t
+    (** The arguments of a type whose definition is not known yet, so are
+        equated, have different modes. *)
   [@@deriving sexp_of]
 end
 

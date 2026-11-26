@@ -18,6 +18,7 @@ let indirect_constructors =
     ; "Mode_expr.Term.Release", 1
     ; "Mode_expr.Term.Static_if_const", 1
     ; "Mode_expr.Term.Const_if_static", 1
+    ; "Mode_expr.Constraint.Submode", 2
     ; "Pattern.Deref", 1
     ; "Pattern.Poly_variant", 2
     ; "Pattern.Exception", 1
@@ -41,6 +42,7 @@ let indirect_constructors =
     ; "Expr.Poly_variant", 2
     ; "Expr.Stack", 1
     ; "Expr.Exclave", 1
+    ; "Expr.Region", 1
     ; "Expr.Nontail", 1
     ; "Expr.Annotated", 2
     ; "Expr.Forget", 2
@@ -135,8 +137,13 @@ module Make (B : Builder) = struct
     | Const_if_static t -> con "Const_if_static" [ mode_term t ]
   ;;
 
-  let mode_constraint ({ lower; upper } : Mode_expr.Constraint.t) =
-    B.tuple [ mode_term lower; mode_term upper ]
+  let mode_constraint : Mode_expr.Constraint.t -> _ = function
+    | Submode { lower; upper } ->
+      con
+        "Stag.Mode_expr.Constraint.Submode"
+        [ mode_term lower; mode_term upper ]
+    | Pointer_free var ->
+      con "Stag.Mode_expr.Constraint.Pointer_free" [ B.string var ]
   ;;
 
   let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
@@ -301,6 +308,7 @@ module Make (B : Builder) = struct
       | Expect expected -> con "Expect" [ B.string expected.txt ]
       | Stack e -> con "Stack" [ expr e ]
       | Exclave e -> con "Exclave" [ expr e ]
+      | Region e -> con "Region" [ expr e ]
       | Nontail e -> con "Nontail" [ expr e ]
       | Annotated (e, a) -> con "Annotated" [ expr e; annot a ]
       | Forget (names, e) -> con "Forget" [ list name names; expr e ]

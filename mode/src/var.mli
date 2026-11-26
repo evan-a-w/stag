@@ -16,12 +16,24 @@ val id : t -> int
 val lower : t -> Const.t
 val upper : t -> Const.t
 val is_generic : t -> bool
+
+(** What [read] gives once the constraints [f] adds hold, which are then undone:
+    [None] if they can't hold. *)
+val assuming
+  :  (unit -> (unit, Mode_error.t) Result.t)
+  -> read:(unit -> 'a)
+  -> 'a option
+
 val lower_rank : t -> rank:int -> unit
 
-(** The lower bound [t] would have on [axis] if the variables [raised] (by [id])
-    were raised to their upper bounds, but generic ones: what [t] is at least
-    however they turn out. *)
-val lower_assuming : t -> 'a Axis.t -> raised:(int -> bool) -> 'a
+(** The lower bound [t] would have on [axis] if the variables (by [id]), but
+    generic ones, were raised to the points [raised] gives: what [t] is at least
+    however they turn out, by the constraints added. *)
+val lower_assuming : t -> 'a Axis.t -> raised:(int -> 'a option) -> 'a
+
+(** The layouts, not known, on which constraints [t] may get on [axis] from
+    below wait. *)
+val waits_on : t -> _ Axis.t -> Graph.Layout.t list
 
 (** [None] once generic. *)
 val rank : t -> int option
@@ -35,7 +47,8 @@ module Node : sig
 
   val axis : t -> Axis.Any.t
 
-  (** Bounds, as points of the axis by index. *)
+  (** Bounds, as points of the axis by index: a generic node's, those its
+      instances get. *)
   val lower : t -> int
 
   val upper : t -> int
@@ -44,6 +57,43 @@ module Node : sig
       given is raised to its point: what the constraints imply of them then.
       [None] if one can't be. *)
   val raised : (t * int) list -> (t * int) list option
+
+  module Fate = Graph.Fate
+
+  (** What generalizing at [rank], keeping the nodes [kept] holds, does with
+      [t]. *)
+  val fate : t -> rank:int -> kept:(t -> bool) -> Fate.t
+
+  (** [t] and the nodes it is constrained to be below, transitively: those whose
+      upper bounds bound [t]'s. *)
+  val above : t -> t list
+
+  (** Only under [assuming]. *)
+  val at_most : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
+
+  val at_least : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
+
+  module Guarded : sig
+    type node := t
+
+    type kind =
+      | Edge of node * Morphism.t * node (** [lo <= m(hi)] *)
+      | Upper of node * int
+      | Lower of node * int
+
+    (** [kind], once any of [guards] has pointers: [holds] if one has. *)
+    type t =
+      { kind : kind
+      ; guards : Graph.Layout.t list
+      ; holds : bool
+      }
+
+    (** What the constraints not added, as the layouts guarding them aren't
+        known, imply between the nodes given, or of their bounds. A generic
+        node's scheme keeps them, its instances adding them: those whose guard
+        has pointers since [hold]. *)
+    val among : node list -> t list
+  end
 end
 
 val node : t -> _ Axis.t -> Node.t
@@ -133,8 +183,9 @@ val default_to_upper : t -> unit
     inconsistent anyway). *)
 val generalize : t list -> rank:int -> unit
 
-(** Generic and unconstrained: a placeholder each instance copies afresh. *)
-val create_generic : Id_source.t -> t
+(** Generic and unconstrained but for [at_most]: a placeholder each instance
+    copies afresh. *)
+val create_generic : ?at_most:Const.t * Reason.t -> Id_source.t -> t
 
 (** Makes a generic variable one of rank [rank] again, with its constraints, to
     refine a scheme in place before generalizing it anew. Not allowed under

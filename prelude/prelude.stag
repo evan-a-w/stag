@@ -144,6 +144,13 @@ module Stag = struct
         | Static_if_const of ptr[t]
         | Const_if_static of ptr[t]
     end
+
+    (* Of a [with] clause: [lower <= upper], or ['a : pointer_free]. *)
+    module Constraint = struct
+      type t =
+        | Submode of ptr[Term.t * Term.t]
+        | Pointer_free of string
+    end
   end
 
   module Type_expr = struct
@@ -162,9 +169,8 @@ module Stag = struct
       | Splice of ptr[Expr.t]
       (* [t @ m], only as a function type's argument or result. *)
       | Moded of ptr[t * Mode_expr.t]
-      (* [t with c and ...], only as an annotation's type: each constraint
-         [(lower, upper)] is [lower <= upper], at least one a variable. *)
-      | Constrained of ptr[t * list[Mode_expr.Term.t * Mode_expr.Term.t]]
+      (* [t with c and ...], only as an annotation's type. *)
+      | Constrained of ptr[t * list[Mode_expr.Constraint.t]]
       (* [t @@ m], only as a record field's type, a constructor's argument or
          a pointer's type argument. *)
       | Modality of ptr[t * Mode_expr.t]
@@ -291,6 +297,7 @@ module Stag = struct
       | Struct_quote of list[Toplevel.t]
       | Stack of ptr[t]
       | Exclave of ptr[t]
+      | Region of ptr[t]
       (* [f x [@nontail]], of an application. *)
       | Nontail of ptr[t]
       (* [(e : t @ m)], of an expression not a variable. *)

@@ -1,6 +1,7 @@
 open! Import
 
 let reason = Reason.create
+let layouts = Id_source.create ()
 
 let ok result =
   match result with
@@ -494,5 +495,373 @@ let%expect_test "instances made under a failed atomically are forgotten" =
       (lower_because ("x1 is local")) (upper_because ("x1 is global"))))
     ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global))
+    |}]
+;;
+
+let%expect_test "guarded constraints are added once their layout has pointers, \
+                 in either order"
+  =
+  let ids = Id_source.create () in
+  let run ~raise_first =
+    let layout = Layout.create layouts in
+    let x = Var.create ids ~rank:1
+    and y = Var.create ids ~rank:1 in
+    let raise () =
+      ok (Layout.raise layout ~because:[ reason "'a turned out to be string" ])
+    in
+    if raise_first then raise ();
+    ok
+      (Var.submode
+         ~crossing:(Crossing.while_pointer_free layout)
+         x
+         y
+         (reason "x is y"));
+    ok (Var.at_least x Locality Local (reason "x is local"));
+    print_s [%message "before" ~y:(Var.lower y : Const.t)];
+    if not raise_first then raise ();
+    print_s [%message "after" ~y:(Var.lower y : Const.t)]
+  in
+  run ~raise_first:false;
+  [%expect
+    {|
+    (before (y ((stage Const) (provenance Static) (locality Global))))
+    (after (y ((stage Const) (provenance Static) (locality Local))))
+    |}];
+  run ~raise_first:true;
+  [%expect
+    {|
+    (before (y ((stage Const) (provenance Static) (locality Local))))
+    (after (y ((stage Const) (provenance Static) (locality Local))))
+    |}];
+  (* A pointer-free layout never adds them; a layout above another has pointers
+     once it does. *)
+  let lower = Layout.create layouts
+  and upper = Layout.create layouts in
+  ok (Layout.add_below ~lower upper);
+  let x = Var.create ids ~rank:1
+  and y = Var.create ids ~rank:1 in
+  ok
+    (Var.submode
+       ~crossing:(Crossing.while_pointer_free upper)
+       x
+       y
+       (reason "x is y"));
+  ok (Var.at_least x Locality Local (reason "x is local"));
+  ok (Layout.raise lower ~because:[ reason "'b turned out to be string" ]);
+  print_s
+    [%message (Layout.has_pointers upper : bool) ~y:(Var.lower y : Const.t)];
+  [%expect
+    {|
+    (("Layout.has_pointers upper" true)
+     (y ((stage Const) (provenance Static) (locality Local))))
+    |}];
+  let annotated = Layout.create layouts in
+  ok (Layout.bound_by annotated (reason "annotated pointer_free"));
+  print_result (Layout.raise annotated ~because:[ reason "it is a string" ]);
+  [%expect
+    {|
+    (Error
+     ("Has pointers" (because ("it is a string"))
+      (bound ((reason "annotated pointer_free") (instance ())))))
+    |}]
+;;
+
+let%expect_test "a scheme keeps constraints guarded by a layout not \
+                 generalized, through internal variables, for each instance"
+  =
+  let ids = Id_source.create () in
+  let layout = Layout.create layouts in
+  (* [let id y = let z = y in z], of a type ['a] of an enclosing scope, not
+     known. *)
+  let y = Var.create ids ~rank:1
+  and z = Var.create ids ~rank:1
+  and result = Var.create ids ~rank:1 in
+  let crossing = Crossing.while_pointer_free layout in
+  ok (Var.submode ~crossing y z (reason "y is bound to z"));
+  ok (Var.submode ~crossing z result (reason "z is returned"));
+  Var.generalize [ y; result ] ~rank:0;
+  show [ y; result ];
+  [%expect
+    {|
+    ((m0.stage Const..Nonportable
+      (generic (m0.stage <= (cross_portable m2.stage))
+       (m0.stage <= m2.stage unless (l5))))
+     (m0.provenance Static..External
+      (generic (m0.provenance <= (const_is_static m0.stage))
+       (m0.provenance <= m2.provenance unless (l5))))
+     (m0.locality Global..Local
+      (generic (m0.locality <= m2.locality unless (l5)))))
+    ((m2.stage Const..Nonportable (generic))
+     (m2.provenance Static..External
+      (generic (m2.provenance <= (const_is_static m2.stage))))
+     (m2.locality Global..Local (generic)))
+    |}];
+  let instance () =
+    let instance = Var.Instance.create ids ~rank:0 in
+    let y = Var.Instance.instantiate instance y in
+    let result = Var.Instance.instantiate instance result in
+    ok (Var.at_least y Locality Local (reason "a local argument"));
+    result
+  in
+  let before = instance () in
+  print_s [%message (Var.lower before : Const.t)];
+  [%expect
+    {| ("Var.lower before" ((stage Const) (provenance Static) (locality Global))) |}];
+  ok (Layout.raise layout ~because:[ reason "'a is string" ]);
+  let after = instance () in
+  print_s [%message (Var.lower before : Const.t) (Var.lower after : Const.t)];
+  [%expect
+    {|
+    (("Var.lower before" ((stage Const) (provenance Static) (locality Local)))
+     ("Var.lower after" ((stage Const) (provenance Static) (locality Local))))
+    |}]
+;;
+
+let%expect_test "a guarded constraint that failed in an attempt is dropped" =
+  let ids = Id_source.create () in
+  let first = Layout.create layouts
+  and second = Layout.create layouts
+  and both = Layout.create layouts in
+  ok (Layout.add_below ~lower:first both);
+  ok (Layout.add_below ~lower:second both);
+  let x = Var.create ids ~rank:1
+  and y = Var.create ids ~rank:1 in
+  ok (Var.at_least x Locality Local (reason "x is local"));
+  ok (Var.at_most y Locality Global (reason "y is global"));
+  ok
+    (Var.submode
+       ~crossing:(Crossing.while_pointer_free both)
+       x
+       y
+       (reason "x is y"));
+  let raise layout what =
+    Layout.attempt (fun () -> Layout.raise layout ~because:[ reason what ])
+  in
+  print_result (raise first "'a turned out to be string");
+  print_s [%message (Layout.has_pointers first : bool)];
+  [%expect
+    {|
+    (Error
+     ("Mode mismatch" (var m1) (axis locality) (lower Local) (upper Global)
+      (lower_because ("x is local" "x is y" "'a turned out to be string"))
+      (upper_because ("y is global"))))
+    ("Layout.has_pointers first" false)
+    |}];
+  (* Another way it has pointers doesn't fail again. *)
+  print_result (raise second "'b turned out to be string");
+  print_s
+    [%message (Layout.has_pointers both : bool) ~y:(Var.lower y : Const.t)];
+  [%expect
+    {|
+    (Ok ())
+    (("Layout.has_pointers both" true)
+     (y ((stage Const) (provenance Static) (locality Global))))
+    |}];
+  (* Under a failed atomically, the drop is undone with the rest. *)
+  let third = Layout.create layouts
+  and guarded = Layout.create layouts in
+  ok (Layout.add_below ~lower:third guarded);
+  let z = Var.create ids ~rank:1 in
+  ok (Var.at_most z Locality Global (reason "z is global"));
+  ok
+    (Var.submode
+       ~crossing:(Crossing.while_pointer_free guarded)
+       x
+       z
+       (reason "x is z"));
+  print_result
+    (Private.Undo.atomically (fun () ->
+       let%bind.Result () = raise third "'c turned out to be string" in
+       Error
+         (Error.Has_pointers
+            { because = []
+            ; bound = { reason = reason "abandoned"; instance = None }
+            })));
+  print_result (raise guarded "'d turned out to be string");
+  [%expect
+    {|
+    (Error
+     ("Mode mismatch" (var m2) (axis locality) (lower Local) (upper Global)
+      (lower_because ("x is local" "x is z" "'c turned out to be string"))
+      (upper_because ("z is global"))))
+    (Error
+     ("Mode mismatch" (var m2) (axis locality) (lower Local) (upper Global)
+      (lower_because ("x is local" "x is z" "'d turned out to be string"))
+      (upper_because ("z is global"))))
+    |}]
+;;
+
+(* One binding giving a layout pointers is one error: the rest it guards follow
+   from it, so are dropped with the one that failed. *)
+let%expect_test "what a failed layout guards is dropped together" =
+  let ids = Id_source.create () in
+  let layout = Layout.create layouts in
+  let x = Var.create ids ~rank:1 in
+  ok (Var.at_least x Locality Local (reason "x is local"));
+  let uppers =
+    List.init 3 ~f:(fun i ->
+      let y = Var.create ids ~rank:1 in
+      ok
+        (Var.at_most y Locality Global (reason [%string "y%{i#Int} is global"]));
+      ok
+        (Var.submode
+           ~crossing:(Crossing.while_pointer_free layout)
+           x
+           y
+           (reason [%string "x is y%{i#Int}"]));
+      y)
+  in
+  print_result
+    (Layout.attempt (fun () ->
+       Layout.raise layout ~because:[ reason "'a turned out to be string" ]));
+  print_result (Layout.raise layout ~because:[ reason "again" ]);
+  print_s [%message (List.map uppers ~f:Var.lower : Const.t list)];
+  [%expect
+    {|
+    (Error
+     ("Mode mismatch" (var m1) (axis locality) (lower Local) (upper Global)
+      (lower_because ("x is local" "x is y2" "'a turned out to be string"))
+      (upper_because ("y2 is global"))))
+    (Ok ())
+    ("List.map uppers ~f:Var.lower"
+     (((stage Const) (provenance Static) (locality Global))
+      ((stage Const) (provenance Static) (locality Global))
+      ((stage Const) (provenance Static) (locality Global))))
+    |}]
+;;
+
+(* Layouts above each other, as nested types: deciding the bottom one decides
+   them all, and fires what each guards once. *)
+let%expect_test "a chain of layouts" =
+  let ids = Id_source.create () in
+  let chain = List.init 20 ~f:(fun _ -> Layout.create layouts) in
+  List.iter
+    (List.zip_exn (List.drop_last_exn chain) (List.tl_exn chain))
+    ~f:(fun (lower, upper) -> ok (Layout.add_below ~lower upper));
+  let x = Var.create ids ~rank:1 in
+  ok (Var.at_least x Locality Local (reason "x is local"));
+  let ys =
+    List.mapi chain ~f:(fun i layout ->
+      let y = Var.create ids ~rank:1 in
+      ok
+        (Var.submode
+           ~crossing:(Crossing.while_pointer_free layout)
+           x
+           y
+           (reason [%string "x is y%{i#Int}"]));
+      y)
+  in
+  ok
+    (Layout.raise
+       (List.hd_exn chain)
+       ~because:[ reason "'a turned out to be string" ]);
+  ok (Layout.raise (List.last_exn chain) ~because:[ reason "again" ]);
+  print_s
+    [%sexp
+      (List.map ys ~f:(fun y -> (Var.lower y).locality) : Axis.Locality.t list)];
+  [%expect
+    {|
+    (Local Local Local Local Local Local Local Local Local Local Local Local
+     Local Local Local Local Local Local Local Local)
+    |}]
+;;
+
+(* [low] raises [fine], which fires a constraint that holds, then [failing],
+   which fires one that fails: undone, [fine]'s doesn't fire again later. *)
+let%expect_test "what a layout raised in a failed attempt guards is dropped" =
+  let ids = Id_source.create () in
+  let low = Layout.create layouts
+  and fine = Layout.create layouts
+  and failing = Layout.create layouts in
+  ok (Layout.add_below ~lower:low failing);
+  ok (Layout.add_below ~lower:low fine);
+  let x = Var.create ids ~rank:1
+  and y = Var.create ids ~rank:1
+  and z = Var.create ids ~rank:1 in
+  ok (Var.at_least x Locality Local (reason "x is local"));
+  ok (Var.at_most z Locality Global (reason "z is global"));
+  ok
+    (Var.submode
+       ~crossing:(Crossing.while_pointer_free fine)
+       x
+       y
+       (reason "x is y"));
+  ok
+    (Var.submode
+       ~crossing:(Crossing.while_pointer_free failing)
+       x
+       z
+       (reason "x is z"));
+  let raise layout what =
+    Layout.attempt (fun () -> Layout.raise layout ~because:[ reason what ])
+  in
+  print_result (raise low "'a turned out to be string");
+  print_s [%message "" ~y:(Var.lower y : Const.t)];
+  (* [y] could only fail later, if bounded: it fired with the failed binding. *)
+  ok (Var.at_most y Locality Global (reason "y is global"));
+  print_result (raise fine "'b turned out to be string");
+  print_s
+    [%message (Layout.has_pointers fine : bool) ~y:(Var.lower y : Const.t)];
+  [%expect
+    {|
+    (Error
+     ("Mode mismatch" (var m2) (axis locality) (lower Local) (upper Global)
+      (lower_because ("x is local" "x is z" "'a turned out to be string"))
+      (upper_because ("z is global"))))
+    (y ((stage Const) (provenance Static) (locality Global)))
+    (Ok ())
+    (("Layout.has_pointers fine" true)
+     (y ((stage Const) (provenance Static) (locality Global))))
+    |}]
+;;
+
+let%expect_test "a layout of both has pointers once both of its own do" =
+  let show name layout = printf "%s: %b\n" name (Layout.has_pointers layout) in
+  let a = Layout.create layouts
+  and b = Layout.create layouts in
+  let ab = Layout.both layouts a b in
+  ok (Layout.raise a ~because:[ reason "a" ]);
+  show "after a" ab;
+  ok (Layout.raise b ~because:[ reason "b" ]);
+  show "after a and b" ab;
+  let a = Layout.create layouts
+  and b = Layout.create layouts in
+  let ab = Layout.both layouts a b in
+  Layout.pointer_free b;
+  ok (Layout.raise a ~because:[ reason "a" ]);
+  printf "unknown once b is pointer-free: %b\n" (Layout.is_unknown ab);
+  let a = Layout.create layouts
+  and b = Layout.create layouts in
+  let ab = Layout.both layouts a b in
+  ok (Layout.bound_by ab (reason "annotated pointer_free"));
+  ok (Layout.raise a ~because:[ reason "a" ]);
+  print_result (Layout.raise b ~because:[ reason "b" ]);
+  (* Undone with the rest. *)
+  let a = Layout.create layouts
+  and b = Layout.create layouts in
+  ok (Layout.raise a ~because:[ reason "a" ]);
+  print_result
+    (Private.Undo.atomically (fun () ->
+       let ab = Layout.both layouts a b in
+       let%bind.Result () = Layout.raise b ~because:[ reason "b" ] in
+       show "inside" ab;
+       Error
+         (Error.Has_pointers
+            { because = []
+            ; bound = { reason = reason "abandoned"; instance = None }
+            })));
+  printf "b after: %b\n" (Layout.has_pointers b);
+  [%expect
+    {|
+    after a: false
+    after a and b: true
+    unknown once b is pointer-free: false
+    (Error
+     ("Has pointers" (because (b a))
+      (bound ((reason "annotated pointer_free") (instance ())))))
+    inside: true
+    (Error
+     ("Has pointers" (because ()) (bound ((reason abandoned) (instance ())))))
+    b after: false
     |}]
 ;;

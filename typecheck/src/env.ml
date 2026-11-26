@@ -11,6 +11,7 @@ module Lock = struct
       | Quote of Mode.Var.t
       | Splice
       | Exclave
+      | Region
   end
 
   type t =
@@ -26,12 +27,13 @@ module Lock = struct
       match stack with
       | [] -> None
       | { kind = Quote _; _ } :: rest -> Some rest
-      | { kind = Closure _ | Splice | Exclave; _ } :: rest -> leave_quote rest
+      | { kind = Closure _ | Splice | Exclave | Region; _ } :: rest ->
+        leave_quote rest
     in
     List.fold_right locks ~init:[] ~f:(fun lock stack ->
       match lock.kind with
       | Splice -> Option.value (leave_quote stack) ~default:stack
-      | Closure _ | Quote _ | Exclave -> lock :: stack)
+      | Closure _ | Quote _ | Exclave | Region -> lock :: stack)
   ;;
 end
 
@@ -42,6 +44,7 @@ module Entry = struct
     ; quote_id : int option
     ; mode : Binding.t
     ; held : Binding.t option
+    ; shape : (Mode_shape.t option[@sexp.opaque])
     ; locks : (Lock.t list[@sexp.opaque])
     ; binder : Typed.Binder.t
     ; defining : bool
@@ -54,6 +57,7 @@ module Entry = struct
     ; quote_id = None
     ; mode
     ; held
+    ; shape = None
     ; locks = []
     ; binder = Toplevel ident
     ; defining

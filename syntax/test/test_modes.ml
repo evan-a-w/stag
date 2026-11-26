@@ -116,6 +116,8 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
   expr "A [@nontail]";
   expr "`A [@nontail]";
   expr "g (Some (f x)) [@nontail]";
+  expr "region_ let x = stack_ (Some 1) in f x";
+  expr "(region_ (f x), region_ exclave_ g x)";
   [%expect
     {|
     (Stack (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
@@ -137,6 +139,13 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
     t.stag:1:2-12: `[@nontail]` is only written after an application, as in `f x [@nontail]`
     t.stag:1:3-13: `[@nontail]` is only written after an application, as in `f x [@nontail]`
     (Nontail (App (Var g ()) (Construct Some ((App (Var f ()) (Var x ()))))))
+    (Region
+     (Let x () () (Stack (Construct Some ((Lit (Int 1)))))
+      (App (Var f ()) (Var x ()))))
+    (Region
+     (Tuple
+      ((App (Var f ()) (Var x ()))
+       (Region (Exclave (App (Var g ()) (Var x ())))))))
     |}]
 ;;
 
@@ -227,48 +236,49 @@ let%expect_test "mode constraints" =
         (Constrained
          (Arrow (Arrow (Moded (Var b) (Var n)) (Var c))
           (Arrow (Arrow (Var a) (Moded (Var b) (Var m))) (Arrow (Var a) (Var c))))
-         (((lower (Mode (Var m))) (upper (Mode (Var n))))))))
+         ((Submode (lower (Mode (Var m))) (upper (Mode (Var n))))))))
       (Var f ())))
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
-         (((lower (Mode (Var m))) (upper (Mode (Var n))))
-          ((lower (Mode (Var n))) (upper (Mode (Atoms (Portable)))))))))
+         ((Submode (lower (Mode (Var m))) (upper (Mode (Var n))))
+          (Submode (lower (Mode (Var n))) (upper (Mode (Atoms (Portable)))))))))
       (Var f ())))
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Var a))
-         (((lower (Mode (Atoms (Portable)))) (upper (Mode (Var m))))
-          ((lower (Mode (Var m))) (upper (Mode (Atoms (Local Portable)))))))))
+         ((Submode (lower (Mode (Atoms (Portable)))) (upper (Mode (Var m))))
+          (Submode (lower (Mode (Var m)))
+           (upper (Mode (Atoms (Local Portable)))))))))
       (Var f ())))
     (Var x
      ((ty
        (Constrained (Con int ())
-        (((lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
+        ((Submode (lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
       (mode (Var m))))
     (Fun
      ((x
        ((ty
          (Constrained (Con int ())
-          (((lower (Mode (Var m))) (upper (Mode (Var n)))))))
+          ((Submode (lower (Mode (Var m))) (upper (Mode (Var n)))))))
         (mode (Var m)))))
      (Var x ()))
     ((Let f
       ((x
         ((ty
           (Constrained (Con int ())
-           (((lower (Mode (Atoms (Const)))) (upper (Mode (Var m)))))))
+           ((Submode (lower (Mode (Atoms (Const)))) (upper (Mode (Var m)))))))
          (mode (Var m)))))
       ((ty
         (Constrained (Con int ())
-         (((lower (Mode (Var m))) (upper (Mode (Var n)))))))
+         ((Submode (lower (Mode (Var m))) (upper (Mode (Var n)))))))
        (mode (Var n)))
       (Var x ())))
     (Match
      (Var x
       ((ty
         (Constrained (Con int ())
-         (((lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
+         ((Submode (lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
        (mode (Var m))))
      (((Var y) (Var y ()))))
     |}]
@@ -314,13 +324,15 @@ let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
-         (((lower (Axis Stage (Var m))) (upper (Axis Stage (Var n))))))))
+         ((Submode (lower (Axis Stage (Var m))) (upper (Axis Stage (Var n))))))))
       (Var f ())))
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
-         (((lower (Axis Locality (Var m))) (upper (Axis Locality (Var n))))
-          ((lower (Axis Provenance (Var n))) (upper (Axis Provenance (Var m))))))))
+         ((Submode (lower (Axis Locality (Var m)))
+           (upper (Axis Locality (Var n))))
+          (Submode (lower (Axis Provenance (Var n)))
+           (upper (Axis Provenance (Var m))))))))
       (Var f ())))
     t.stag:1:17-42: the sides of `<=` are on different axes, stage and locality
     t.stag:1:17-38: a bound is on the whole variable, as in `'m <= portable`
@@ -356,7 +368,7 @@ let f : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('m)) = f
     ((Let f ()
       ((ty
         (Constrained (Con int ())
-         (((lower (Meet (Axis Stage (Var m)) Portable))
+         ((Submode (lower (Meet (Axis Stage (Var m)) Portable))
            (upper (Axis Stage (Var n))))))))
       (Var f ())))
     |}];

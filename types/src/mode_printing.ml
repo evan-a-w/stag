@@ -40,6 +40,42 @@ module Printed = struct
   ;;
 end
 
+(* A constraint not added yet, printed [unless] its guards are pointer-free, or,
+   if it [holds] (one has pointers), as is. *)
+module Guarded = struct
+  type kind =
+    | Upper of Mode_node.t * int
+    | Lower of Mode_node.t * int
+    | Relation of Relation.t
+
+  type t =
+    { kind : kind
+    ; guards : Mode.Layout.t list
+    ; holds : bool
+    }
+
+  let compare_kind a b =
+    match a, b with
+    | Upper (n, p), Upper (n', p') | Lower (n, p), Lower (n', p') ->
+      [%compare: Mode_node.t * int] (n, p) (n', p')
+    | Relation r, Relation r' ->
+      [%compare: Mode_node.t * int * Mode_node.t]
+        (r.lo, Mode.Morphism.code (Written.morphism r.written), r.hi)
+        (r'.lo, Mode.Morphism.code (Written.morphism r'.written), r'.hi)
+    | Upper _, _ -> -1
+    | _, Upper _ -> 1
+    | Lower _, _ -> -1
+    | _, Lower _ -> 1
+  ;;
+
+  let compare a b =
+    let ids t = List.map t.guards ~f:Mode.Layout.id in
+    match compare_kind a.kind b.kind with
+    | 0 -> [%compare: int list * bool] (ids a, a.holds) (ids b, b.holds)
+    | c -> c
+  ;;
+end
+
 type t =
   { vars : Mode.Var.t Int.Table.t
   ; order : int Int.Table.t
@@ -51,6 +87,7 @@ type t =
   ; names : string Int.Table.t
   ; anonymous : Int.Hash_set.t
   ; mutable printed : Printed.t list
+  ; mutable guarded : Guarded.t list
   }
 
 let create () =
@@ -64,6 +101,7 @@ let create () =
   ; names = Int.Table.create ()
   ; anonymous = Int.Hash_set.create ()
   ; printed = []
+  ; guarded = []
   }
 ;;
 
@@ -143,6 +181,58 @@ let is_plain (r : Relation.t) =
   match r.written with
   | Plain _ -> true
   | Meet _ | Release | Static_if_const | Const_if_static -> false
+;;
+
+let rep_id t id = Hashtbl.find t.rep id |> Option.value ~default:id
+
+(* The constraints not added yet between the variables [ids], as the layouts
+   guarding them aren't known, on their classes' representatives: those the
+   closure doesn't imply already. *)
+let guarded t closure ~ids ~axes ~is_node =
+  let of_solver node =
+    { Mode_node.var = rep_id t (Mode.Var.Node.var_id node)
+    ; axis = Mode.Var.Node.axis node
+    }
+  in
+  let written_of morphism =
+    List.find_map written_forms ~f:(fun (written, m, _) ->
+      Option.some_if
+        (Mode.Morphism.le m morphism && Mode.Morphism.le morphism m)
+        written)
+  in
+  let implied (lo : Mode_node.t) morphism hi =
+    List.for_all (Mode_closure.domain closure lo) ~f:(fun p ->
+      Mode_closure.raise closure lo p hi >= Mode.Morphism.left morphism p)
+  in
+  let printed node = Hash_set.mem is_node node in
+  List.concat_map ids ~f:(fun id ->
+    List.map (axes id) ~f:(fun (Mode.Axis.Any.T axis) ->
+      Mode.Var.node (Hashtbl.find_exn t.vars id) axis))
+  |> Mode.Var.Node.Guarded.among
+  |> List.filter_map ~f:(fun { Mode.Var.Node.Guarded.kind; guards; holds } ->
+    let kind : Guarded.kind option =
+      match kind with
+      | Upper (n, p) ->
+        let n = of_solver n in
+        Option.some_if
+          (printed n && p < Mode_closure.upper closure n)
+          (Guarded.Upper (n, p))
+      | Lower (n, p) ->
+        let n = of_solver n in
+        Option.some_if
+          (printed n && p > Mode_closure.lower closure n)
+          (Guarded.Lower (n, p))
+      | Edge (lo, morphism, hi) ->
+        let lo = of_solver lo
+        and hi = of_solver hi in
+        if printed lo && printed hi && not (implied lo morphism hi)
+        then
+          Option.map (written_of morphism) ~f:(fun written ->
+            Guarded.Relation { lo; written; hi })
+        else None
+    in
+    Option.map kind ~f:(fun kind -> { Guarded.kind; guards; holds }))
+  |> List.dedup_and_sort ~compare:Guarded.compare
 ;;
 
 (* The variables are grouped into classes equal on every axis they read, each
@@ -335,7 +425,14 @@ let settle t =
        @ bounds)
       ~item:Printed.item
   in
+  t.guarded <- guarded t closure ~ids ~axes ~is_node;
   let related = Int.Hash_set.create () in
+  List.iter t.guarded ~f:(fun { kind; _ } ->
+    match kind with
+    | Upper (n, _) | Lower (n, _) -> Hash_set.add related n.var
+    | Relation { lo; hi; _ } ->
+      Hash_set.add related lo.var;
+      Hash_set.add related hi.var);
   let bounded = Mode_node.Hash_set.create () in
   List.iter printed ~f:(function
     | Relation r ->
@@ -413,10 +510,7 @@ let name t rep =
       sprintf "'%sm%d" (if weak then "_" else "") (Hashtbl.length t.names))
 ;;
 
-let rep t var =
-  let id = Mode.Var.id var in
-  Hashtbl.find t.rep id |> Option.value ~default:id
-;;
+let rep t var = rep_id t (Mode.Var.id var)
 
 let side t var =
   let rep = rep t var in
@@ -425,7 +519,7 @@ let side t var =
   | None -> `Name (name t rep)
 ;;
 
-let constraints t =
+let constraints t ~layout_name =
   let on ({ var; axis } : Mode_node.t) =
     sprintf "%s(%s)" (Mode_node.axis_name axis) (name t var)
   in
@@ -478,5 +572,21 @@ let constraints t =
        | Const_if_static -> sprintf "%s <= const_if_static(%s)" (on lo) (on hi))
       :: group rest
   in
-  group t.printed
+  let guarded ({ kind; guards; holds } : Guarded.t) =
+    let printed : Printed.t =
+      match kind with
+      | Upper (n, p) -> Upper (n, p)
+      | Lower (n, p) -> Lower (n, p)
+      | Relation r -> Relation r
+    in
+    let constraint_ = String.concat (group [ printed ]) in
+    if holds
+    then constraint_
+    else
+      sprintf
+        "%s unless pointer_free(%s)"
+        constraint_
+        (String.concat ~sep:", " (List.map guards ~f:layout_name))
+  in
+  group t.printed @ List.map t.guarded ~f:guarded
 ;;

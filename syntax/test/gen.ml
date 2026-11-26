@@ -130,15 +130,15 @@ and annot_type t : Type_expr.t =
   if int t 3 = 0
   then (
     let var () = loc (Mode_expr.Var (pick t [ "m"; "n" ])) in
-    let constraint_ () : Mode_expr.Constraint.t =
+    let submode () : Mode_expr.Term.t * Mode_expr.Term.t =
       let on axis : Mode_expr.Term.t = Axis (axis, var ()) in
       match int t 6 with
-      | 0 -> { lower = Mode (var ()); upper = Mode (mode_expr t) }
-      | 1 -> { lower = Mode (mode_expr t); upper = Mode (var ()) }
-      | 2 -> { lower = Mode (var ()); upper = Mode (var ()) }
+      | 0 -> Mode (var ()), Mode (mode_expr t)
+      | 1 -> Mode (mode_expr t), Mode (var ())
+      | 2 -> Mode (var ()), Mode (var ())
       | 3 ->
         let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
-        { lower = on axis; upper = on axis }
+        on axis, on axis
       | _ ->
         (* Functions nested up to three deep, each of a term on its axis. *)
         let rec left (axis : Mode_expr.Axis.t) depth : Mode_expr.Term.t =
@@ -162,7 +162,15 @@ and annot_type t : Type_expr.t =
           | _ -> on axis
         in
         let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
-        { lower = left axis 3; upper = right axis 3 }
+        left axis 3, right axis 3
+    in
+    let layout_var () = pick t [ "'a"; "'b"; "..'r" ] in
+    let constraint_ () : Mode_expr.Constraint.t =
+      match int t 8 with
+      | 0 -> Pointer_free (layout_var ())
+      | _ ->
+        let lower, upper = submode () in
+        Submode { lower; upper }
     in
     loc
       (Type_expr.Constrained
@@ -347,6 +355,7 @@ and expr t : Expr.t =
          ; (fun t -> Struct_quote (list t ~min:0 ~max:3 toplevel))
          ; (fun t -> Stack (expr t))
          ; (fun t -> Exclave (expr t))
+         ; (fun t -> Region (expr t))
          ; (fun t -> Nontail (loc (Expr.App (expr t, expr t))))
          ; (fun t ->
              Annotated

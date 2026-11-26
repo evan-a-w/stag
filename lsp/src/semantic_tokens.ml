@@ -71,6 +71,7 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | Mut
   | Stack_
   | Exclave_
+  | Region_
   | Global_
   | Forget
   | Let_expect_test

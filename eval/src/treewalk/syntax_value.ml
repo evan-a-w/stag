@@ -414,13 +414,20 @@ module Of_value = struct
              (match at with
               | Annotation ->
                 let constraint_ value : Mode_expr.Constraint.t =
-                  let constraint_ : Mode_expr.Constraint.t =
-                    match value with
-                    | Value.Tuple [ lower; upper ] ->
-                      { lower = within (Component 0) (mode_term ~loc) lower
-                      ; upper = within (Component 1) (mode_term ~loc) upper
-                      }
-                    | value -> unexpected ~expected:"a pair" value
+                  let constraint_ =
+                    variant
+                      "Stag.Mode_expr.Constraint.t"
+                      value
+                      ~f:(fun constructor args : Mode_expr.Constraint.t ->
+                        let arg i read = Args.read args i read in
+                        match constructor, Args.count args with
+                        | "Submode", 2 ->
+                          Submode
+                            { lower = arg 0 (mode_term ~loc)
+                            ; upper = arg 1 (mode_term ~loc)
+                            }
+                        | "Pointer_free", 1 -> Pointer_free (arg 0 string)
+                        | _ -> raise Bad_arguments)
                   in
                   match Mode_expr.Constraint.check constraint_ with
                   | Ok () -> constraint_
@@ -715,6 +722,7 @@ module Of_value = struct
          | "Struct_quote", 1 -> Struct_quote (arg 0 (list (toplevel ~loc)))
          | "Stack", 1 -> Stack (arg 0 (expr ~loc))
          | "Exclave", 1 -> Exclave (arg 0 (expr ~loc))
+         | "Region", 1 -> Region (arg 0 (expr ~loc))
          | "Nontail", 1 ->
            (match arg 0 (expr ~loc) with
             | { txt = App _; _ } as app -> Nontail app

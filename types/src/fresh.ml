@@ -23,6 +23,7 @@ let set_value_parameters t f = t.value_parameters <- f
 let value_parameters t = t.value_parameters
 let set_variances t f = t.variances <- f
 let variances t = t.variances
+let next_id t = t.next_id
 
 let settle t f =
   match t.settling with

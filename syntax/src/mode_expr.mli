@@ -59,13 +59,15 @@ module Term : sig
   val to_string : t -> string
 end
 
-(** [lower <= upper] of a [with] clause: between modes, at least one of them a
+(** Of a [with] clause. [lower <= upper]: between modes, at least one of them a
     variable, on every axis; or between terms of variables on one axis. *)
 module Constraint : sig
   type t =
-    { lower : Term.t
-    ; upper : Term.t
-    }
+    | Submode of
+        { lower : Term.t
+        ; upper : Term.t
+        }
+    | Pointer_free of string (** ['a : pointer_free]. *)
   [@@deriving sexp_of, compare, equal]
 
   val to_string : t -> string

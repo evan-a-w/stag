@@ -135,12 +135,17 @@ and mode_term (term : Mode_expr.Term.t) (term' : Mode_expr.Term.t) =
     , _ ) -> None
 
 and mode_constraint
-  ({ lower; upper } : Mode_expr.Constraint.t)
-  ({ lower = lower'; upper = upper' } : Mode_expr.Constraint.t)
+  (generated : Mode_expr.Constraint.t)
+  (written : Mode_expr.Constraint.t)
   =
-  let* lower = mode_term lower lower' in
-  let+ upper = mode_term upper upper' in
-  { Mode_expr.Constraint.lower; upper }
+  match generated, written with
+  | Submode { lower; upper }, Submode { lower = lower'; upper = upper' } ->
+    let* lower = mode_term lower lower' in
+    let+ upper = mode_term upper upper' in
+    Mode_expr.Constraint.Submode { lower; upper }
+  | Pointer_free var, Pointer_free var' when String.equal var var' ->
+    Some generated
+  | (Submode _ | Pointer_free _), _ -> None
 
 and annot ({ ty; mode } : Annot.t) ({ ty = ty'; mode = mode' } : Annot.t) =
   let* ty = option type_expr ty ty' in
@@ -342,6 +347,9 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Exclave e, Exclave e' ->
     let+ e = expr e e' in
     Expr.Exclave e
+  | Region e, Region e' ->
+    let+ e = expr e e' in
+    Expr.Region e
   | Nontail e, Nontail e' ->
     let+ e = expr e e' in
     Expr.Nontail e
@@ -382,6 +390,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Struct_quote _
       | Stack _
       | Exclave _
+      | Region _
       | Nontail _
       | Annotated _
       | Forget _

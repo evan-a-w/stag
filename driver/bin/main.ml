@@ -89,7 +89,7 @@ let files_param =
 
 (* The sources of the prelude among [paths] are checked as the prelude of their
    checkout, then the others as a program that sees it. *)
-let check_with_prelude_sources ~limits ~sources ~program =
+let check_with_prelude_sources ~limits ~modes ~sources ~program =
   let checkout = snd (List.hd_exn sources) in
   List.iter sources ~f:(fun (path, other) ->
     if not
@@ -126,7 +126,7 @@ let check_with_prelude_sources ~limits ~sources ~program =
           (Fs.canonical path)
       with
       | Ok signature ->
-        print_string (Signature.to_string_hum ~of_prelude:true signature)
+        print_string (Signature.to_string_hum ~of_prelude:true ~modes signature)
       | Error diagnostic ->
         report [] diagnostic;
         exit 1);
@@ -147,7 +147,8 @@ let check_with_prelude_sources ~limits ~sources ~program =
           exit 1
       in
       warn_stale files driver;
-      print_string (Signature.to_string_hum (Driver.checked driver).signature))
+      print_string
+        (Signature.to_string_hum ~modes (Driver.checked driver).signature))
 ;;
 
 let check_command =
@@ -166,7 +167,15 @@ let check_command =
           Stdlib_checkout.prelude_file
           Stdlib_checkout.core_dir)
     (let%map_open.Command paths = files_param
-     and limits = Pipeline_config.limits_param () in
+     and limits = Pipeline_config.limits_param ()
+     and modes =
+       flag
+         "modes"
+         no_arg
+         ~doc:
+           " print the modes of the signature in full: each mode written, and \
+            the constraints between them"
+     in
      fun () ->
        let sources, program =
          List.partition_map (dedup paths) ~f:(fun path ->
@@ -175,13 +184,13 @@ let check_command =
            | None -> Second path)
        in
        match sources with
-       | _ :: _ -> check_with_prelude_sources ~limits ~sources ~program
+       | _ :: _ -> check_with_prelude_sources ~limits ~modes ~sources ~program
        | [] ->
          let files = read_files paths in
          let driver = check (Pipeline_config.create ~limits paths) files in
          warn_stale files driver;
          print_string
-           (Signature.to_string_hum (Driver.checked driver).signature))
+           (Signature.to_string_hum ~modes (Driver.checked driver).signature))
 ;;
 
 let run_command =

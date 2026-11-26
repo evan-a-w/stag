@@ -9,8 +9,8 @@ val create
   :  'w Type_equal.Id.t
   -> 'w
   -> bind:('w -> 'a -> (unit, 'e) Result.t)
-  -> instantiate:('w -> 'w option)
-       (** The state of an instance's copy, if it keeps one. *)
+  -> instantiate:('w -> at:Loc.t option -> 'w option)
+       (** The state of an instance's copy, if it keeps one, made [at] a use. *)
   -> generalize:('w -> (unit, 'e) Result.t)
   -> ('a, 'e) t
 
@@ -20,7 +20,7 @@ val find : ('a, _) t list -> 'w Type_equal.Id.t -> 'w option
     then none of their changes are made. *)
 val bind : ('a, 'e) t list -> 'a -> (unit, 'e) Result.t
 
-val instantiate : ('a, 'e) t list -> ('a, 'e) t list
+val instantiate : ?at:Loc.t -> ('a, 'e) t list -> ('a, 'e) t list
 
 (** Before the variable is generalized: the errors of each. *)
 val generalize : (_, 'e) t list -> 'e list

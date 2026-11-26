@@ -1,5 +1,15 @@
 open! Import
 
+(** Why a layout is pointer-free: as annotated by [reason], at an [instance] of
+    what is annotated, used there, if it is one. *)
+module Bound : sig
+  type t =
+    { reason : Reason.t
+    ; instance : Loc.t option
+    }
+  [@@deriving sexp_of]
+end
+
 type t =
   | Mismatch :
       { var : int
@@ -27,6 +37,12 @@ type t =
       ; because : Reason.t
       }
       -> t (** A constant above another that [because] requires below it. *)
+  | Has_pointers :
+      { because : Reason.t list (** Why its values have pointers. *)
+      ; bound : Bound.t (** Why they may not. *)
+      }
+      -> t
+  (** A type variable annotated pointer-free bound to a type with pointers. *)
 [@@deriving sexp_of]
 
 (** [Unequal] unless the points are equal. *)

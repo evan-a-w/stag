@@ -417,6 +417,7 @@ let splice_code
             }
       ; ty = in_.ty
       ; loc = in_.loc
+      ; made = Typed.Expr.Made.none
       })
 ;;
 

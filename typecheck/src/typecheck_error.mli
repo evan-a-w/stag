@@ -118,8 +118,6 @@ module Kind : sig
     | Store_into_box (** A [Store] through a [box], which is immutable. *)
     | Exclave_not_in_tail_position
     (** [exclave_ e] other than as the result of a function body. *)
-    | Mutable_captured_in_exclave of string
-    (** A closure in [exclave_ e] capturing a [let mut] of the region it ends. *)
     | Stack_not_on_allocation (** [stack_ e] where [e] allocates nothing. *)
     | Compile_time_use_of_mutable of
         { toplevel : string
@@ -184,9 +182,6 @@ module Kind : sig
     (** A [regional] or [local] modality on a field or constructor argument. *)
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
-    | Mode_parameter_on_arrow of string
-    (** A declaration's mode parameter as one of its arrows' modes, which are
-        fixed. *)
     | Anonymous_mode_in_constraint
     (** [_] in a [with] constraint, which would relate nothing else. *)
     | Invalid_mode of string

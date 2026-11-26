@@ -60,10 +60,39 @@ Mode crossing by layout: a value of a pointer-free by-value type (`int`,
 `bool`, `char`, `unit`, and records, tuples and variants of pointer-free
 types) holds nothing a mode could restrict. It crosses locality and
 provenance entirely, and stage up to `portable` (it can always be lifted into
-code, but `const` stays a promise about how it was computed). Applied when the
-type is known where the constraint arises; a function's parameter type is
-unified with what the context expects before its body is checked, so whether
-a use crosses does not depend on the order things are checked in. Records,
+code, but `const` stays a promise about how it was computed). A constraint on a
+value whose type is not known yet (a type variable) is guarded by the
+variable's layout: added as if the type crossed, and in full once the variable
+is bound to a type with pointers, whenever that happens (as
+`let c = compare k k2`, whose `int` is known only from how `c` is used). So
+crossing is decided when the type is known, whatever the order things are
+checked in: `let f u = let r @ global = x in r in Int.add (f ()) 1`, with `x`
+local, is accepted, as `x` is found to be an `int` after `f` is generalized.
+A type variable still unknown when it is generalized is taken to have
+pointers, so its guarded constraints are added in full: a scheme has no
+guarded constraints of its own, and an instance at a pointer-free type
+crosses at its own uses anyway. Writing `'a : pointer_free` in a `with`
+clause instead bounds it: the guarded constraints are dropped, and every
+instance must be pointer-free; an instance that isn't is an error where it
+is used (`keep "s"`), noting the annotation and what made it have pointers.
+Only a guard of a variable of an enclosing scope, still unknown, stays guarded
+in a scheme. A weak toplevel's constraints still guarded print after it, as
+`with 'm0 <= global unless pointer_free('_a)`: they are added once `'_a` has
+pointers. This form is printed only, never written (a scheme has no guarded
+constraints, and a weak variable can't be annotated). Each layout is decided as
+the scope that made its variable ends (a `let`'s body, a function's, a
+toplevel), as for generalizing, so what is checked when doesn't depend on the
+order. A quote embedding a value whose stage depends on a parameter, or whose
+type isn't known to be pointer-free yet, waits until both are known: the value
+must be `portable` once any guard has pointers. Whatever is still unknown at the
+end of the toplevel (as of a weak variable) is taken to have pointers, so the
+embedding must hold however it is decided.
+
+One mistake is one error. A binding annotation (`let s @ global = e`) applies
+before the value's mode is checked against it, so a value exceeding it is
+reported once, at the binding, and its uses see the annotated mode. A type
+turning out to have pointers adds every constraint it guards at once: if one
+fails, the rest are dropped with it, rather than each reported. Records,
 tuples and variants are values, not allocations: what is local in a local
 `(p, 1)` is `p`.
 
@@ -79,9 +108,29 @@ tuples and variants are values, not allocations: what is local in a local
 | match                      | join of the scrutinee and the arms; its pattern variables have the scrutinee's mode (exception cases: nonportable) |
 | splice in a quote          | nonportable (the code's mode is not known)  |
 | toplevel splice            | the mode of its expansion: `.~(.<1>.)` is const |
-| value computed at compile time, embedded in generated code | portable |
+| value computed at compile time, used in generated code (lifted) | const static global: a constant of the code |
 | `let x = e1 in e2`         | join of `e1` and `e2`                       |
 | quote `<e>`                | join of the values it captures from outer levels (its free variables are resolved at the splice, so don't count) |
+| by-value tuple, record, constructor | the join of its components, each of which keeps its own mode (see below) |
+
+A by-value block (a tuple, record or constructor argument, not boxed) has a
+mode per component as well as its whole mode, the join of them. They follow
+it through `let` bindings, patterns, field projections (`r.a`, `` r.`a ``),
+re-binding and match arms (joined component-wise; arms of different shapes
+fall back to the whole), so `let p = (k, ext "v") in match p with (k, _) ->
+k` keeps `k` at `gc`. Anywhere it is used as a whole (an argument, a result,
+stored, boxed, embedded, annotated, a `let mut`, a lock such as a closure's
+or an `exclave_`'s), only the whole counts. A field's modality still applies
+to its component.
+
+A value used at a later stage than it is bound in (a local of a splice used in
+the quote it returns, or what a toplevel splice's code embedded) must be
+`portable`, so is deeply immutable: no cell is portable, and a block is as
+portable as what it holds. The code holds a copy of it, so at the use it is a
+`const static global` constant, even if it is an application's result (the
+application ran at compile time). A toplevel spliced from it is then `const`,
+so generalized. The binding itself keeps its mode, and so does the code
+holding it.
 
 See [Arrow modes](#arrow-modes).
 
@@ -175,7 +224,6 @@ back as a fresh variable) and their constraints follow the type:
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
   with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5
-  and release(locality('m2)) <= locality('m5) and 'm2 <= regional
   and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1)
   and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
 ```
@@ -276,6 +324,12 @@ free there on locality, keeps its name in both places.
 An arrow's side fixed to a constant (by a declaration, as a record field's
 `string -> string`) prints only its atoms other than the default, as
 annotations and declarations alike read unwritten axes as the default.
+A declared arrow's side may instead name one of the declaration's mode
+parameters (`type cmp['k, 'p : mode] = { compare : 'k @ 'p -> 'k @ 'p -> int }`):
+its stage and provenance are the argument's, its locality `global` (the
+parameter is bounded so). The parameter gets the side's variance: an
+argument's is contravariant, a result's covariant; as a result is never
+`const`, the parameter is then at least `portable`.
 
 `release(locality('a)) <= locality('b)` is not a default between a
 parameter and its result: most curried and higher-order functions don't have
@@ -577,16 +631,42 @@ Each step is a branch stacked on the previous one.
   inferred, an immutable `box['a]` (covariant, read as a part) that `list`
   is built of, so `list` is covariant. A mode variable written once and
   related to nothing prints as `_`, which reads back as a fresh variable.
+- **J. Allocation locality and regions**: an allocation returned by its
+  function has the function's result locality, so `let mk x = Box.make x`
+  is `'a -> box['a] @ 'm`, made on the heap or in the caller's region as
+  each use of the result chooses (see
+  [semantics.md](semantics.md#locality)); the placement of each allocation
+  site (closures, partial applications, boxes, pointers, captured `let mut`
+  cells) is recorded for its owner (toplevel or generalised `let`), as
+  fixed or following one side of the owner's type, for the monomorphiser
+  (`Typed.Program.allocations`), read once the whole component is checked; an
+  interpreter in the tests (`Region_check`) follows the record, failing on
+  any use after free, as an oracle. `region_ e` opens a region of its own,
+  freed when it ends (its value is checked as a function's result, and
+  `exclave_` ends it early). Chosen over a `with_region (fun () -> e)`
+  function: a keyword needs no closure, and reads like `stack_` and
+  `exclave_`. A tail call's value is returned as an `exclave_`'s is (the
+  callee runs after the region has ended, so its caller's region is the
+  function's caller's): `let apply f x = f x` returns what `f` does, local
+  or not, and a search recursing by tail calls (`Map.find`) returns a local
+  part of a local argument.
+- **K. Per-component modes**: a by-value block's components each keep a mode
+  (`Mode_shape`) through bindings, patterns, projections and match arms (see
+  [Expression modes](#expression-modes)); used as a whole, they are joined.
 
 ## Later
 
 - `<t @ m>{ctx}` code modes.
+- Per-component modes in types, `(a @ m1) * (b @ m2)`, so a function's
+  parameter or result keeps them too (today it is the whole); and through
+  locks, `let mut`, annotations and record update, which use the whole.
 - `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
   only C-compatible data (pointer-free values and `cptr`s), for `external`
   signatures.
 - Pointers in `external` signatures, and callbacks (`@ static` closures
   passed to C).
-- A dynamic mode checker in the interpreter, as a test oracle.
+- A dynamic mode checker in the interpreter, as a test oracle, beyond the
+  locality of allocations, which `Region_check` checks.
 - Presence ordering constraints (`Absent <= Present`) are kept as bounds
   between presence variables, so are solved independently of the order they
   arise in, as are the type equalities of entries the code may use, which

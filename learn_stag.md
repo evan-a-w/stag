@@ -9,6 +9,7 @@ OCaml, and today runs in an interpreter (a compiler to LLVM is planned, see
 
 ```sh
 stag check FILE.stag     # typecheck, print the signature
+stag check -modes FILE.stag  # ... with every mode and mode constraint
 stag run FILE.stag       # typecheck and evaluate
 stag test FILE.stag      # run let%expect_test tests (-promote to accept)
 stag fmt -inplace FILE.stag
@@ -469,12 +470,32 @@ let s = sum3 1 2 3                  (* val s : int = 7 *)
    the same value anywhere, so a local int is returned freely. *)
 let read_local (p : ptr[int] @ local) = p.*
 (* val read_local : ptr[int] @ local -> int *)
+(* Crossing waits for the type: [c] is known to be an int only once it is
+   compared, yet it crosses. *)
+let sign (p : ptr[int] @ local) f =
+  let c = f p in
+  match Int.lt c 0 with
+  | true -> c
+  | false -> 0
+(* val sign : ptr[int] @ local -> ((ptr[int] @ regional -> int) -> int) @ local *)
+(* A type variable may be bounded to pointer-free types (with 'a :
+   pointer_free), so its values cross: a local argument is returned global. *)
+let keep : 'a @ 'm -> 'a @ global with 'a : pointer_free = fun x -> x
+(* val keep : 'a -> 'a *)
+let kept (x : int @ local) = keep x     (* val kept : int @ local -> int *)
 
 (* exclave_ ends the region early, so a function can return a value allocated
    in its caller's region. *)
 let make_local x = exclave_ stack_ (Ptr.make x)
 (* val make_local : 'a -> ptr['a] @ local *)
 let used = read_local (make_local 5)    (* val used : int = 5 *)
+
+(* The components of a by-value tuple or record keep their own modes: the
+   global pointer can be returned though its pair holds a local one. *)
+let second x =
+  let pair = ((stack_ (Ptr.make x)), Ptr.make x) in
+  match pair with (_, g) -> g
+(* val second : 'a -> ptr['a] *)
 ```
 
 ```stag-error
@@ -483,6 +504,20 @@ let leak x = stack_ (Ptr.make x)
 (* Error: This is local, because it is allocated by [stack_] *)
 (* ... but must be at most regional, because the function returns it, ending
    its region (return it with [exclave_] instead) *)
+```
+
+While a weak variable's type isn't known, a constraint crossing would spare
+waits on it, and `stag check -modes` (which prints modes in full) prints it
+with what it waits on: after `let cell = Ptr.make (loop ())`, a function storing a local
+argument into `cell` is `'_a @ 'm0 -> unit with local <= 'm0 and 'm0 <= global
+unless pointer_free('_a)`. This form is only printed, never written.
+
+```stag-error
+(* An instance of a pointer-free variable at a type with pointers is an error
+   where it is used. *)
+let keep : 'a @ 'm -> 'a @ global with 'a : pointer_free = fun x -> x
+let s = keep "s"
+(* Error: This type has pointers, because its type turned out to be string *)
 ```
 
 ```stag-error
@@ -499,6 +534,54 @@ let g (p : ptr[int] @ local) = p.*
 let f x = let p = stack_ (Ptr.make x) in g p [@nontail]
 let seven = f 7                     (* val seven : int = 7 *)
 ```
+
+`[@nontail]` only helps when the call's result doesn't outlive the region. To
+return a value built from a local result, the call must give it in the
+caller's region, with `exclave_`:
+
+```stag-error
+let lb (x : int) = exclave_ stack_ (Box.make x)
+let wrap (x : int) = Box.make (lb x)
+(* Error: ... but must be at most regional, because the function returns it,
+   ending its region (return it with [exclave_] instead) *)
+```
+
+```stag
+let lb (x : int) = exclave_ stack_ (Box.make x)
+let wrap (x : int) = exclave_ Box.make (lb x)
+```
+
+### Where allocations go, and regions
+
+An allocation a function returns is made where its caller wants it: on the
+heap if the result is used `global`ly, in the caller's region if `local`ly. The
+same function serves both, so code can be "GC or arena" by how it is used.
+
+```stag modes
+let mk (x : int) = Box.make x
+(* val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0 *)
+let unbox (b : box[int]) = match b with *n -> n
+let kept : box[int] = mk 1          (* on the heap *)
+let temp (u : unit) = let b @ local = mk 2 in unbox b [@nontail]
+(* in temp's region *)
+```
+
+`region_ e` evaluates `e` in a region of its own, freed when it ends, like a
+function body: nothing local to it can be its value.
+
+```stag
+let mk (x : int) = Box.make x
+let unbox (b : box[int]) = match b with *n -> n
+let total = region_ (let a @ local = mk 1 in let b @ local = mk 2 in Int.add (unbox a) (unbox b))
+(* val total : int = 3 *)
+```
+
+```stag-error
+let mk (x : int) = Box.make x
+let leaks (u : unit) = region_ (let b @ local = mk 1 in b)
+(* Error: but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) *)
+```
+
 
 ### Annotations
 
@@ -597,6 +680,12 @@ itself is `ptr['a, 'p : mode]`, with `ptr[t @@ m]` sugar for `ptr[t, m]`.
 type cell['a, 'p : mode] = { value : 'a @@ 'p }
 let gc_cell : cell[string, gc] = { value = "x" }
 let read_cell (c : cell['a, 'p]) = c.value
+
+(* A declared arrow may take and give values of a mode parameter. The closure
+   of [cmp a] holds [a], so is of ['p] too. *)
+type sorter['k, 'p : mode] = { cmp : 'k @ 'p -> ('k @ 'p -> int) @ 'p }
+let by_length : sorter[string, external] =
+  { cmp = fun a b -> Int.sub (String.length a) (String.length b) }
 ```
 
 ### Variance
@@ -653,7 +742,8 @@ let get_x (r : r) = r.x
 (* val get_x : r @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1) and meet(provenance('m0), gc) <= provenance('m1) and release(locality('m0)) <= locality('m1) *)
 
 let embed (x @ portable) = .< x >.
-(* val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1 *)
+(* val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and release(locality('m0)) <= locality('m1) and 'm0 <= portable gc and gc <= 'm1 *)
+(* What is lifted into code is copied as static data, so must be in the GC heap: [gc]. *)
 
 let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
 (* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
@@ -664,6 +754,49 @@ let same (x : string @ 'm) : string @ 'm = x
 
 let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = fun x -> x
 (* val static_if : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and provenance('m1) <= static_if_const(stage('m0)) *)
+```
+
+### Example: a map and a cache
+
+`Core.Map` (a persistent AVL tree) and `Core.Lru` (a cache of nodes linked by
+pointers, indexed by a map) are written once for every mode. Their last
+parameter is the provenance of the values held: a map of GC strings is also
+one of possibly external strings (it is covariant), but a cache, being
+mutable, is invariant. What they build goes where the caller wants it, as
+their builders return it with `exclave_`, and `int` values cross every axis.
+A pair's components keep their own modes, so `concat` can match `(l, r)`
+without either map's mode constraining the other's.
+A value used at compile time and lifted into code must be `portable`, and
+at most `gc` (static data can't refer outside the GC heap); the code then
+holds it as a constant (`const static`).
+
+```stag
+let m = Core.Map.of_list Core.Int.compare [(1, "a"); (2, "b")]
+let wide : Core.Map.t[int, string, external] = m
+let size (u : unit) =
+  let local_m @ local = Core.Map.add Core.Int.compare m 3 "c" in
+  Core.Map.cardinal local_m [@nontail]
+let three = size ()                   (* val three : int = 3 *)
+
+let keywords = .~(
+  let table @ portable =
+    Core.Map.of_list Core.String.compare [("let", 1); ("in", 2)] in
+  .< table >.)
+let is_let = Core.Map.mem Core.String.compare keywords "let"  (* val is_let : bool = true *)
+let static_keywords @ const static = keywords
+
+let cache : Core.Lru.t[int, string, gc] = Core.Lru.create 2 Core.Int.compare
+let used =
+  Core.Lru.add cache 1 "a";
+  Core.Lru.add cache 2 "b";
+  Core.Lru.add cache 3 "c";
+  Core.Lru.find cache 1               (* val used : option[string] = None *)
+```
+
+```stag-error
+let cache : Core.Lru.t[int, string, gc] = Core.Lru.create 2 Core.Int.compare
+let as_external : Core.Lru.t[int, string, external] = cache
+(* Error: but an expression was expected of type Core.Lru.t[int, string, external] *)
 ```
 
 ## C functions

@@ -22,6 +22,9 @@ module Lock : sig
       | Exclave
       (** [exclave_ e]: [e] is in the caller's region, after the function's has
           ended, so what is local to the function's is gone. *)
+      | Region
+      (** [region_ e]: [e] is in a region of its own, so what is local outside
+          it outlives it, as for a closure's body, but nothing is captured. *)
   end
 
   type t =
@@ -41,6 +44,9 @@ module Entry : sig
     ; quote_id : int option (** The innermost quote the entry is bound in. *)
     ; mode : Binding.t (** Of the variable, or of a [let mut]'s cell. *)
     ; held : Binding.t option (** Of the values a [let mut] holds. *)
+    ; shape : Mode_shape.t option
+    (** The modes of its value's by-value components, where known: each is at
+        least that component's. *)
     ; locks : Lock.t list
     (** The locks enclosing its binding, innermost first. *)
     ; binder : Typed.Binder.t

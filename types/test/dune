@@ -3,4 +3,4 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core stag_types))
+ (libraries core stag_mode stag_types))

@@ -5,7 +5,7 @@ type ('a, 'e) t =
       { id : 'w Type_equal.Id.t
       ; state : 'w
       ; bind : 'w -> 'a -> (unit, 'e) Result.t
-      ; instantiate : 'w -> 'w option
+      ; instantiate : 'w -> at:Loc.t option -> 'w option
       ; generalize : 'w -> (unit, 'e) Result.t
       }
       -> ('a, 'e) t
@@ -26,9 +26,9 @@ let bind ts target =
     List.fold_result ts ~init:() ~f:(fun () (T t) -> t.bind t.state target))
 ;;
 
-let instantiate ts =
+let instantiate ?at ts =
   List.filter_map ts ~f:(fun (T t) ->
-    Option.map (t.instantiate t.state) ~f:(fun state -> T { t with state }))
+    Option.map (t.instantiate t.state ~at) ~f:(fun state -> T { t with state }))
 ;;
 
 let generalize ts =

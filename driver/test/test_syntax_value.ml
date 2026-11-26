@@ -86,9 +86,12 @@ let%expect_test "the prelude's signature" =
         module Term : sig
           type t = Mode of Mode_expr.t | Axis of Axis.t * Mode_expr.t | Meet of ptr[t * Atom.t] | Release of ptr[t] | Static_if_const of ptr[t] | Const_if_static of ptr[t]
         end
+        module Constraint : sig
+          type t = Submode of ptr[Term.t * Term.t] | Pointer_free of string
+        end
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.Term.t * Mode_expr.Term.t]] | Modality of ptr[t * Mode_expr.t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.Constraint.t]] | Modality of ptr[t * Mode_expr.t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
@@ -125,7 +128,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Seq of ptr[t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Stack of ptr[t] | Exclave of ptr[t] | Nontail of ptr[t] | Annotated of ptr[t * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] | Forget of ptr[list[string] * t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Seq of ptr[t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Stack of ptr[t] | Exclave of ptr[t] | Region of ptr[t] | Nontail of ptr[t] | Annotated of ptr[t * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] | Forget of ptr[list[string] * t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -264,6 +267,58 @@ let%expect_test "the prelude's signature" =
         val assoc_exn : ('a -> 'b -> bool) -> 'a -> list['b * 'c] -> 'c
         val sort : ('a -> 'a -> int) -> list['a] -> list['a]
         val dedup : ('a -> 'a -> int) -> list['a] -> list['a]
+      end
+      module Lru : sig
+        type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
+        type entry['a, 'b, 'm0 : mode] = { key : 'a @@ gc; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local -> ('a @ local -> int) @ local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        val create : int -> ('a @ local -> ('a @ local -> int) @ local) -> t['a, 'b, 'm0]
+        val length : t['a, 'b, 'm0] -> int
+        module Internal : sig
+          val unlink : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
+          val push_front : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
+          val use : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
+          val evict_last : t['a, 'b, 'm0] -> unit
+        end
+        val find : t['a, 'b, 'm0] -> 'a -> option['b]
+        val add : t['a, 'b, 'm0] -> 'a -> 'b -> unit
+        val mem : t['a, 'b, 'm0] -> 'a -> bool
+        val remove : t['a, 'b, 'm0] -> 'a -> unit
+        val clear : t['a, 'b, 'm0] -> unit
+        val to_list : t['a, 'b, 'm0] -> list['a * 'b]
+      end
+      module Map : sig
+        type t['a, 'b, 'm0 : mode] = Empty | Node of box[node['a, 'b, 'm0]]
+        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a @@ gc; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
+        val empty : t['a, 'b, 'm0]
+        val is_empty : t['a, 'b, 'm0] -> bool
+        val height : t['a, 'b, 'm0] -> int
+        val min_binding : t['a, 'b, 'm0] -> option['a * 'b]
+        val max_binding : t['a, 'b, 'm0] -> option['a * 'b]
+        module Internal : sig
+          val max : int -> int -> int
+          val create : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+          val bal : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
+          val onto : t['a, 'b, 'm0] -> list['a * 'b] -> list['a * 'b]
+          val add_min : 'a -> 'b -> t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+          val add_max : 'a -> 'b -> t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+          val join : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
+          val concat : t['a, 'b, 'm0] -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
+          val remove : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> t['b, 'c, 'm1]
+        end
+        val singleton : 'a -> 'b -> t['a, 'b, 'm0]
+        val add : ('a -> 'a -> int) -> t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1]
+        val find : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> option['c]
+        val mem : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> bool
+        val remove : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> t['b, 'c, 'm1]
+        val update : ('a -> 'a -> int) -> t['a, 'b, 'm0] -> 'a -> (option['b] -> option['b]) -> t['a, 'b, 'm1]
+        val fold : ('a -> 'b -> 'c -> 'c) -> t['a, 'b, 'm0] -> 'c -> 'c
+        val iter : ('a -> 'b -> 'c) -> t['a, 'b, 'm0] -> unit
+        val map : ('a -> 'b -> 'c) -> t['a, 'b, 'm0] -> t['a, 'c, 'm1]
+        val filter : ('a -> 'b -> bool) -> t['a, 'b, 'm0] -> t['a, 'b, 'm1]
+        val cardinal : t['a, 'b, 'm0] -> int
+        val to_list : t['a, 'b, 'm0] -> list['a * 'b]
+        val of_list : ('a -> 'a -> int) -> list['a * 'b] -> t['a, 'b, 'm0]
       end
       module Option : sig
         val some : 'a -> option['a]
@@ -750,13 +805,14 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 118)
+    ((constructors 121)
      (reflected
-      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Store
-       prelude.Stag.Mode_expr.Atom.External
+      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Region
+       prelude.Stag.Expr.Store prelude.Stag.Mode_expr.Atom.External
        prelude.Stag.Mode_expr.Atom.Nonportable
        prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Mode_expr.Axis.Locality
        prelude.Stag.Mode_expr.Axis.Provenance prelude.Stag.Mode_expr.Axis.Stage
+       prelude.Stag.Mode_expr.Constraint.Pointer_free
        prelude.Stag.Mode_expr.Term.Axis
        prelude.Stag.Mode_expr.Term.Const_if_static
        prelude.Stag.Mode_expr.Term.Meet prelude.Stag.Mode_expr.Term.Release
@@ -1467,7 +1523,7 @@ let%expect_test "modes and modalities only where the parser puts them" =
   let constrained ?(lower = m) ?(upper = local) ty =
     at
       (Syntax.Type_expr.Constrained
-         (ty, [ { lower = Mode lower; upper = Mode upper } ]))
+         (ty, [ Submode { lower = Mode lower; upper = Mode upper } ]))
   in
   program (var { ty = Some (constrained int); mode = Some m });
   program (var { ty = Some (constrained ~lower:local int); mode = None });
@@ -1481,11 +1537,11 @@ let%expect_test "modes and modalities only where the parser puts them" =
     {|
     let v = (x : int @ 'm with 'm <= local)
 
-    Malformed syntax: expected a well-formed mode constraint (a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= portable`), got (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
+    Malformed syntax: expected a well-formed mode constraint (a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= portable`), got Stag.Mode_expr.Constraint.Submode (Ptr.make (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make (Stag.Mode_expr.Constraint.Submode (Ptr.make (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))))), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
     Malformed syntax: expected at least one mode constraint, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil))))
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make ((Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil))))), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make (Stag.Mode_expr.Constraint.Submode (Ptr.make (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))))), Nil))))
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Box.make (Stag.Mode_expr.Constraint.Submode (Ptr.make (Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Var "m"), Stag.Mode_expr.Term.Mode (Stag.Mode_expr.Atoms (Cons (Box.make (Stag.Mode_expr.Atom.Local, Nil)))))), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     |}]
 ;;
 
@@ -1767,12 +1823,12 @@ end >.
       ((x
         ((ty
           (Constrained (Con int ())
-           (((lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
+           ((Submode (lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
          (mode (Var m)))))
       ((ty
         (Constrained (Con int ())
-         (((lower (Mode (Var m))) (upper (Mode (Var n))))
-          ((lower (Mode (Var n))) (upper (Mode (Atoms (Nonportable))))))))
+         ((Submode (lower (Mode (Var m))) (upper (Mode (Var n))))
+          (Submode (lower (Mode (Var n))) (upper (Mode (Atoms (Nonportable))))))))
        (mode (Var n)))
       (Var x ())))
     type r = {x : int @@ global; y : int}

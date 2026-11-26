@@ -243,6 +243,7 @@ module Defs = struct
         with antiquotes. *)
     | Stack of expr (** [stack_ e] *)
     | Exclave of expr (** [exclave_ e] *)
+    | Region of expr (** [region_ e] *)
     | Nontail of expr (** [f x [@nontail]], of an application. *)
     | Annotated of expr * annot
     (** [(e : t @ m)], of an expression not a variable, whose annotation is
@@ -469,6 +470,7 @@ module Expr = struct
     | Struct_quote of toplevel list
     | Stack of t
     | Exclave of t
+    | Region of t
     | Nontail of t
     | Annotated of t * Annot.t
     | Forget of Name.t list * t
