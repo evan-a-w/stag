@@ -3,9 +3,7 @@ open! Import
 let to_error diagnostics =
   Error.of_string
     (String.concat
-       (List.map
-          diagnostics
-          ~f:(Diagnostic.to_string_hum ?contents:None)))
+       (List.map diagnostics ~f:(Diagnostic.to_string_hum ?contents:None)))
 ;;
 
 let benches ?(prefix = "") ?compile_time_c_calls ~prelude parse =

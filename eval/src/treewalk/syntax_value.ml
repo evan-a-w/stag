@@ -741,7 +741,8 @@ module Of_value = struct
            Forget (arg 0 (list (name Binder ~loc)), arg 1 (expr ~loc))
          | "Attributed", 2 ->
            Attributed
-             (arg 0 (expr ~loc), arg 1 (attribute ~loc ~position:Attribute.Position.Expr))
+             ( arg 0 (expr ~loc)
+             , arg 1 (attribute ~loc ~position:Attribute.Position.Expr) )
          | _ -> raise Bad_arguments))
 
   and attribute value ~loc ~position : Attribute.t =

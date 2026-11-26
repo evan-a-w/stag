@@ -467,7 +467,7 @@ let name e = match e with E -> "E" | F n -> "F"
 let main = print_endline (name Division_by_zero)
 |};
   [%expect
-    {|[@@@warning "-non-exhaustive"]
+    {|
     File "a.stag", line 4, characters 13-47:
     4 | let name e = match e with E -> "E" | F n -> "F"
                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -491,14 +491,15 @@ let main =
     other
     |}];
   run
-    "let f b = match b with true -> 1 | exception Division_by_zero -> 0\n\
+    "[@@@warning \"-non-exhaustive\"]\n\
+     let f b = match b with true -> 1 | exception Division_by_zero -> 0\n\
      let main = f false";
   [%expect
-    {|[@@@warning "-non-exhaustive"]
+    {|
     File "a.stag", line 1, characters 10-66:
     1 | let f b = match b with true -> 1 | exception Division_by_zero -> 0
                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: Match failure: no case matches the value false
+    Error: This match is not exhaustive [non-exhaustive]: it does not cover `false`
     |}]
 ;;
 

@@ -115,7 +115,6 @@ let shown reports =
 
 let errors t = shown t.reports
 let warnings t = shown t.warnings
-
 let fresh_ident t name = Typed.Ident.fresh t.stamps name
 let find_toplevel t name = Hashtbl.find t.toplevels name |> Option.map ~f:force
 let toplevel t name = force (Hashtbl.find_exn t.toplevels name)

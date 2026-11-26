@@ -277,7 +277,7 @@ let%expect_test "different, with no output" =
   [%expect
     {xxx|
     File "a.stag", line 3, characters 2-22:
-    3 |   match 2 with 1 -> ()
+    3 |   match 2 with 1 -> () [@@warning "-non-exhaustive"]
           ^^^^^^^^^^^^^^^^^^^^
     Error: Expect test "error" failed: Match failure: no case matches the value 2
     Output since the last [%expect]:

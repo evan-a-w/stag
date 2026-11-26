@@ -1927,8 +1927,7 @@ and report_coverage (scope : Scope.t) ~loc ~scrutinee ~cases ~exception_cases =
       let path = Module_scope.path scope.module_ in
       List.init (List.length path) ~f:(fun n ->
         String.concat (List.take path (List.length path - n)) ~sep:"." ^ ".")
-      |> List.find_map ~f:(fun prefix ->
-        String.chop_prefix canonical ~prefix)
+      |> List.find_map ~f:(fun prefix -> String.chop_prefix canonical ~prefix)
       |> Option.value ~default:canonical
   in
   let { Exhaustiveness.Result.missing; unused } =
@@ -1940,8 +1939,7 @@ and report_coverage (scope : Scope.t) ~loc ~scrutinee ~cases ~exception_cases =
       Non_exhaustive
       (Typecheck_error.create
          ~loc
-         (Non_exhaustive_match
-            (Exhaustiveness.Counterexample.to_string missing))));
+         (Non_exhaustive_match (Exhaustiveness.Counterexample.to_string missing))));
   let unused_cases kind cases unused =
     List.iter unused ~f:(fun index ->
       let (pattern : Typed.Pattern.t) = List.nth_exn cases index in

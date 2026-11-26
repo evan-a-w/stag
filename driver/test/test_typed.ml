@@ -634,7 +634,8 @@ let captured x = .~(.<captured x>.)
 ;;
 
 let%expect_test "literals that look like placeholders" =
-  print {|[@@@warning "-non-exhaustive"]
+  print
+    {|[@@@warning "-non-exhaustive"]
 let lits s = match s with "\0000" -> ('\000', "\0003")
 |};
   [%expect

@@ -213,7 +213,8 @@ let spliced = .~(fails; .<1>.)
 ;;
 
 let%expect_test "splice evaluation failures" =
-  run {|[@@@warning "-non-exhaustive"]
+  run
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let x = .~(match B with A -> .<0>.)
 |};

@@ -574,8 +574,8 @@ let create
       Syntax_at.expr syntax body
     | Module (_, toplevels) -> List.iter toplevels ~f:syntax_of_toplevel
     | Attributed (toplevel, _) -> syntax_of_toplevel toplevel
-    | Type _ | Exception _ | External _ | Malformed_exception _ | Attribute _
-      -> ()
+    | Type _ | Exception _ | External _ | Malformed_exception _ | Attribute _ ->
+      ()
   in
   List.iter files ~f:(fun (_, toplevel) -> syntax_of_toplevel toplevel);
   List.iter files ~f:(fun (_, toplevel) ->

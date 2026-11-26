@@ -60,17 +60,11 @@ Error: message
     that of [contents] of the file, if given and the span is in it. Spans of
     several lines quote them (elided in the middle when there are many) without
     underlining. A [warning] says [Warning:] for [Error:]. *)
-val to_string_hum
-  :  ?contents:(string -> string option)
-  -> t
-  -> string
+val to_string_hum : ?contents:(string -> string option) -> t -> string
 
 (** Each as [to_string_hum], the first [max_shown] only, then a line of how many
     more there are, which are warnings if all are. *)
-val list_to_string_hum
-  :  ?contents:(string -> string option)
-  -> t list
-  -> string
+val list_to_string_hum : ?contents:(string -> string option) -> t list -> string
 
 (** 50. *)
 val max_shown : int

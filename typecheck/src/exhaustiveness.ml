@@ -306,7 +306,8 @@ module Signature = struct
             then None
             else
               Some
-                (Head.counterexample ~name
+                (Head.counterexample
+                   ~name
                    head
                    (List.init arity ~f:(fun _ -> Counterexample.any)))))
     | Poly_variant { ty; _ } :: _ ->
@@ -317,7 +318,8 @@ module Signature = struct
        with
        | Some (tag, _) ->
          Some
-           (Head.counterexample ~name
+           (Head.counterexample
+              ~name
               (Poly_variant { tag; ty })
               [ Counterexample.any ])
        | None -> Option.some_if row.open_ Counterexample.any)
@@ -351,7 +353,10 @@ module Context = struct
     | Wild :: rest ->
       let heads = Matrix.heads (column rows) in
       (match
-         Signature.missing ~variant_constructors:t.variant_constructors ~name:t.name heads
+         Signature.missing
+           ~variant_constructors:t.variant_constructors
+           ~name:t.name
+           heads
        with
        | None ->
          List.exists heads ~f:(fun head ->
@@ -371,7 +376,10 @@ module Context = struct
     else (
       let heads = Matrix.heads (column rows) in
       match
-        Signature.missing ~variant_constructors:t.variant_constructors ~name:t.name heads
+        Signature.missing
+          ~variant_constructors:t.variant_constructors
+          ~name:t.name
+          heads
       with
       | None ->
         List.find_map heads ~f:(fun head ->

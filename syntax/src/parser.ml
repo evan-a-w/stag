@@ -1337,7 +1337,8 @@ and construct ?(in_argument = false) t : Expr.t =
     (match path t ~what:"" with
      | path, true ->
        if any_attribute_ahead t
-       then attributes ~in_argument t (expr_since t start (Construct (path, [])))
+       then
+         attributes ~in_argument t (expr_since t start (Construct (path, [])))
        else (
          let args =
            if starts_atom (peek t)
@@ -1356,7 +1357,8 @@ and construct ?(in_argument = false) t : Expr.t =
     let tag = located ~loc:start tag in
     advance t;
     if any_attribute_ahead t
-    then attributes ~in_argument t (expr_since t start (Poly_variant (tag, None)))
+    then
+      attributes ~in_argument t (expr_since t start (Poly_variant (tag, None)))
     else (
       let arg =
         if starts_atom (peek t)

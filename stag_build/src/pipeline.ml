@@ -31,7 +31,9 @@ module Checked = struct
     ; diagnostics
     ; warnings =
         Diagnostic.sort
-          (List.map checked.warnings ~f:(Diagnostic.of_typecheck_error ~warning:true))
+          (List.map
+             checked.warnings
+             ~f:(Diagnostic.of_typecheck_error ~warning:true))
     }
   ;;
 end

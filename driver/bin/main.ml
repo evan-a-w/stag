@@ -188,15 +188,13 @@ let check_command =
            | None -> Second path)
        in
        match sources with
-       | _ :: _ -> check_with_prelude_sources
-           ~limits
-           ~warnings
-           ~modes
-           ~sources
-           ~program
+       | _ :: _ ->
+         check_with_prelude_sources ~limits ~warnings ~modes ~sources ~program
        | [] ->
          let files = read_files paths in
-         let driver = check (Pipeline_config.create ~warnings ~limits paths) files in
+         let driver =
+           check (Pipeline_config.create ~warnings ~limits paths) files
+         in
          warn_stale files driver;
          print_string
            (Signature.to_string_hum ~modes (Driver.checked driver).signature))
@@ -212,7 +210,9 @@ let run_command =
      and warnings = Pipeline_config.warnings_param in
      fun () ->
        let files = read_files paths in
-       let driver = check (Pipeline_config.create ~warnings ~limits paths) files in
+       let driver =
+         check (Pipeline_config.create ~warnings ~limits paths) files
+       in
        warn_stale files driver;
        eval ~limits files driver)
 ;;
@@ -253,7 +253,9 @@ let test_command =
           eprintf "Error: -print-corrected takes one FILE\n%!";
           exit 2
         | _ -> ());
-       let driver = check (Pipeline_config.create ~warnings ~limits paths) files in
+       let driver =
+         check (Pipeline_config.create ~warnings ~limits paths) files
+       in
        let outcome =
          Test_and_correct.run
            ~limits

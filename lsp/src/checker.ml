@@ -115,7 +115,12 @@ let of_program
         None
     | Ok
         ( (prelude : Pipeline_config.Loaded_prelude.t)
-        , { Pipeline.Checked.groups; checked; diagnostics; warnings; driver = _ } ) ->
+        , { Pipeline.Checked.groups
+          ; checked
+          ; diagnostics
+          ; warnings
+          ; driver = _
+          } ) ->
       let diagnostics = Diagnostic.sort (diagnostics @ warnings) in
       let program = Option.both groups checked in
       (match prelude, stdlib with

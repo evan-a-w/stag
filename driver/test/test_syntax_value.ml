@@ -118,6 +118,9 @@ let%expect_test "the prelude's signature" =
       module Binding : sig
         type t = string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
       end
+      module Attribute : sig
+        type t = {`name : string; `payload : option[string]}
+      end
       module Pattern : sig
         module Rest : sig
           type t = Closed | Open | Bind of string
@@ -128,7 +131,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Seq of ptr[t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Stack of ptr[t] | Exclave of ptr[t] | Region of ptr[t] | Nontail of ptr[t] | Annotated of ptr[t * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] | Forget of ptr[list[string] * t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Seq of ptr[t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Stack of ptr[t] | Exclave of ptr[t] | Region of ptr[t] | Nontail of ptr[t] | Annotated of ptr[t * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] | Forget of ptr[list[string] * t] | Attributed of ptr[t * {`name : string; `payload : option[string]}]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -141,7 +144,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Let_mut of string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | External of {`name : string; `symbol : string; `ty : Type_expr.t} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
+        type t = Let of string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Let_mut of string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | External of {`name : string; `symbol : string; `ty : Type_expr.t} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]} | Attributed of ptr[t * {`name : string; `payload : option[string]}] | Attribute of {`name : string; `payload : option[string]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -805,10 +808,11 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 123)
+    ((constructors 126)
      (reflected
-      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Region
-       prelude.Stag.Expr.Store prelude.Stag.Mode_expr.Atom.External
+      (prelude.Stag.Expr.Attributed prelude.Stag.Expr.Deref
+       prelude.Stag.Expr.Forget prelude.Stag.Expr.Region prelude.Stag.Expr.Store
+       prelude.Stag.Mode_expr.Atom.External
        prelude.Stag.Mode_expr.Atom.Nonportable
        prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Mode_expr.Axis.Locality
        prelude.Stag.Mode_expr.Axis.Provenance prelude.Stag.Mode_expr.Axis.Stage
@@ -818,6 +822,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
        prelude.Stag.Mode_expr.Term.Meet prelude.Stag.Mode_expr.Term.Release
        prelude.Stag.Mode_expr.Term.Static_if_const prelude.Stag.Mode_expr.Var_at
        prelude.Stag.Pattern.Deref prelude.Stag.Pattern.Or
+       prelude.Stag.Toplevel.Attribute prelude.Stag.Toplevel.Attributed
        prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
        prelude.Stag.Type_decl.Param.Mode prelude.Stag.Type_expr.Arg.Mode
@@ -1022,7 +1027,7 @@ let%expect_test "generated syntax the parser does not make" =
   Round_trip.program program;
   print_string (Printer.program program);
   [%expect
-    {|[@@@warning "-non-exhaustive"]
+    {|
     ((Type
       ((name t) (params ())
        (kind
@@ -1043,15 +1048,7 @@ let%expect_test "generated syntax the parser does not make" =
     |}];
   Source_helpers.run_program ~prelude:false program;
   [%expect
-    {|
-    type t = C of (int * ptr[t]) | D of int
-    val one_tuple : t
-    val first : int
-    -- evaluated at compile time
-    -- evaluated
-    (one_tuple (C (Tuple 1 (Ptr (D 2)))))
-    (first 1)
-    |}]
+    {| (Non_exhaustive_match "D _") |}]
 ;;
 
 let%expect_test "reflected types print as paths" =

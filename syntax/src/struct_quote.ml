@@ -158,8 +158,8 @@ let check_no_expansions toplevels =
             raise
               (Error
                  ( toplevel.loc
-                 , "An attribute can't follow `include .~e` in a struct \
-                    quote, as it stands for a list of declarations" ))
+                 , "An attribute can't follow `include .~e` in a struct quote, \
+                    as it stands for a list of declarations" ))
           | _ -> Traverse.toplevel v () toplevel)
     }
   in

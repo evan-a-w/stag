@@ -606,8 +606,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "This case is unused [unused-arm]: the cases before it match every value \
      it does"
   | Unused_exception_arm ->
-    "This exception case is unused [unused-arm]: the exception cases before \
-     it match every exception it does"
+    "This exception case is unused [unused-arm]: the exception cases before it \
+     match every exception it does"
   | Duplicate_pattern_variable name ->
     sprintf "The variable %s is bound several times in this matching" name
   | Or_pattern_variable_missing name ->
