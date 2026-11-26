@@ -126,7 +126,8 @@ module Syntax_at = struct
     | App (a, b) | Seq (a, b) ->
       recurse a;
       recurse b
-    | Let (name, bindings, _, body, in_) ->
+    | Let (name, bindings, _, body, in_)
+    | Let_nonrec (name, bindings, _, body, in_) ->
       set t.lets e.loc (name, bindings);
       recurse body;
       recurse in_
@@ -460,7 +461,7 @@ let rec declarations
   in
   List.iter toplevels ~f:(fun toplevel ->
     match toplevel.txt with
-    | Let (name, bindings, _, body) ->
+    | Let (name, bindings, _, body) | Let_nonrec (name, bindings, _, body) ->
       set t.values name;
       Hashtbl.set values ~key:(canonical name) ~data:(name, bindings, body)
     | Let_mut (name, _, body) ->
@@ -560,8 +561,10 @@ let create
       List.iter
         (up_to_date_expansion ~up_to_date toplevel)
         ~f:syntax_of_toplevel
-    | Let (_, _, _, e) | Let_mut (_, _, e) | Expect_test { body = e; _ } ->
-      Syntax_at.expr syntax e
+    | Let (_, _, _, e)
+    | Let_nonrec (_, _, _, e)
+    | Let_mut (_, _, e)
+    | Expect_test { body = e; _ } -> Syntax_at.expr syntax e
     | Bench { param; body; name = _ } ->
       Option.iter param ~f:(fun { args; name } ->
         Hashtbl.set bench_params ~key:(Span.of_loc toplevel.loc) ~data:name;

@@ -740,7 +740,7 @@ and expr_type
        let var = node (Var var_ref) ty in
        if applied then var else Prim_types.value_sites scope var)
   | App (f, x) -> application_type ?expected ~hint ~applied t scope ~at ~loc f x
-  | Let { binder; args; annot; mode = mode_annot; body; in_ } ->
+  | Let { binder; nonrec_; args; annot; mode = mode_annot; body; in_ } ->
     let_type
       ?expected
       ~hint
@@ -748,6 +748,7 @@ and expr_type
       scope
       ~at
       ~loc
+      ~nonrec_
       ~binder
       ~args
       ~annot
@@ -1214,6 +1215,7 @@ and let_type
   (scope : Scope.t)
   ~(at : Mode_rules.Expected.t)
   ~loc
+  ~nonrec_
   ~binder
   ~args
   ~annot
@@ -1268,11 +1270,15 @@ and let_type
            { inner with owner = Option.first_some !frame inner.owner }
          in
          let defining mode ~f =
-           Env.with_bindings
-             scope.locals
-             [ name, Scope.entry scope ~defining:true ~ident ~scheme:fn.ty ~mode
-             ]
-             ~f
+           if nonrec_
+           then f ()
+           else
+             Env.with_bindings
+               scope.locals
+               [ ( name
+                 , Scope.entry scope ~defining:true ~ident ~scheme:fn.ty ~mode )
+               ]
+               ~f
          in
          (* A closure may refer to itself, but a value referring to itself is
             not known yet, as a [let rec]'s isn't. *)
@@ -2921,11 +2927,15 @@ let declare
        | Some generated -> Generated.wrap_error generated error)
   in
   let add_toplevel
+    ?(nonrec_ = false)
     (kind : Toplevel_binding.Kind.t)
     (name : Syntax.Name.t)
     annot
     expr
     =
+    let scope =
+      if nonrec_ then Module_scope.without module_ Value name.txt else module_
+    in
     let name = Module_scope.canonical_name module_ name.txt in
     let toplevel =
       lazy
@@ -2935,7 +2945,7 @@ let declare
           | Value | Function _ | External _ -> ());
          Toplevel_binding.create
            ~ident
-           ~module_
+           ~module_:scope
            ~kind
            ~annot:annot.Syntax.Annot.ty
            ~mode:annot.mode
@@ -2979,13 +2989,19 @@ let declare
       args
       ~malformed:true
       ~wrap_error
-  | Let (name, args, annot, expr), _ ->
+  | Let (name, args, annot, expr), _ | Let_nonrec (name, args, annot, expr), _
+    ->
     let kind : Toplevel_binding.Kind.t =
       match Nonempty_list.of_list args with
       | None -> Value
       | Some args -> Function args
     in
-    add_toplevel kind name annot expr
+    let nonrec_ =
+      match toplevel.txt with
+      | Let_nonrec _ -> true
+      | _ -> false
+    in
+    add_toplevel ~nonrec_ kind name annot expr
   | Let_mut (name, annot, expr), _ -> add_toplevel Mut name annot expr
   | External { name; ty; symbol }, _ ->
     let at_compile_time =
@@ -3041,7 +3057,10 @@ let check_declarations t (program : Program_env.t) module_ =
           program.type_env
           (Module_scope.canonical_name module_ name.txt)
         |> report_if_error
-      | Let (name, _, _, _) | Let_mut (name, _, _) | External { name; _ } ->
+      | Let (name, _, _, _)
+      | Let_nonrec (name, _, _, _)
+      | Let_mut (name, _, _)
+      | External { name; _ } ->
         let toplevel =
           Program_env.toplevel
             program
@@ -3077,6 +3096,7 @@ let rec items (program_env : Program_env.t) module_ =
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Typed.Program.Item.t option ->
       match toplevel.txt with
       | Let ({ txt = name; loc = _ }, _, _, _)
+      | Let_nonrec ({ txt = name; loc = _ }, _, _, _)
       | Let_mut ({ txt = name; loc = _ }, _, _)
       | External { name = { txt = name; loc = _ }; _ } ->
         Program_env.find_toplevel
@@ -3140,6 +3160,7 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
       match toplevel.txt with
       | Expect_test _ | Bench _ | Include _ -> None
       | Let ({ txt = name; loc = _ }, _, _, _)
+      | Let_nonrec ({ txt = name; loc = _ }, _, _, _)
       | Let_mut ({ txt = name; loc = _ }, _, _)
       | External { name = { txt = name; loc = _ }; _ } ->
         let toplevel = Program_env.toplevel program_env (canonical_name name) in

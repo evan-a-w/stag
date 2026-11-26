@@ -179,3 +179,8 @@ val path_from_splice
   -> locals:String.Set.t
   -> Syntax.Decl_path.t
   -> Syntax.Decl_path.t option
+
+(** [t], but where the plain name [name] does not find [t]'s module's member of
+    it in [namespace], only one outside the module: the scope of the definition
+    of a [let nonrec] or [type nonrec]. Paths through the module still do. *)
+val without : t -> Namespace.t -> string -> t

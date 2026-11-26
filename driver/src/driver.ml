@@ -75,6 +75,7 @@ module Module_group = struct
     | File
         { txt =
             ( Let _
+            | Let_nonrec _
             | Let_mut _
             | Type _
             | Exception _

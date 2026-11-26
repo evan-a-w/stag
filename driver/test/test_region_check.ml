@@ -343,7 +343,7 @@ let use (u : unit) = t1 1
   [%expect
     {|
     (Rejected
-     ("n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: rename one of them"))
+     ("n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: write `let nonrec n` to use the outer one, or rename one of them"))
     |}]
 ;;
 
