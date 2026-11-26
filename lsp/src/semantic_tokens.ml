@@ -68,6 +68,7 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | False
   | Let
   | Rec
+  | Nonrec
   | Mut
   | Stack_
   | Exclave_

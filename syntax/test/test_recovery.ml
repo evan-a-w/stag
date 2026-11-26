@@ -310,7 +310,7 @@ let ok = 1
     t.stag:12:8-9: expected a declaration splice `.~e` after `include`, found `x`
     t.stag:14:0-3: expected a type, found `let`
     t.stag:14:4-5: expected a name to bind, found `=`
-    t.stag:16:4-7: lets are always recursive; remove `rec`
+    t.stag:16:4-7: lets are recursive unless `nonrec`; remove `rec`
     ---
     let f (x : int) : int = <error>
     let g = <error>

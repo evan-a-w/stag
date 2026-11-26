@@ -274,6 +274,8 @@ module Stag = struct
       | Var of Path.t[Value_ref.t] * Annot.t
       | App of ptr[t * t]
       | Let of ptr[string * list[Binding.t] * Annot.t * t * t]
+      (* [let nonrec x = e in body]: [x] is not bound in [e]. *)
+      | Let_nonrec of ptr[string * list[Binding.t] * Annot.t * t * t]
       | Seq of ptr[t * t]
       | Let_mut of ptr[string * Annot.t * t * t]
       | Assign of ptr[Path.t[Value_ref.t] * t]
@@ -348,8 +350,10 @@ module Stag = struct
   module Toplevel = struct
     type t =
       | Let of string * list[Binding.t] * Annot.t * Expr.t
+      | Let_nonrec of string * list[Binding.t] * Annot.t * Expr.t
       | Let_mut of string * Annot.t * Expr.t
       | Type of Type_decl.t
+      | Type_nonrec of Type_decl.t
       | Exception of string * list[Type_expr.t]
       | External of {`name : string; `ty : Type_expr.t; `symbol : string}
       | Module of string * list[t]

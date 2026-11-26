@@ -188,6 +188,7 @@ let level (e : Expr.t) : Level.t =
   match e.txt with
   | Seq _ -> Seq
   | Let _
+  | Let_nonrec _
   | Let_mut _
   | Match _
   | Fun _
@@ -224,7 +225,8 @@ let bare_at at e = Level.compare (level e) at >= 0
 
 let rec extends_right e =
   match (unwrap e).txt with
-  | Let _ | Seq _ | Let_mut _ | Match _ | Fun _ | Forget _ -> true
+  | Let _ | Let_nonrec _ | Seq _ | Let_mut _ | Match _ | Fun _ | Forget _ ->
+    true
   | Stack body | Exclave body | Region body -> extends_right body
   | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
@@ -238,6 +240,7 @@ let rec ends_with_match ~seq:in_seq e =
   | Match _ -> true
   | Seq (_, second) -> ends_with_match ~seq:true second
   | Let (_, _, _, _, body)
+  | Let_nonrec (_, _, _, _, body)
   | Let_mut (_, _, _, body)
   | Fun (_, body)
   | Forget (_, body) ->
@@ -293,7 +296,7 @@ module Kind = struct
 
   let of_toplevel (t : Toplevel.t) =
     match t.txt with
-    | Let _ | Let_mut _ -> Let
+    | Let _ | Let_nonrec _ | Let_mut _ -> Let
     | Type _ | Exception _ | External _ | Malformed_exception _ -> Type
     | Module_splice _ -> Module_splice
     | Include _ -> Include
@@ -588,11 +591,17 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
     ^^ text ";"
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Seq } second
-  | Let (name, params, annot, rhs, body) ->
+  | Let (name, params, annot, rhs, body)
+  | Let_nonrec (name, params, annot, rhs, body) ->
+    let keyword =
+      match e.txt with
+      | Let_nonrec _ -> "let nonrec"
+      | _ -> "let"
+    in
     definition
       ~record:(is_bracketed rhs)
       ~ending:"in"
-      (let_lhs roots "let" name params annot)
+      (let_lhs roots keyword name params annot)
       (expr roots Ctx.top rhs)
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Ctx.body ctx } body
@@ -641,7 +650,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       in
       (* A flat [let] or sequence is only kept on the line of a flat match. *)
       match ctx.flat, (unwrap body).txt with
-      | true, (Let _ | Seq _ | Let_mut _) -> doc
+      | true, (Let _ | Let_nonrec _ | Seq _ | Let_mut _) -> doc
       | _ -> group doc
     in
     let head =
@@ -879,9 +888,9 @@ and constructor_decl roots ((name : Name.t), args) =
                (text " *" ^^ line)
                (List.map args ~f:(type_expr roots ~prec:2))))
 
-and type_decl roots ({ name; params; kind } : Type_decl.t) =
+and type_decl roots ({ name; params; kind; nonrec_ } : Type_decl.t) =
   let lhs =
-    text ("type " ^ name.txt)
+    text ((if nonrec_ then "type nonrec " else "type ") ^ name.txt)
     ^^
     match params with
     | [] -> empty
@@ -925,6 +934,11 @@ and toplevel roots ~indent (t : Toplevel.t) =
     definition
       ~record:(is_bracketed rhs)
       (let_lhs roots "let" name params annot)
+      (expr_doc roots rhs)
+  | Let_nonrec (name, params, annot, rhs) ->
+    definition
+      ~record:(is_bracketed rhs)
+      (let_lhs roots "let nonrec" name params annot)
       (expr_doc roots rhs)
   | Let_mut (name, annot, rhs) ->
     definition

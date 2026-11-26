@@ -260,6 +260,13 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
     let* e = expr e e' in
     let+ in_ = expr in_ in_' in
     Expr.Let (n, bs, t, e, in_)
+  | Let_nonrec (n, bs, t, e, in_), Let_nonrec (n', bs', t', e', in_') ->
+    let* n = name n n' in
+    let* bs = list binding bs bs' in
+    let* t = annot t t' in
+    let* e = expr e e' in
+    let+ in_ = expr in_ in_' in
+    Expr.Let_nonrec (n, bs, t, e, in_)
   | Seq (a, b), Seq (a', b') ->
     let* a = expr a a' in
     let+ b = expr b b' in
@@ -370,6 +377,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Var _
       | App _
       | Let _
+      | Let_nonrec _
       | Let_mut _
       | Seq _
       | Assign _
@@ -403,9 +411,11 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
     , _ ) -> None
 
 and type_decl
-  ({ name = n; params; kind } : Type_decl.t)
-  ({ name = n'; params = params'; kind = kind' } : Type_decl.t)
+  ({ name = n; params; kind; nonrec_ } : Type_decl.t)
+  ({ name = n'; params = params'; kind = kind'; nonrec_ = nonrec' } :
+    Type_decl.t)
   =
+  let* () = Option.some_if (Bool.equal nonrec_ nonrec') () in
   let* n = name n n' in
   let* params = list (located (same Type_decl.Param.equal)) params params' in
   let+ kind =
@@ -426,7 +436,7 @@ and type_decl
     | (Variant _ | Record _ | Alias _ | Abstract | Splice _ | Malformed _), _ ->
       None
   in
-  { Type_decl.name = n; params; kind }
+  { Type_decl.name = n; params; kind; nonrec_ }
 
 and toplevel g w = located toplevel_desc g w
 
@@ -438,6 +448,12 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     let* t = annot t t' in
     let+ e = expr e e' in
     Toplevel.Let (n, bs, t, e)
+  | Let_nonrec (n, bs, t, e), Let_nonrec (n', bs', t', e') ->
+    let* n = name n n' in
+    let* bs = list binding bs bs' in
+    let* t = annot t t' in
+    let+ e = expr e e' in
+    Toplevel.Let_nonrec (n, bs, t, e)
   | Let_mut (n, t, e), Let_mut (n', t', e') ->
     let* n = name n n' in
     let* t = annot t t' in
@@ -489,6 +505,7 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     let+ body = expr body body' in
     Toplevel.Bench { name = n; param; body }
   | ( ( Let _
+      | Let_nonrec _
       | Let_mut _
       | Type _
       | Exception _

@@ -169,6 +169,7 @@ module Expr = struct
       | App of t * t
       | Let of
           { binder : Binder.t
+          ; nonrec_ : bool
           ; args : (Binder.t * Syntax.Annot.t) list
           ; annot : Syntax.Type_expr.t option
           ; mode : Syntax.Mode_expr.t option
@@ -242,6 +243,17 @@ module Expr = struct
     | Let (name, args, annot, equal, in_) ->
       Let
         { binder = Name name
+        ; nonrec_ = false
+        ; args = List.map args ~f:binding
+        ; annot = annot.ty
+        ; mode = annot.mode
+        ; body = sub equal
+        ; in_ = sub in_
+        }
+    | Let_nonrec (name, args, annot, equal, in_) ->
+      Let
+        { binder = Name name
+        ; nonrec_ = true
         ; args = List.map args ~f:binding
         ; annot = annot.ty
         ; mode = annot.mode
@@ -335,6 +347,7 @@ module Expr = struct
       ->
       Let
         { binder = Ident ident
+        ; nonrec_ = false
         ; args = annotated_args args annots
         ; annot = result_annot
         ; mode
