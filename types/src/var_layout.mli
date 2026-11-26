@@ -43,6 +43,15 @@ val above : t -> Mode.Layout.t list -> Mode.Layout.t
     do: a field that may be present, of an entry with those layouts. *)
 val both : t -> Mode.Layout.t -> Mode.Layout.t list -> Mode.Layout.t
 
+module Finality : sig
+  (** Of a [wait]ing check: [Final] once the layouts it waits on won't be
+      decided by generalizing: those of what a toplevel doesn't generalize, or
+      of earlier toplevels. *)
+  type t =
+    | Provisional
+    | Final
+end
+
 (** The variables made while checking a scope: those numbered from [first_id]
     on, until one within it begins. *)
 module Frame : sig
@@ -51,13 +60,11 @@ end
 
 (** [f] within a frame: what it doesn't [decide] is left to the frame around it,
     unless [f] raises, abandoning what it checked. *)
-val within : t -> first_id:Type.id -> (Frame.t -> 'a) -> 'a
+val within : t -> first_id:Type.Id.t -> (Frame.t -> 'a) -> 'a
 
 (** Until [check] says it is done, it is run as frames are decided, after their
-    layouts are: in that of the innermost scope now, or around it. [final] once
-    the layouts it waits on won't be decided by generalizing: those of what a
-    toplevel doesn't generalize, or of earlier toplevels. *)
-val wait : t -> (final:bool -> bool) -> unit
+    layouts are: in that of the innermost scope now, or around it. *)
+val wait : t -> (Finality.t -> bool) -> unit
 
 (** Runs the [wait]ing checks of all frames, as before running code: what is
     known then is checked. *)
@@ -68,10 +75,10 @@ val check_waiting : t -> unit
     those are the ones its type doesn't reach, which nothing can bind: a
     variable shared with an outer scope has the rank of its scope. Not those
     [except] keeps, which the scope's type reaches but it doesn't generalize.
-    Then runs the frame's [wait]ing checks, [final] if [final]. *)
+    Then runs the frame's [wait]ing checks. *)
 val decide
-  :  ?except:(Type.id -> bool)
-  -> ?final:bool
+  :  ?except:(Type.Id.t -> bool)
   -> Frame.t
-  -> rank:Type.rank
+  -> rank:Type.Rank.t
+  -> finality:Finality.t
   -> Mode.Error.t list

@@ -16,33 +16,26 @@ module Pending = struct
     | Kept of Type.kept
 end
 
-let ok_exn result ~what =
+let ok_exn sexp_of_error result ~what =
   match result with
   | Ok () -> ()
   | Error error ->
-    raise_s [%message "Scheme: bound failed" what (error : Unification_error.t)]
+    raise_s [%message "Scheme: bound failed" what (error : error)]
 ;;
 
 let presence_at_most_exn fresh ~presence ~bound =
-  Unify.presence_at_most
-    fresh
-    ~presence
-    ~bound
-    ~error:
-      (Row_mismatch
-         ( RExtend ("", presence, Absent, Type.unit, REmpty)
-         , RExtend ("", bound, Absent, Type.unit, REmpty)
-         , Presence_mismatch "" ))
-  |> ok_exn ~what:"presence"
+  Unify.presence_at_most fresh ~presence ~bound
+  |> ok_exn [%sexp_of: Unify.Presence_error.t] ~what:"presence"
 ;;
 
 let unify_if_present_exn fresh ~presence ~ty1 ~ty2 =
-  Unify.unify_if_present fresh ~presence ~ty1 ~ty2 |> ok_exn ~what:"equality"
+  Unify.unify_if_present fresh ~presence ~ty1 ~ty2
+  |> ok_exn [%sexp_of: Unification_error.t] ~what:"equality"
 ;;
 
 let constrain_row_exn fresh ~row ~(bound : Type.bound) =
   Unify.constrain_row fresh ~row ~bound:bound.row ~shadowed:bound.shadowed
-  |> ok_exn ~what:"row"
+  |> ok_exn [%sexp_of: Unification_error.t] ~what:"row"
 ;;
 
 let enqueue_kept ~pending ~seen_kept kept =
@@ -66,8 +59,10 @@ let instantiator ?at fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
        | Some instance -> instance
        | None ->
          let (var' : _ Type.Var.t) = create () in
-         var'.in_record <- var.in_record;
-         var'.watchers <- Watcher.instantiate ?at var.watchers @ var'.watchers;
+         if var.in_record then Type.Var.mark_in_record var';
+         Type.Var.set_watchers
+           var'
+           (Watcher.instantiate ?at var.watchers @ var'.watchers);
          let instance = wrap var' in
          Hashtbl.set table ~key:var.id ~data:instance;
          bounds var var';
@@ -345,20 +340,15 @@ let close_presence_bounds fresh (generalized : Presence_var.t list) =
       ~f:(fun (other : Presence_var.t) ->
         if outside other
         then
-          other.bounds
-          <- List.filter other.bounds ~f:(fun bound ->
+          Type.Var.set_bounds
+            other
+            (List.filter other.bounds ~f:(fun bound ->
                match Type.presence_bound_var bound with
                | Some var -> not (is_generalized var)
-               | None -> true)));
+               | None -> true))));
   List.iter (List.concat implied) ~f:(fun (lower, upper) ->
     presence_at_most_exn fresh ~presence:(PVar lower) ~bound:(PVar upper));
   List.filter_opt with_equalities
-;;
-
-let lower ~rank (var : _ Type.Var.t) =
-  match var.state with
-  | Unbound rank' when rank' > rank -> var.state <- Unbound rank
-  | Unbound _ | Generic | Link _ -> ()
 ;;
 
 (* The bounds in [bounds] with generalized variables are kept, their other
@@ -380,7 +370,7 @@ let keep_with_generalized fresh ~rank ~args ~kept bounds =
     | Unbound _ | Link _ -> Ok ()
   in
   let lowerer ~guarded:_ var : (unit, Nothing.t) Result.t =
-    lower ~rank var;
+    Type.Var.lower_rank var ~rank;
     Ok ()
   in
   List.partition_map bounds ~f:(fun bound ->
@@ -434,7 +424,7 @@ let attach_kept ~is_generalized kept =
              [%message "Scheme: bound with an earlier generalized variable"];
          (match var.kept with
           | last :: _ when phys_equal last kept -> ()
-          | _ -> var.kept <- kept :: var.kept)
+          | _ -> Type.Var.set_kept var (kept :: var.kept))
        | Unbound _ | Link _ -> ());
       Ok ()
     in
@@ -460,8 +450,8 @@ let keep_row_bounds fresh (var : Row_var.t) ~rank =
       ~args:(fun (bound : Type.bound) -> [ Type.ARow bound.row ])
       ~kept:(fun bound ~id -> Type.Row_bound { id; lower = var; bound })
   in
-  var.bounds <- bounds;
-  if not (List.is_empty kept) then lower ~rank var;
+  Type.Var.set_bounds var bounds;
+  if not (List.is_empty kept) then Type.Var.lower_rank ~rank var;
   kept
 ;;
 
@@ -480,8 +470,8 @@ let keep_equalities fresh (var : Presence_var.t) ~rank =
           Type.If_present_kept { id; presence = var; ty1; ty2 }
         | At_most _ | At_least _ -> assert false)
   in
-  var.bounds <- bounds;
-  if not (List.is_empty kept) then lower ~rank var;
+  Type.Var.set_bounds var bounds;
+  if not (List.is_empty kept) then Type.Var.lower_rank ~rank var;
   kept
 ;;
 
@@ -735,10 +725,11 @@ let drop_subsumed_row_bounds (var : Row_var.t) =
     List.find var.bounds ~f:(fun (bound : Type.bound) -> empty bound.row)
   with
   | Some empty ->
-    var.bounds
-    <- List.filter var.bounds ~f:(fun bound ->
+    Type.Var.set_bounds
+      var
+      (List.filter var.bounds ~f:(fun bound ->
          phys_equal bound empty
-         || not (Set.is_subset empty.shadowed ~of_:bound.shadowed))
+         || not (Set.is_subset empty.shadowed ~of_:bound.shadowed)))
   | None -> ()
 ;;
 
@@ -747,7 +738,7 @@ let drop_subsumed_row_bounds (var : Row_var.t) =
    occurrence that is not reached again through a [Link], record or variant, and
    [link] on each occurrence of a [Link]. *)
 let iter_used_vars
-  ?(link = fun (_ : Type.id) -> ())
+  ?(link = fun (_ : Type.Id.t) -> ())
   ?(except_row = fun (_ : Type.bound) -> false)
   ?(except_presence = fun (_ : Type.presence_bound) -> false)
   ~tys
@@ -883,7 +874,9 @@ let drop_trivial_row_bounds
     | None -> false
   in
   List.iter rows ~f:(fun var ->
-    var.bounds <- List.filter var.bounds ~f:(fun bound -> not (trivial bound)))
+    Type.Var.set_bounds
+      var
+      (List.filter var.bounds ~f:(fun bound -> not (trivial bound))))
 ;;
 
 (* Likewise an equality [p => t = 'a] holds whatever [p] and [t] if ['a] is used
@@ -945,11 +938,12 @@ let drop_trivial_equalities
       && Hashtbl.find_exn references var.id = 1)
   in
   List.iter with_sides ~f:(fun ((var : Presence_var.t), bounds) ->
-    var.bounds
-    <- List.filter_map bounds ~f:(fun (bound, sides) ->
+    Type.Var.set_bounds
+      var
+      (List.filter_map bounds ~f:(fun (bound, sides) ->
          match sides with
          | Some sides when trivial bound sides -> None
-         | Some _ | None -> Some bound))
+         | Some _ | None -> Some bound)))
 ;;
 
 (* A bound [B] of a generalized row whose entries' presences and types and tail
@@ -1154,13 +1148,14 @@ let drop_witnessed_row_bounds
   in
   let drop ~presences:local_presences ~tys:local_tys =
     let remove (owner : Presence_var.t) bound =
-      owner.bounds
-      <- List.filter owner.bounds ~f:(fun other -> not (phys_equal other bound))
+      Type.Var.set_bounds
+        owner
+        (List.filter owner.bounds ~f:(fun other -> not (phys_equal other bound)))
     in
     List.iter local_presences ~f:(fun ((var : Presence_var.t), _) ->
       List.iter (Hashtbl.find_multi relations var.id) ~f:(fun (owner, bound) ->
         remove owner bound);
-      var.bounds <- []);
+      Type.Var.set_bounds var []);
     List.iter local_tys ~f:(fun ((var : (Type.ty, Nothing.t) Type.Var.t), _) ->
       List.iter
         (Hashtbl.find_multi equalities var.id)
@@ -1181,8 +1176,9 @@ let drop_witnessed_row_bounds
       in
       Option.iter witness ~f:(fun (presences, tys) ->
         drop ~presences ~tys;
-        row.bounds
-        <- List.filter row.bounds ~f:(fun other -> not (phys_equal other bound)))))
+        Type.Var.set_bounds
+          row
+          (List.filter row.bounds ~f:(fun other -> not (phys_equal other bound))))))
 ;;
 
 (* A generalized presence that nothing uses, which is not the upper bound of
@@ -1210,12 +1206,13 @@ let rec drop_unused_presences
   | unused, presences ->
     List.iter unused ~f:(fun var ->
       List.iter (uppers var) ~f:(fun upper ->
-        upper.bounds
-        <- List.filter upper.bounds ~f:(function
-             | At_least lower -> not (Type.same_presence lower (PVar var))
-             | At_most _ | If_present _ -> true));
-      var.state <- Link Absent;
-      var.bounds <- []);
+        Type.Var.set_bounds
+          upper
+          (List.filter upper.bounds ~f:(function
+            | At_least lower -> not (Type.same_presence lower (PVar var))
+            | At_most _ | If_present _ -> true)));
+      Type.Var.set_state var (Link Absent);
+      Type.Var.set_bounds var []);
     drop_unused_presences
       ~tys
       ~is_generalized
@@ -1240,12 +1237,13 @@ let decide_clashing_presences (presences : Presence_var.t list) =
              | If_present (ty1, ty2) -> Unify.clash ty1 ty2
              | At_most _ | At_least _ -> false) ->
       List.iter (uppers var) ~f:(fun (upper : Presence_var.t) ->
-        upper.bounds
-        <- List.filter upper.bounds ~f:(function
-             | At_least lower -> not (Type.same_presence lower (PVar var))
-             | At_most _ | If_present _ -> true));
-      var.state <- Link Absent;
-      var.bounds <- []
+        Type.Var.set_bounds
+          upper
+          (List.filter upper.bounds ~f:(function
+            | At_least lower -> not (Type.same_presence lower (PVar var))
+            | At_most _ | If_present _ -> true)));
+      Type.Var.set_state var (Link Absent);
+      Type.Var.set_bounds var []
     | Generic | Unbound _ | Link _ -> ())
 ;;
 
@@ -1263,7 +1261,7 @@ let restore_reverse_bounds (var : Presence_var.t) =
             Type.same_presence p q
           | (At_most _ | At_least _ | If_present _), _ -> false)
       in
-      if not has_reverse then other.bounds <- reverse :: other.bounds
+      if not has_reverse then Type.Var.add_bound other reverse
     | Some _ | None -> ()
   in
   List.iter var.bounds ~f:(fun bound ->
@@ -1274,15 +1272,16 @@ let restore_reverse_bounds (var : Presence_var.t) =
 ;;
 
 let reopen fresh ~rank tys =
+  Mode.Private.Undo.assert_not_atomic "Scheme.reopen";
   let kept = Queue.create () in
   let seen_kept = Int.Hash_set.create () in
   let presences = Queue.create () in
   let reopened (var : _ Type.Var.t) =
     match var.state with
     | Generic ->
-      var.state <- Unbound rank;
+      Type.Var.set_state var (Unbound rank);
       List.iter var.kept ~f:(enqueue_kept ~pending:kept ~seen_kept);
-      var.kept <- [];
+      Type.Var.set_kept var [];
       true
     | Unbound _ | Link _ -> false
   in
@@ -1358,13 +1357,14 @@ let reopen fresh ~rank tys =
 ;;
 
 let generalize fresh ~rank tys =
+  Mode.Private.Undo.assert_not_atomic "Scheme.generalize";
   let presences = Queue.create () in
   let rows = Queue.create () in
   let in_bounds_of = Queue.create () in
   let modes = Int.Table.create () in
   let generalized = Int.Hash_set.create () in
   let generalize (var : _ Type.Var.t) =
-    var.state <- Generic;
+    Type.Var.set_state var Generic;
     Hash_set.add generalized var.id;
     Queue.enqueue in_bounds_of var.in_bounds_of
   in

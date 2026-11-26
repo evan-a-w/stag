@@ -6,7 +6,7 @@ open! Import
 type t = private int [@@deriving sexp_of]
 
 val max_id : int
-val create : Type.id -> Type.id -> t
+val create : Type.Id.t -> Type.Id.t -> t
 
 module Hash_set : sig
   type id_pair := t

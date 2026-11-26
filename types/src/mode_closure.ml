@@ -13,9 +13,9 @@ let solver_node t (node : Mode_node.t) =
 ;;
 
 (* The levels of the nodes of [t]'s variables, with [seeds] raised. *)
-let levels t seeds =
+let levels ?floors t seeds =
   let table = Mode_node.Table.create () in
-  match Mode.Var.Node.raised seeds with
+  match Mode.Var.Node.raised ?floors seeds with
   | None ->
     raise_s
       [%message
@@ -58,17 +58,18 @@ let create vars ~floors =
   in
   (* A generic node's bound its scheme adds once a layout has pointers raises
      what it is below. *)
+  let shared = Mode.Var.Node.Floors.create () in
   let scheme_lowers =
     List.concat_map vars ~f:(fun var ->
       List.map Mode.Axis.Any.all ~f:(fun (T axis) ->
         let node = Mode.Var.node var axis in
-        node, Mode.Var.Node.lower node))
+        node, Mode.Var.Node.Floors.lower shared node))
   in
   let floors =
     List.map floors ~f:(fun (node, point) -> solver_node t node, point)
     @ scheme_lowers
   in
-  { t with floors; base = levels t floors }
+  { t with floors; base = levels ~floors:shared t floors }
 ;;
 
 let domain t node =

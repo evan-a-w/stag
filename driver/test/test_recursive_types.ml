@@ -192,7 +192,7 @@ let quoted_ones = .<let ones = `Cons (1, Ptr.make ones) in ones>.
 ;;
 
 let%expect_test "occurs check fails for unguarded cycles" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let check f =
     let a = tvar fresh in
@@ -241,7 +241,7 @@ let%expect_test "occurs check fails for unguarded cycles" =
 ;;
 
 let%expect_test "guarded cycles" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let check f =
     let a = tvar fresh in
@@ -303,7 +303,7 @@ let%expect_test "guarded cycles" =
 ;;
 
 let%expect_test "sexps of cyclic types" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let list =
     fix fresh (fun l ->
@@ -344,7 +344,7 @@ let%expect_test "sexps of cyclic types" =
 ;;
 
 let%expect_test "unifying cyclic types of different unrollings" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let a = fix fresh (fun a -> variant fresh [ "A", ptr a ]) in
   let b = tvar fresh in
@@ -382,7 +382,7 @@ let%expect_test "unifying cyclic types of different unrollings" =
 ;;
 
 let%expect_test "mismatching cyclic types" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let a = fix fresh (fun a -> variant fresh [ "A", ptr a ]) in
   let ab =
@@ -440,7 +440,7 @@ let%expect_test "mismatching cyclic types" =
 ;;
 
 let%expect_test "generalization and instantiation of cyclic types" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let elt = Type.TVar (Fresh.var fresh ~rank:2) in
   let list = Type.TVar (Fresh.var fresh ~rank:2) in
@@ -690,7 +690,7 @@ type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
 ;;
 
 let%expect_test "bounds with cyclic types" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let list () =
     fix fresh (fun l ->
@@ -883,7 +883,7 @@ type t = [`A of t] * id[t]
 ;;
 
 let%expect_test "instantiation and unification of large types" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let n = 4000 in
   let generic () = Type.TVar (Fresh.var fresh ~rank:2) in
   let chain =
@@ -891,7 +891,7 @@ let%expect_test "instantiation and unification of large types" =
       ~n
       (fun ty ->
         let var = Fresh.var fresh ~rank:2 in
-        var.state <- Link (Type.TTuple [ ty; Type.int ]);
+        Type.Var.set_state var (Link (Type.TTuple [ ty; Type.int ]));
         Type.TVar var)
       (generic ())
   in
@@ -1072,7 +1072,7 @@ type c = c * int
 ;;
 
 let%expect_test "instantiation copies each part of a cycle once" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let elt = Type.TVar (Fresh.var fresh ~rank:2) in
   let list = Type.TVar (Fresh.var fresh ~rank:2) in
@@ -1101,7 +1101,7 @@ let%expect_test "instantiation copies each part of a cycle once" =
 ;;
 
 let%expect_test "occurs check through a link visited guarded, then unguarded" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   (* [l = v -> int], then [v = f l]. *)
   let check f =
@@ -1144,7 +1144,7 @@ let%expect_test "occurs check through a link visited guarded, then unguarded" =
 ;;
 
 let%expect_test "unified link pairs are memoised as pairs" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let linked ty =
     let l = tvar fresh in
@@ -1188,7 +1188,7 @@ let field ty name =
 ;;
 
 let%expect_test "instantiation shares cycles without generic variables" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let fix_at ~rank f =
     let a = Type.TVar (Fresh.var fresh ~rank) in
@@ -1246,7 +1246,7 @@ let%expect_test "instantiation shares cycles without generic variables" =
 ;;
 
 let%expect_test "instantiation copies generic presences and bounds" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let open T in
   let generic () = Fresh.var fresh ~rank:2 in
   (* [({self : ptr['a]; x?'p : int} as 'a)] *)

@@ -41,13 +41,13 @@ let print_ty ty = print_s [%sexp (ty : Type.ty)]
 let print_row row = print_s [%sexp (row : Type.row)]
 
 let%expect_test "trivial unification" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_ty fresh ~ty1:int ~ty2:int;
   [%expect {| (Ok ()) |}]
 ;;
 
 let%expect_test "trivial fail unification" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_ty fresh ~ty1:int ~ty2:string;
   [%expect
     {|
@@ -58,7 +58,7 @@ let%expect_test "trivial fail unification" =
 ;;
 
 let%expect_test "list unification" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let list ty = con "list" ~args:[ ATy ty ] in
   let a = tvar fresh ~rank:0 in
   unify_ty fresh ~ty1:(list int) ~ty2:(list a);
@@ -75,7 +75,7 @@ let%expect_test "list unification" =
 ;;
 
 let%expect_test "constructor arity mismatch" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_ty
     fresh
     ~ty1:(con "pair" ~args:[ ATy int ])
@@ -90,7 +90,7 @@ let%expect_test "constructor arity mismatch" =
 ;;
 
 let%expect_test "constructor arg kind mismatch" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_ty
     fresh
     ~ty1:(con "t" ~args:[ ATy int ])
@@ -104,7 +104,7 @@ let%expect_test "constructor arg kind mismatch" =
 ;;
 
 let%expect_test "constructor with context args" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty
     fresh
@@ -118,7 +118,7 @@ let%expect_test "constructor with context args" =
 ;;
 
 let%expect_test "arrows" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:(Type.arrow a int) ~ty2:(Type.arrow bool b);
@@ -133,7 +133,7 @@ let%expect_test "arrows" =
 ;;
 
 let%expect_test "tuples" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ bool; int ]);
   print_ty a;
@@ -144,7 +144,7 @@ let%expect_test "tuples" =
 ;;
 
 let%expect_test "tuple length mismatch" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_ty fresh ~ty1:(TTuple [ int; int ]) ~ty2:(TTuple [ int ]);
   [%expect
     {|
@@ -155,7 +155,7 @@ let%expect_test "tuple length mismatch" =
 ;;
 
 let%expect_test "tuples unify every element, reporting the first error" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:1 in
   unify_ty
@@ -174,7 +174,7 @@ let%expect_test "tuples unify every element, reporting the first error" =
 ;;
 
 let%expect_test "constructor arguments stop at the first error" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty
     fresh
@@ -190,7 +190,7 @@ let%expect_test "constructor arguments stop at the first error" =
 ;;
 
 let%expect_test "length mismatches unify no element" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ int ]);
   unify_ty
@@ -211,7 +211,7 @@ let%expect_test "length mismatches unify no element" =
 ;;
 
 let%expect_test "structural mismatch" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_ty fresh ~ty1:(Type.arrow int int) ~ty2:(TTuple [ int; int ]);
   unify_ty fresh ~ty1:int ~ty2:(Type.arrow int int);
   [%expect
@@ -226,7 +226,7 @@ let%expect_test "structural mismatch" =
 ;;
 
 let%expect_test "code types unify inner type and context" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let r = rvar fresh ~rank:1 in
   unify_ty fresh ~ty1:(code ~inner:a r) ~ty2:(code (row [ "x", bool ]));
@@ -241,7 +241,7 @@ let%expect_test "code types unify inner type and context" =
 ;;
 
 let%expect_test "variable with itself" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:a;
   print_ty a;
@@ -252,7 +252,7 @@ let%expect_test "variable with itself" =
 ;;
 
 let%expect_test "variable binds on either side" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:int;
@@ -269,7 +269,7 @@ let%expect_test "variable binds on either side" =
 ;;
 
 let%expect_test "link chains" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:b;
@@ -289,7 +289,7 @@ let%expect_test "link chains" =
 ;;
 
 let%expect_test "occurs check" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:(TTuple [ a; int ]);
   unify_ty fresh ~ty1:a ~ty2:(con "list" ~args:[ ATy a ]);
@@ -303,14 +303,14 @@ let%expect_test "occurs check" =
 ;;
 
 let%expect_test "occurs check through context" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:(code (row [ "x", a ]));
   [%expect {| (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1))))) |}]
 ;;
 
 let%expect_test "binding lowers ranks of variables in the bound type" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:3 in
   let c = tvar fresh ~rank:2 in
@@ -329,7 +329,7 @@ let%expect_test "binding lowers ranks of variables in the bound type" =
 ;;
 
 let%expect_test "binding variable to variable lowers rank" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:3 in
   unify_ty fresh ~ty1:a ~ty2:b;
@@ -341,7 +341,7 @@ let%expect_test "binding variable to variable lowers rank" =
 ;;
 
 let%expect_test "bindings are not undone on failure" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:(Type.arrow a int) ~ty2:(Type.arrow bool string);
   print_ty a;
@@ -355,7 +355,7 @@ let%expect_test "bindings are not undone on failure" =
 ;;
 
 let%expect_test "empty contexts" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_row fresh ~row1:REmpty ~row2:REmpty;
   unify_row fresh ~row1:REmpty ~row2:(row [ "x", int ]);
   unify_row fresh ~row1:(row [ "x", int ]) ~row2:REmpty;
@@ -372,7 +372,7 @@ let%expect_test "empty contexts" =
 ;;
 
 let%expect_test "context order does not matter" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_row
     fresh
     ~row1:(row [ "x", int; "y", bool ])
@@ -381,7 +381,7 @@ let%expect_test "context order does not matter" =
 ;;
 
 let%expect_test "context label types are unified" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   unify_row fresh ~row1:(row [ "x", a ]) ~row2:(row [ "x", int ]);
   print_ty a;
@@ -396,7 +396,7 @@ let%expect_test "context label types are unified" =
 ;;
 
 let%expect_test "missing label in closed context" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   unify_row fresh ~row1:(row [ "x", int ]) ~row2:(row [ "y", int ]);
   [%expect
     {|
@@ -407,7 +407,7 @@ let%expect_test "missing label in closed context" =
 ;;
 
 let%expect_test "open context against closed context" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   unify_row
     fresh
@@ -422,7 +422,7 @@ let%expect_test "open context against closed context" =
 ;;
 
 let%expect_test "two open contexts share a fresh tail" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r1 = rvar fresh ~rank:1 in
   let r2 = rvar fresh ~rank:3 in
   unify_row
@@ -441,7 +441,7 @@ let%expect_test "two open contexts share a fresh tail" =
 ;;
 
 let%expect_test "context variables" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   unify_row fresh ~row1:r ~row2:r;
   unify_row fresh ~row1:r ~row2:(row [ "x", int ]);
@@ -455,14 +455,14 @@ let%expect_test "context variables" =
 ;;
 
 let%expect_test "context occurs check" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   unify_row fresh ~row1:r ~row2:(row [ "x", int ] ~tail:r);
   [%expect {| (Error (Occurs_check_failed (ARow (RVar (Unbound 0 1))))) |}]
 ;;
 
 let%expect_test "cyclic context" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   unify_row
     fresh
@@ -485,7 +485,7 @@ let%expect_test "cyclic context" =
 ;;
 
 let%expect_test "duplicate labels are scoped" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let row1 = row [ "x", int; "x", bool ] in
   unify_row fresh ~row1 ~row2:(row [ "x", int; "x", bool ]);
   unify_row fresh ~row1 ~row2:(row [ "x", bool; "x", int ]);
@@ -498,7 +498,7 @@ let%expect_test "duplicate labels are scoped" =
 ;;
 
 let%expect_test "linked context variable in tail position" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   unify_row fresh ~row1:r ~row2:(row [ "z", int ]);
   unify_row fresh ~row1:(row [ "x", int ]) ~row2:(row [ "y", bool ] ~tail:r);
@@ -519,7 +519,7 @@ let%expect_test "linked context variable in tail position" =
 ;;
 
 let%expect_test "presence" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let maybe name ty rest = ext name ty rest ~presence:(pvar fresh ~rank:1) in
   let maybe_x = maybe "x" int REmpty in
   unify_row fresh ~row1:maybe_x ~row2:REmpty;
@@ -552,7 +552,7 @@ let%expect_test "presence" =
 ;;
 
 let%expect_test "absent entries need not agree on type" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   unify_row fresh ~row1:(ext "x" int REmpty ~presence:Absent) ~row2:r;
   print_row r;
@@ -572,7 +572,7 @@ let%expect_test "absent entries need not agree on type" =
 ;;
 
 let%expect_test "presence variables are generalized and their rank lowered" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let inner = Fresh.var fresh ~rank:2 in
   let outer = pvar fresh ~rank:1 in
   let r = rvar fresh ~rank:1 in
@@ -597,7 +597,7 @@ let%expect_test "presence variables are generalized and their rank lowered" =
 ;;
 
 let%expect_test "context bounds" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   let bound = rvar fresh ~rank:1 in
   constrain fresh ~row:r ~bound;
@@ -632,7 +632,7 @@ let%expect_test "context bounds" =
 ;;
 
 let%expect_test "context bounds and presence" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let constrain = constrain fresh in
   let maybe name ty rest = ext name ty rest ~presence:(pvar fresh ~rank:1) in
   (* Unused entries need not be in the bound. *)
@@ -671,8 +671,6 @@ let print_presences presences =
              code (ext "x" int REmpty ~presence)))))
 ;;
 
-let presence_error = Unification_error.Row_mismatch (REmpty, REmpty, Cyclic_row)
-
 let force fresh presence ~to_ =
   let result =
     Unify.unify_row
@@ -692,7 +690,7 @@ let at_most fresh ~presence ~bound =
 ;;
 
 let%expect_test "unknown presences are bounded, not unified" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let bounded () =
     let p = pvar fresh ~rank:1 in
     let q = pvar fresh ~rank:1 in
@@ -746,7 +744,7 @@ let print_entries entries =
 ;;
 
 let%expect_test "equalities wait for their presence" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let pending () =
     let p = pvar fresh ~rank:1 in
     let a = tvar fresh ~rank:1 in
@@ -795,12 +793,12 @@ let%expect_test "equalities wait for their presence" =
 let%expect_test "types clash only if no instance of their variables unifies \
                  them"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:1 in
   let cyclic f =
     let var = Fresh.var fresh ~rank:1 in
-    var.state <- Link (f (TVar var));
+    Var.set_state var (Link (f (TVar var)));
     TVar var
   in
   let rec nest n ty = if n = 0 then ty else Type.arrow int (nest (n - 1) ty) in
@@ -864,7 +862,7 @@ let%expect_test "types clash only if no instance of their variables unifies \
 ;;
 
 let%expect_test "an equality between clashing types makes its presence Absent" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:1 in
   let q = pvar fresh ~rank:1 in
   at_most fresh ~presence:q ~bound:p;
@@ -920,7 +918,7 @@ let%expect_test "an equality between clashing types makes its presence Absent" =
 ;;
 
 let%expect_test "unifying presences merges their equalities" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:1 in
   let q = pvar fresh ~rank:1 in
   let a = tvar fresh ~rank:1 in
@@ -943,7 +941,7 @@ let%expect_test "unifying presences merges their equalities" =
 ;;
 
 let%expect_test "equalities follow presence bounds" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let bounded () =
     let p = pvar fresh ~rank:1 in
     let q = pvar fresh ~rank:1 in
@@ -982,7 +980,7 @@ let%expect_test "equalities follow presence bounds" =
 ;;
 
 let%expect_test "a row bound equates entry types if present" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:1 in
   let q = pvar fresh ~rank:1 in
   let a = tvar fresh ~rank:1 in
@@ -1014,7 +1012,7 @@ let%expect_test "a row bound equates entry types if present" =
 let%expect_test "equalities are generalized and instantiated with their \
                  presence"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:2 in
   let a = tvar fresh ~rank:2 in
   let outer = pvar fresh ~rank:1 in
@@ -1065,7 +1063,7 @@ let%expect_test "equalities are generalized and instantiated with their \
 ;;
 
 let%expect_test "entry types that only matter where their presence is present" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:2 in
   let q = pvar fresh ~rank:2 in
   let a = tvar fresh ~rank:2 in
@@ -1097,7 +1095,7 @@ let%expect_test "entry types that only matter where their presence is present" =
   let p' = pvar fresh ~rank:2 in
   let q' = pvar fresh ~rank:2 in
   let b' = tvar fresh ~rank:2 in
-  Unify.presence_at_most fresh ~presence:q' ~bound:p' ~error:presence_error
+  Unify.presence_at_most fresh ~presence:q' ~bound:p'
   |> Result.map_error ~f:ignore
   |> [%sexp_of: (unit, unit) Result.t]
   |> print_s;
@@ -1128,7 +1126,7 @@ let rec permutations = function
 (* Runs [steps] on [x?'p] and [x?'q] in every order, printing their results and
    the presences, which are the same whatever the order. *)
 let in_every_order steps =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   List.iter (permutations steps) ~f:(fun steps ->
     let p = pvar fresh ~rank:1 in
     let q = pvar fresh ~rank:1 in
@@ -1221,7 +1219,7 @@ let%expect_test "presence bounds are solved in any order" =
 ;;
 
 let%expect_test "presence bounds through chains and cycles" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let chain n =
     let presences = List.init n ~f:(fun _ -> pvar fresh ~rank:1) in
     List.iter2_exn
@@ -1278,7 +1276,7 @@ let%expect_test "presence bounds through chains and cycles" =
 ;;
 
 let%expect_test "unifying bounded presences merges their bounds" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:1 in
   let q = pvar fresh ~rank:1 in
   let r = pvar fresh ~rank:1 in
@@ -1306,7 +1304,7 @@ let%expect_test "unifying bounded presences merges their bounds" =
 ;;
 
 let%expect_test "presence bounds are generalized and instantiated together" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = pvar fresh ~rank:2 in
   let q = pvar fresh ~rank:1 in
   at_most fresh ~presence:p ~bound:q;
@@ -1365,9 +1363,7 @@ let bounded_through_generalized fresh =
   List.iter
     [ l1, g1; g1, g2; g2, g3; g3, g2; g3, u; l2, g3 ]
     ~f:(fun (presence, bound) ->
-      match
-        Unify.presence_at_most fresh ~presence ~bound ~error:presence_error
-      with
+      match Unify.presence_at_most fresh ~presence ~bound with
       | Ok () -> ()
       | Error _ -> raise_s [%message "unexpected conflict"]);
   print_presences [ l1; l2; u ];
@@ -1387,7 +1383,7 @@ let bounded_through_generalized fresh =
 let%expect_test "generalization keeps the bounds that hold through generalized \
                  variables"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let l1, l2, u, instance = bounded_through_generalized fresh in
   let i1 = instance () in
   let i2 = instance () in
@@ -1407,7 +1403,7 @@ let%expect_test "generalization keeps the bounds that hold through generalized \
 ;;
 
 let%expect_test "instances of a scheme get the presences already known" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let l1, l2, u, instance = bounded_through_generalized fresh in
   force fresh u ~to_:Absent;
   print_presences [ l1; l2; u; instance () ];
@@ -1432,7 +1428,7 @@ let%expect_test "instances of a scheme get the presences already known" =
 ;;
 
 let%expect_test "bounds are kept by generalization and instantiation" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:2 in
   let bound = rvar fresh ~rank:2 in
   ignore
@@ -1451,7 +1447,7 @@ let%expect_test "bounds are kept by generalization and instantiation" =
 ;;
 
 let%expect_test "bounds don't lower ranks" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:2 in
   let bound = rvar fresh ~rank:2 in
   ignore
@@ -1469,7 +1465,7 @@ let%expect_test "bounds don't lower ranks" =
 ;;
 
 let%expect_test "an absent entry shadows later entries with its name" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let constrain = constrain fresh in
   let absent_then_x = ext "x" int (row [ "x", bool ]) ~presence:Absent in
   (* The shadowed [x] is unreachable, so needs no entry in the bound. *)
@@ -1520,7 +1516,7 @@ let%expect_test "an absent entry shadows later entries with its name" =
 ;;
 
 let%expect_test "cyclic bounds" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let constrain = constrain fresh in
   let print contexts =
     TTuple (List.map contexts ~f:code) |> Type.to_string_hum |> print_endline
@@ -1575,7 +1571,7 @@ let%expect_test "cyclic bounds" =
 ;;
 
 let%expect_test "bounds referring to the bounded variable" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let print context = print_endline (Type.to_string_hum (code context)) in
   let s = rvar fresh ~rank:1 in
   (* A bound that is the variable itself constrains nothing. *)
@@ -1601,7 +1597,7 @@ let%expect_test "bounds referring to the bounded variable" =
 ;;
 
 let%expect_test "bounds do not constrain shadowed entries" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let r = rvar fresh ~rank:1 in
   let bound = row [ "x", int ] ~tail:(rvar fresh ~rank:1) in
   constrain fresh ~row:(row [ "x", int ] ~tail:r) ~bound;
@@ -1649,7 +1645,7 @@ let print_in_bounds_of (var : _ Var.t) =
 ;;
 
 let%expect_test "a row bound is recorded on the variables in it" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let o = Fresh.var fresh ~rank:1 in
   let a = Fresh.var fresh ~rank:2 in
   let g = Fresh.var fresh ~rank:2 in
@@ -1683,7 +1679,7 @@ let context_of = function
 ;;
 
 let%expect_test "a scheme keeps the bounds of outer rows to its variables" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let o = rvar fresh ~rank:1 in
   let a = pvar fresh ~rank:2 in
   let g = rvar fresh ~rank:2 in
@@ -1711,7 +1707,7 @@ let%expect_test "a scheme keeps the bounds of outer rows to its variables" =
 let%expect_test "generalization adds the outside bounds implied through a \
                  scheme"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let o1 = rvar fresh ~rank:1 in
   let o2 = rvar fresh ~rank:1 in
   let g = rvar fresh ~rank:2 in
@@ -1741,7 +1737,7 @@ let%expect_test "generalization adds the outside bounds implied through a \
 ;;
 
 let%expect_test "a bound of a variable out of scope is left in place" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let dead = rvar fresh ~rank:2 in
   let g = rvar fresh ~rank:2 in
   constrain fresh ~row:dead ~bound:g;
@@ -1758,12 +1754,16 @@ let%expect_test "a bound of a variable out of scope is left in place" =
 ;;
 
 let%expect_test "same_bound compares structure up to links, conservatively" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let p = Fresh.var fresh ~rank:1 in
   let q = Fresh.var fresh ~rank:1 in
   let a = tvar fresh ~rank:1 in
   let tail = rvar fresh ~rank:1 in
-  let linked_tail = RVar { (Fresh.var fresh ~rank:1) with state = Link tail } in
+  let linked_tail =
+    let var = Fresh.var fresh ~rank:1 in
+    Var.set_state var (Link tail);
+    RVar var
+  in
   let record = Fresh.record fresh (row [ "x", int ]) in
   let bound ?(shadowed = []) row =
     { row; shadowed = String.Set.of_list shadowed }
@@ -1778,7 +1778,11 @@ let%expect_test "same_bound compares structure up to links, conservatively" =
       , bound (x_y ())
       , bound
           (x_y
-             ~px:(PVar { (Fresh.var fresh ~rank:1) with state = Link (PVar p) })
+             ~px:
+               (PVar
+                  (let var = Fresh.var fresh ~rank:1 in
+                   Var.set_state var (Link (PVar p));
+                   var))
              ()) )
     ; ( "entries in another order"
       , bound (x_y ())
@@ -1840,15 +1844,18 @@ let%expect_test "same_bound compares structure up to links, conservatively" =
 let%expect_test "iteration past the first steps visits cycles once and reports \
                  unguarded uses"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let x = Fresh.var fresh ~rank:1 in
   let chain =
     List.fold (List.init 100 ~f:Fn.id) ~init:(TVar x) ~f:(fun target _ ->
-      TVar { (Fresh.var fresh ~rank:1) with state = Link target })
+      TVar
+        (let var = Fresh.var fresh ~rank:1 in
+         Var.set_state var (Link target);
+         var))
   in
   let back = Fresh.var fresh ~rank:1 in
   let cyclic = Fresh.record fresh (row [ "self", TVar back; "x", chain ]) in
-  back.state <- Link cyclic;
+  Var.set_state back (Link cyclic);
   let calls = ref [] in
   let add ~guarded (var : _ Var.t) =
     calls := (var.id, guarded) :: !calls;
@@ -1869,7 +1876,7 @@ let%expect_test "iteration past the first steps visits cycles once and reports \
 let%expect_test "a reopened scheme's presences are bounded by outside ones \
                  again"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let outer = pvar fresh ~rank:1 in
   let p = pvar fresh ~rank:2 in
   at_most fresh ~presence:outer ~bound:p;
@@ -1894,7 +1901,7 @@ let%expect_test "a reopened scheme's presences are bounded by outside ones \
 ;;
 
 let%expect_test "reopening errs if a kept bound no longer holds" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let outer = rvar fresh ~rank:1 in
   let g = row [ "x", bool ] ~tail:(rvar fresh ~rank:2) in
   constrain fresh ~row:outer ~bound:g;
@@ -1919,7 +1926,7 @@ let%expect_test "reopening errs if a kept bound no longer holds" =
 ;;
 
 let%expect_test "a reopened scheme is refined in place" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = tvar fresh ~rank:2 in
   let outer = rvar fresh ~rank:1 in
   let g = rvar fresh ~rank:2 in
@@ -1958,7 +1965,7 @@ let%expect_test "a reopened scheme is refined in place" =
 let%expect_test "joins settle through each other, the binding unification \
                  getting their error and the next unification none"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let join () = TVar (Unify.join_var fresh ~rank:1) in
   let returning locality =
     TArrow
@@ -2008,7 +2015,7 @@ let%expect_test "joins settle through each other, the binding unification \
 let%expect_test "a link rolled back with an enclosing failure leaves the edges \
                  and classes of both variables apart"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let join () = TVar (Unify.join_var fresh ~rank:1) in
   let sub ~lower ~upper =
     print_s
@@ -2059,7 +2066,7 @@ let%expect_test "a link rolled back leaves the classes apart: fixing a join \
       Error.create_s [%sexp (error : Unification_error.t)])
     |> Or_error.ok_exn
   in
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let join () = Unify.join_var fresh ~rank:1 in
   let b = join () in
   let c = join () in
@@ -2091,7 +2098,7 @@ let%expect_test "a link rolled back leaves the classes apart: fixing a join \
 
 let%expect_test "a link kept merges the classes: fixing a join makes both equal"
   =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let join () = Unify.join_var fresh ~rank:1 in
   let b = join () in
   let c = join () in
@@ -2112,5 +2119,208 @@ let%expect_test "a link kept merges the classes: fixing a join makes both equal"
     (Ok ())
     (Ok ())
     '_a * '_a * '_a * '_a
+    |}]
+;;
+
+let%expect_test "a failed atomically undoes every change unification made" =
+  let fresh = Fresh.conservative () in
+  let r : (row, bound) Var.t = Fresh.var fresh ~rank:2 in
+  let v : (ty, Nothing.t) Var.t = Fresh.var fresh ~rank:3 in
+  let p : (presence, presence_bound) Var.t = Fresh.var fresh ~rank:3 in
+  let q : (row, bound) Var.t = Fresh.var fresh ~rank:3 in
+  let bound_var : (row, bound) Var.t = Fresh.var fresh ~rank:3 in
+  constrain
+    fresh
+    ~row:(RVar r)
+    ~bound:(ext "a" int (ext "b" bool (RVar bound_var)));
+  let summary name (var : (_, _) Var.t) =
+    let state =
+      match var.state with
+      | Unbound rank -> sprintf "unbound %d" rank
+      | Generic -> "generic"
+      | Link _ -> "link"
+    in
+    sprintf
+      "%s: %s, %d bounds, in bounds of %d, in record %b"
+      name
+      state
+      (List.length var.bounds)
+      (List.length var.in_bounds_of)
+      var.in_record
+  in
+  let show () =
+    List.iter
+      [ summary "r" r
+      ; summary "v" v
+      ; summary "p" p
+      ; summary "q" q
+      ; summary "bound" bound_var
+      ]
+      ~f:print_endline
+  in
+  Var.mark_in_record r;
+  show ();
+  let rolled_back =
+    Mode.Private.Undo.atomically (fun () ->
+      match
+        Unify.unify_row
+          fresh
+          ~row1:(RVar r)
+          ~row2:(ext ~presence:(PVar p) "a" (TVar v) (RVar q))
+      with
+      | Ok () -> Error "later failure"
+      | Error error ->
+        Error (Sexp.to_string [%sexp (error : Unification_error.t)]))
+  in
+  print_s [%sexp (rolled_back : (unit, string) Result.t)];
+  show ();
+  [%expect
+    {|
+    (Ok ())
+    r: unbound 2, 1 bounds, in bounds of 0, in record true
+    v: unbound 3, 0 bounds, in bounds of 0, in record false
+    p: unbound 3, 0 bounds, in bounds of 0, in record false
+    q: unbound 3, 0 bounds, in bounds of 0, in record false
+    bound: unbound 3, 0 bounds, in bounds of 1, in record false
+    (Error "later failure")
+    r: unbound 2, 1 bounds, in bounds of 0, in record true
+    v: unbound 3, 0 bounds, in bounds of 0, in record false
+    p: unbound 3, 0 bounds, in bounds of 0, in record false
+    q: unbound 3, 0 bounds, in bounds of 0, in record false
+    bound: unbound 3, 0 bounds, in bounds of 1, in record false
+    |}]
+;;
+
+let%expect_test "a nominal type's arguments of unknown variances are equated; \
+                 variances of another arity are a mismatch"
+  =
+  let fresh = Fresh.create () in
+  Fresh.set_cons
+    fresh
+    { value_parameters = (fun _ -> None)
+    ; variances =
+        (function
+          | "box1" -> Some [ Covariant ]
+          | "box2" -> Some [ Covariant; Covariant ]
+          | _ -> None)
+    };
+  let returning locality =
+    TArrow
+      ( int
+      , string
+      , { Arrow_modes.default with
+          res = Fixed { Arrow_modes.default_const with locality }
+        } )
+  in
+  let sub name =
+    let con locality = con name ~args:[ ATy (returning locality) ] in
+    print_s
+      [%sexp
+        (Unify.sub_ty fresh ~lower:(con Global) ~upper:(con Local)
+         : (unit, Unification_error.t) Result.t)];
+    print_s
+      [%sexp
+        (Unify.sub_ty fresh ~lower:(con Local) ~upper:(con Global)
+         : (unit, Unification_error.t) Result.t)]
+  in
+  sub "box1";
+  sub "unknown";
+  sub "box2";
+  [%expect
+    {|
+    (Ok ())
+    (Error
+     (Type_mismatch (TArrow (TCon int ()) (TCon string ()))
+      (TArrow (TCon int ()) (TCon string ())
+       (res ((stage Nonportable) (provenance Gc) (locality Local))))
+      (Modes
+       ("Mode exceeds" (axis locality) (lower Local) (upper Global)
+        (because "a function is used at a type with other modes")))))
+    (Error
+     (Type_mismatch
+      (TCon unknown
+       ((ATy
+         (TArrow (TCon int ()) (TCon string ())
+          (res ((stage Nonportable) (provenance Gc) (locality Local)))))))
+      (TCon unknown ((ATy (TArrow (TCon int ()) (TCon string ())))))
+      (Unknown_variances unknown
+       ("Modes unequal" (axis locality) (first Local) (second Global)
+        (because "the function types are unified")))))
+    (Error
+     (Type_mismatch
+      (TCon unknown ((ATy (TArrow (TCon int ()) (TCon string ())))))
+      (TCon unknown
+       ((ATy
+         (TArrow (TCon int ()) (TCon string ())
+          (res ((stage Nonportable) (provenance Gc) (locality Local)))))))
+      (Unknown_variances unknown
+       ("Modes unequal" (axis locality) (first Global) (second Local)
+        (because "the function types are unified")))))
+    (Error
+     (Type_mismatch
+      (TCon box2
+       ((ATy
+         (TArrow (TCon int ()) (TCon string ())
+          (res ((stage Nonportable) (provenance Gc) (locality Local)))))))
+      (TCon box2 ((ATy (TArrow (TCon int ()) (TCon string ())))))
+      (Args_length_mismatch 2 1)))
+    (Error
+     (Type_mismatch (TCon box2 ((ATy (TArrow (TCon int ()) (TCon string ())))))
+      (TCon box2
+       ((ATy
+         (TArrow (TCon int ()) (TCon string ())
+          (res ((stage Nonportable) (provenance Gc) (locality Local)))))))
+      (Args_length_mismatch 2 1)))
+    |}]
+;;
+
+let%expect_test "generalizing and reopening are not allowed under atomically" =
+  let fresh = Fresh.conservative () in
+  let ty = tvar fresh ~rank:1 in
+  let under_atomically f =
+    match Mode.Private.Undo.atomically (fun () -> Ok (f ())) with
+    | Ok _ -> print_endline "allowed"
+    | Error (_ : Nothing.t) -> .
+    | exception exn -> print_s [%sexp (exn : exn)]
+  in
+  under_atomically (fun () -> Scheme.generalize fresh ~rank:0 [ ty ]);
+  Scheme.generalize fresh ~rank:0 [ ty ];
+  under_atomically (fun () ->
+    ignore
+      (Scheme.reopen fresh ~rank:1 [ ty ]
+       : (unit, Unification_error.t) Result.t));
+  [%expect
+    {|
+    ("cannot be undone, so not allowed under atomically" Scheme.generalize)
+    ("cannot be undone, so not allowed under atomically" Scheme.reopen)
+    |}]
+;;
+
+let%expect_test "what is queued to settle all runs, even if one raises" =
+  let result =
+    Or_error.try_with (fun () ->
+      Fresh.settle (fun () ->
+        let queue f = ignore (Fresh.settle f : (unit, _) Result.t) in
+        queue (fun () ->
+          print_endline "first";
+          Ok ());
+        queue (fun () -> failwith "second raises");
+        queue (fun () ->
+          print_endline "third";
+          Ok ());
+        Ok ()))
+  in
+  print_s [%message (result : (unit, Unification_error.t) Result.t Or_error.t)];
+  ignore
+    (Fresh.settle (fun () ->
+       print_endline "a later settle runs alone";
+       Ok ())
+     : (unit, _) Result.t);
+  [%expect
+    {|
+    first
+    third
+    (result (Error (Failure "second raises")))
+    a later settle runs alone
     |}]
 ;;

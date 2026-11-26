@@ -1,8 +1,8 @@
 open! Import
 
 (** An evaluator of typed programs, as the typechecker and driver use it. Its
-    errors are [Runtime_error]s, except on code that did not check
-    ([Typed.Expr.Desc.Error]), where it errs with [Erase.Reached_error]. *)
+    errors are [Runtime_error]s: of kind [Reached_error] on code that did not
+    check ([Typed.Expr.Desc.Error]). *)
 module type Value = sig
   type t [@@deriving sexp_of]
 

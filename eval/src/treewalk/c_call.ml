@@ -76,11 +76,22 @@ let rec fn (args : C_signature.Arg.t list) result : fn =
           | [] -> wrong_count () )
 ;;
 
-let functions = Hashtbl.Poly.create ()
+module Key = struct
+  module T = struct
+    type t = string * C_signature.t [@@deriving compare, hash, sexp_of]
+  end
 
-let call ~symbol (signature : C_signature.t) args =
+  include T
+  include Hashable.Make_plain (T)
+end
+
+type t = (Value.t list -> Value.t, string) Result.t Key.Table.t
+
+let create () = Key.Table.create ()
+
+let call t ~symbol (signature : C_signature.t) args =
   let resolved =
-    Hashtbl.find_or_add functions (symbol, signature) ~default:(fun () ->
+    Hashtbl.find_or_add t (symbol, signature) ~default:(fun () ->
       let (Fn (typ, call)) = fn signature.args signature.result in
       match Foreign.foreign symbol typ with
       | f -> Ok (call f)

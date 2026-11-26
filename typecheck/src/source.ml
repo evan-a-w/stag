@@ -333,7 +333,10 @@ module Expr = struct
     | Assign (var_ref, value) -> Assign (Ref var_ref, sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun { args; annots; body } ->
-      Fun { args = annotated_args args annots; body = sub body }
+      Fun
+        { args = annotated_args (Nonempty_list.to_list args) annots
+        ; body = sub body
+        }
     | Splice { code; subs = Explicit subs } ->
       Splice
         { code = sub code
@@ -351,11 +354,11 @@ module Expr = struct
     | Tuple exprs -> Tuple (subs exprs)
     | Deref expr -> Deref (sub expr)
     | Construct (constructor, exprs) -> Construct (Ref constructor, subs exprs)
-    | Record fields' ->
+    | Record { fields = fields'; record = _ } ->
       Record
         (List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr))
     | Field (expr, field) -> Field (sub expr, Ref field)
-    | Record_update (expr, fields') ->
+    | Record_update { expr; fields = fields'; record = _ } ->
       Record_update
         ( sub expr
         , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr)

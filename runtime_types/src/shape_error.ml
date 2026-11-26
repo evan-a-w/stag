@@ -2,13 +2,13 @@ open! Import
 
 (** Why a type has no shape. *)
 type t =
-  | Unresolved_ty of Type.id
+  | Unresolved_ty of Type.Id.t
   (** A type variable that no declaration expansion binds: the type is not
       concrete. *)
-  | Unresolved_row of Type.id
+  | Unresolved_row of Type.Id.t
   (** An open row, so a structural record or variant that may have more entries. *)
-  | Unresolved_presence of Type.id
-  | Recursive_row of Type.id (** A row variable that expands to itself. *)
+  | Unresolved_presence of Type.Id.t
+  | Recursive_row of Type.Id.t (** A row variable that expands to itself. *)
   | Unknown_type of string
   (** A [TCon] no [Resolver] declares, by canonical name. *)
   | Abstract_type of string
@@ -17,9 +17,9 @@ type t =
       ; expected : int
       ; got : int
       }
-  | Recursive_ty of Type.id
+  | Recursive_ty of Type.Id.t
   (** A type variable whose instantiation reaches itself, so is not concrete. *)
-  | Row_expected of Type.id
+  | Row_expected of Type.Id.t
   (** A row variable used as a type, or the reverse. *)
   | Recursive of string list
   (** The by-value cycle: the expansions enclosing it, outermost first.

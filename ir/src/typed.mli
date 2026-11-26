@@ -115,8 +115,8 @@ module Pattern : sig
           ; rest : Rest.t
           }
       | Error of 'p list
-      (** What failed to check, of its parts that did. Matching it raises
-          [Reached_error]. *)
+      (** What failed to check, of its parts that did. Matching it is a
+          [Reached_error] runtime error. *)
     [@@deriving sexp_of]
   end
 
@@ -136,8 +136,6 @@ module Pattern : sig
 
   (** Of [Type.error]. *)
   val error : t list -> loc:Loc.t -> t
-
-  val has_error : t -> bool
 end
 
 (** The locality markers of expressions: [stack_ e], [exclave_ e], [region_ e]
@@ -313,7 +311,7 @@ module Expr : sig
       | Assign of Var_ref.t * 'e
       (** Of a [let mut] bound in the same quote, or a mutable toplevel. *)
       | Fun of
-          { args : Ident.t list (** Non-empty. *)
+          { args : Ident.t Nonempty_list.t
           ; annots : (Ident.t * Syntax.Annot.t) list
           ; body : 'e
           }
@@ -334,9 +332,16 @@ module Expr : sig
       | Tuple of 'e list
       | Deref of 'e
       | Construct of Constructor_ref.t * 'e list
-      | Record of (Field_ref.t * 'e) list
+      | Record of
+          { record : Record_type.t
+          ; fields : (Field_ref.t * 'e) list
+          }
       | Field of 'e * Field_ref.t
-      | Record_update of 'e * (Field_ref.t * 'e) list
+      | Record_update of
+          { record : Record_type.t
+          ; expr : 'e
+          ; fields : (Field_ref.t * 'e) list
+          }
       (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
           updated fields' types contain. *)
       | Store of 'e * 'e
@@ -428,16 +433,33 @@ module Expr : sig
   (** Whether [t] has an [Error] node or pattern: what failed to check. *)
   val has_error : t -> bool
 
+  module Ref : sig
+    type t =
+      | Binder of Binder.t
+      | Free of string
+  end
+
+  (** What [t] itself, not its children, refers to: the variable it reads or
+      assigns, or the providers of its [Implicit] substitution. *)
+  val iter_own_refs : t -> f:(Ref.t -> unit) @ local -> unit
+
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
       [Persistent] variable, an [Assign] or an [Implicit] substitution. *)
   val refers_to : t -> f:(Binder.t -> bool) @ local -> bool
 end
 
 module Toplevel : sig
+  module Kind : sig
+    type t =
+      | Value
+      | Mut (** [let mut]. *)
+      | Function of Ident.t Nonempty_list.t (** Of these arguments. *)
+    [@@deriving sexp_of]
+  end
+
   type t =
     { ident : Ident.t
-    ; mut : bool (** [let mut], so [args] is empty. *)
-    ; args : Ident.t list
+    ; kind : Kind.t
     ; scheme : Type.ty
     ; body : Expr.t
     ; partials : Allocation.Id.t list (** As [Expr.Made.partials]. *)

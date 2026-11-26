@@ -53,10 +53,19 @@ module Node : sig
 
   val upper : t -> int
 
+  (** [lower]s, shared by queries made while the modes don't change. *)
+  module Floors : sig
+    type node := t
+    type t
+
+    val create : unit -> t
+    val lower : t -> node -> int
+  end
+
   (** The nodes that rise, with their least points (by index), if each node
       given is raised to its point: what the constraints imply of them then.
       [None] if one can't be. *)
-  val raised : (t * int) list -> (t * int) list option
+  val raised : ?floors:Floors.t -> (t * int) list -> (t * int) list option
 
   module Fate = Graph.Fate
 

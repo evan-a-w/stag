@@ -490,7 +490,7 @@ let instantiate t (instance : Instance.t) ~owner ~scheme ~ty =
    both, as the typechecker has it. *)
 let rec merged params (body : Typed.Expr.t) =
   match body.desc with
-  | Fun { args; body; _ } -> merged (params @ args) body
+  | Fun { args; body; _ } -> merged (params @ Nonempty_list.to_list args) body
   | _ -> params, body
 ;;
 
@@ -546,12 +546,12 @@ let rec toplevel ?ty t (instance : Instance.t) (ident : Typed.Ident.t) =
       check_globals t;
       value
   in
-  match top.args with
-  | _ :: _ ->
+  match top.kind with
+  | Function args ->
     (match
        memo ident.name ~f:(fun () ->
          t.next_id <- t.next_id + 1;
-         let params, body = merged top.args top.body in
+         let params, body = merged (Nonempty_list.to_list args) top.body in
          Obj
            { id = t.next_id
            ; region = Region.heap
@@ -570,7 +570,7 @@ let rec toplevel ?ty t (instance : Instance.t) (ident : Typed.Ident.t) =
      | Obj ({ payload = Closure closure; _ } as obj) ->
        Obj { obj with payload = Closure { closure with instance } }
      | value -> value)
-  | [] ->
+  | (Value | Mut) as kind ->
     let key = owner_key owner in
     let own =
       List.filter instance.local ~f:(fun (owner, _) -> String.equal owner key)
@@ -596,7 +596,9 @@ let rec toplevel ?ty t (instance : Instance.t) (ident : Typed.Ident.t) =
         in
         let value = eval t ctx Typed.Ident.Map.empty top.body ~tail:false in
         free t region;
-        if top.mut then unsupported "a mutable toplevel";
+        (match kind with
+         | Mut -> unsupported "a mutable toplevel"
+         | Value | Function _ -> ());
         value)
 
 and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
@@ -883,7 +885,14 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
      | _ -> unsupported "assigning a non-cell")
   | Assign _ -> unsupported "assigning a toplevel"
   | Fun { args; body; _ } ->
-    closure t ctx expr ~params:args ~body ~env ~owner:ctx.owner
+    closure
+      t
+      ctx
+      expr
+      ~params:(Nonempty_list.to_list args)
+      ~body
+      ~env
+      ~owner:ctx.owner
   | Annotated (expr, _) -> eval' ~tail expr
   | Marked (Nontail, expr) -> eval' expr
   | Marked (Stack, expr) -> eval' ~tail expr
@@ -905,13 +914,8 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
   | Tuple exprs -> Tuple (List.map exprs ~f:(fun expr -> eval' expr))
   | Construct (constructor, exprs) ->
     Construct (constructor, List.map exprs ~f:(fun expr -> eval' expr))
-  | Record fields ->
-    let values =
-      match fields with
-      | [] -> [||]
-      | (field, _) :: _ ->
-        Array.create ~len:(Array.length field.record.fields) unit
-    in
+  | Record { record; fields } ->
+    let values = Array.create ~len:(Array.length record.fields) unit in
     List.iter fields ~f:(fun (field, expr) ->
       values.(field.index) <- eval' expr);
     Record values

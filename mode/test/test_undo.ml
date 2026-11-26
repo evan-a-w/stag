@@ -50,6 +50,158 @@ let%expect_test "undo" =
   [%expect
     {|
     ((exn (Failure raised)) (r 3))
-    "Assert_failure mode/src/undo.ml:7:2"
+    "Assert_failure mode/src/undo.ml:13:2"
+    |}]
+;;
+
+let%expect_test "atomically_exn" =
+  let r = ref 0 in
+  let set x =
+    let old = !r in
+    Undo.record (fun () -> r := old);
+    r := x
+  in
+  let returned =
+    Undo.atomically_exn (fun () ->
+      set 1;
+      "returned")
+  in
+  print_s [%message returned ~r:(!r : int)];
+  (match
+     Undo.atomically_exn (fun () ->
+       set 2;
+       failwith "raised")
+   with
+   | () -> print_endline "no exception"
+   | exception exn -> print_s [%message "" (exn : exn) ~r:(!r : int)]);
+  (* Its changes are undone with a failing [atomically] around it. *)
+  let result =
+    Undo.atomically (fun () ->
+      Undo.atomically_exn (fun () -> set 3);
+      Error "outer failed")
+  in
+  print_s [%message "" (result : (unit, string) Result.t) ~r:(!r : int)];
+  [%expect
+    {|
+    (returned (r 1))
+    ((exn (Failure raised)) (r 1))
+    ((result (Error "outer failed")) (r 1))
+    |}]
+;;
+
+let%expect_test "permanent and when_settled" =
+  let r = ref 0 in
+  let cached = ref 0 in
+  let change cell x =
+    Undo.change
+      ~undo:
+        (let old = !cell in
+         fun () -> cell := old)
+      (fun () -> cell := x)
+  in
+  let show what =
+    print_s [%message what ~r:(!r : int) ~cached:(!cached : int)]
+  in
+  let result =
+    Undo.atomically (fun () ->
+      change r 1;
+      Undo.permanent (fun () ->
+        change cached 1;
+        (* Its own groups still undo their changes. *)
+        ignore
+          (Undo.atomically (fun () ->
+             change cached 2;
+             Error ())
+           : (unit, unit) Result.t);
+        Undo.when_settled (fun () -> show "settled");
+        (* Not under [atomically] here, but within one. *)
+        Undo.assert_not_atomic "in permanent");
+      show "after permanent";
+      Error ())
+  in
+  print_s [%message (result : (unit, unit) Result.t)];
+  show "rolled back";
+  Undo.when_settled (fun () -> show "settled at once");
+  [%expect
+    {|
+    ("after permanent" (r 1) (cached 1))
+    (settled (r 0) (cached 1))
+    (result (Error ()))
+    ("rolled back" (r 0) (cached 1))
+    ("settled at once" (r 0) (cached 1))
+    |}]
+;;
+
+let%expect_test "permanent sets aside what is scoped to the enclosing groups" =
+  let scope = ref "none" in
+  Undo.register_scoped ~set_aside:(fun () ->
+    let outer = !scope in
+    scope := "none";
+    fun () -> scope := outer);
+  let show where = print_s [%message where ~scope:(!scope : string)] in
+  ignore
+    (Undo.atomically (fun () ->
+       scope := "attempt";
+       Undo.permanent (fun () ->
+         show "in permanent";
+         scope := "permanent's own");
+       show "after permanent";
+       Error ())
+     : (unit, unit) Result.t);
+  [%expect
+    {|
+    ("in permanent" (scope none))
+    ("after permanent" (scope attempt))
+    |}]
+;;
+
+let%expect_test "what is queued until settled all runs, even if one raises" =
+  let result =
+    Or_error.try_with (fun () ->
+      Undo.atomically_exn (fun () ->
+        Undo.when_settled (fun () -> print_endline "first");
+        Undo.when_settled (fun () -> failwith "second raises");
+        Undo.when_settled (fun () -> print_endline "third")))
+  in
+  print_s [%message (result : unit Or_error.t)];
+  Undo.when_settled (fun () -> print_endline "nothing left queued");
+  [%expect
+    {|
+    first
+    third
+    (result (Error (Failure "second raises")))
+    nothing left queued
+    |}]
+;;
+
+let%expect_test "a set aside that raises leaves the enclosing group as it was" =
+  let fail = ref false in
+  Undo.register_scoped ~set_aside:(fun () ->
+    if !fail then failwith "set aside raises";
+    Fn.id);
+  let r = ref 0 in
+  let set x =
+    let old = !r in
+    Undo.record (fun () -> r := old);
+    r := x
+  in
+  let result =
+    Undo.atomically (fun () ->
+      set 1;
+      fail := true;
+      let permanent =
+        Or_error.try_with (fun () -> Undo.permanent (fun () -> set 2))
+      in
+      fail := false;
+      print_s [%message (permanent : unit Or_error.t)];
+      (* Still within the group, so its changes are still undone. *)
+      set 3;
+      Error ())
+  in
+  print_s [%message (result : (unit, unit) Result.t) ~r:(!r : int)];
+  [%expect
+    {|
+    (permanent (Error (Failure "set aside raises")))
+    ((result (Error ())) (r 0))
     |}]
 ;;

@@ -3,7 +3,7 @@ open! Import
 (* Types are built by hand: what the checker produces is [Type.ty]s, and the
    prelude's declarations are only one source of them. *)
 
-let fresh = Fresh.create ()
+let fresh = Fresh.conservative ()
 let var () = Fresh.var fresh ~rank:1
 let tycon name args = Type.TCon (name, List.map args ~f:(fun ty -> Type.ATy ty))
 let int = tycon "int" []
@@ -271,7 +271,7 @@ let%expect_test "recursion" =
   let self =
     Type.TRecord { id = 7; row = present "next" (Type.TVar v) Type.REmpty }
   in
-  v.state <- Type.Link self;
+  Type.Var.set_state v (Type.Link self);
   shape (Runtime_types.create Resolver.empty) self;
   [%expect
     {|

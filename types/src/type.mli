@@ -1,10 +1,15 @@
 open! Import
 
-type id = int [@@deriving sexp, compare, equal]
-type rank = int [@@deriving sexp, compare, equal]
+module Id : sig
+  type t = int [@@deriving sexp, compare, equal]
+end
+
+module Rank : sig
+  type t = int [@@deriving sexp, compare, equal]
+end
 
 type 'a var_state =
-  | Unbound of rank
+  | Unbound of Rank.t
   | Generic
   | Link of 'a
 
@@ -14,8 +19,8 @@ type 'a var_state =
     is only added to), so that generalizing it can find them. [in_record] is for
     a row variable of a record or variant (or bound to one), whose entries are
     never [assigned]. *)
-type ('a, 'bound) var =
-  { id : id
+type ('a, 'bound) var = private
+  { id : Id.t
   ; mutable state : 'a var_state
   ; mutable bounds : 'bound list
   ; mutable in_bounds_of : bounded list
@@ -33,11 +38,11 @@ and ty =
       ; context : row
       }
   | TRecord of
-      { id : id
+      { id : Id.t
       ; row : row
       }
   | TVariant of
-      { id : id
+      { id : Id.t
       ; row : row (** Tags without the backquote. *)
       }
   | TVar of (ty, Nothing.t) var
@@ -93,12 +98,12 @@ and bounded =
     scheme adds it to the variable once (see [Scheme.generalize]). *)
 and kept =
   | Row_bound of
-      { id : id
+      { id : Id.t
       ; lower : (row, bound) var
       ; bound : bound
       }
   | If_present_kept of
-      { id : id
+      { id : Id.t
       ; presence : (presence, presence_bound) var
       ; ty1 : ty
       ; ty2 : ty
@@ -127,16 +132,16 @@ and row_mismatch_reason =
   | Assigned of string
   | Cyclic_row
 
-val kept_id : kept -> id
+val kept_id : kept -> Id.t
 
 module Var : sig
   type 'a state = 'a var_state =
-    | Unbound of rank
+    | Unbound of Rank.t
     | Generic
     | Link of 'a
 
-  type ('a, 'bound) t = ('a, 'bound) var =
-    { id : id
+  type ('a, 'bound) t = ('a, 'bound) var = private
+    { id : Id.t
     ; mutable state : 'a state
     ; mutable bounds : 'bound list
     ; mutable in_bounds_of : bounded list
@@ -145,7 +150,21 @@ module Var : sig
     ; mutable watchers : ('a, unification_error) Watcher.t list
     }
 
-  val create : id -> 'a state -> ('a, _) t
+  val create : Id.t -> 'a state -> ('a, _) t
+
+  (** The setters record how to undo their change under [atomically]. *)
+
+  val set_state : ('a, _) t -> 'a state -> unit
+
+  (** Of an [Unbound] variable of a higher rank. *)
+  val lower_rank : _ t -> rank:Rank.t -> unit
+
+  val set_bounds : (_, 'bound) t -> 'bound list -> unit
+  val add_bound : (_, 'bound) t -> 'bound -> unit
+  val set_in_bounds_of : _ t -> bounded list -> unit
+  val set_kept : _ t -> kept list -> unit
+  val mark_in_record : _ t -> unit
+  val set_watchers : ('a, _) t -> ('a, unification_error) Watcher.t list -> unit
 
   (** Of a type or row variable, once a mode constraint depends on whether its
       values have pointers (see [Var_layout]). *)
@@ -154,7 +173,7 @@ module Var : sig
   val layout : _ t -> Mode.Layout.t option
 
   (** Raises unless the variable is [Unbound]. *)
-  val rank_exn : _ t -> rank
+  val rank_exn : _ t -> Rank.t
 
   (** As [(Unbound id rank)], [(Generic id)] or [(Link a)]: bounds are omitted,
       as they may refer back to the variable. *)
@@ -273,7 +292,7 @@ module Mapper : sig
     ; row : (row, bound) Var.t -> row
     ; presence : (presence, presence_bound) Var.t -> presence
     ; keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
-    ; id : unit -> id
+    ; id : unit -> Id.t
     ; mode : Mode.Var.t -> Mode.Var.t
     }
 end

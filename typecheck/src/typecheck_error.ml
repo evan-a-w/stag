@@ -415,8 +415,8 @@ let unification_message (error : Unification_error.t) ~show_type =
       (* Named as the variable of the scheme it would be in, not as weak. *)
       let var : Type.arg =
         match var with
-        | ATy (TVar var) -> ATy (TVar { var with state = Generic })
-        | ARow (RVar var) -> ARow (RVar { var with state = Generic })
+        | ATy (TVar var) -> ATy (TVar (Type.Var.create var.id Generic))
+        | ARow (RVar var) -> ARow (RVar (Type.Var.create var.id Generic))
         | ATy _ | ARow _ | AMode _ -> var
       in
       sprintf "The type variable %s occurs inside its own definition" (arg var)
@@ -824,3 +824,6 @@ let message { kind; loc = _; in_scope } =
       ~shadowed:(In_scope.shadows in_scope)
       ~root_modules:in_scope.root_modules)
 ;;
+
+let lift ~loc result = Result.map_error result ~f:(unification_error ~loc)
+let error ~loc kind = Error (create ~loc kind)

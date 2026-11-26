@@ -6,7 +6,7 @@ open! Import
 (** Replaces [Generic] variables by fresh ones at [rank], for a use [at] a
     location if given. The types one partial application
     [instantiate fresh ~rank] is applied to share their instances. *)
-val instantiate : ?at:Loc.t -> Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
+val instantiate : ?at:Loc.t -> Fresh.t -> rank:Type.Rank.t -> Type.ty -> Type.ty
 
 (** Marks unbound variables of [tys] with rank greater than [rank] as [Generic],
     in place, along with those reached through their bounds and equalities.
@@ -24,7 +24,7 @@ val instantiate : ?at:Loc.t -> Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
     between types that [Unify.clash], are [Absent]. [tys] must have every type
     that may share the variables generalized, as what is not seen in them may be
     simplified away or dropped. *)
-val generalize : Fresh.t -> rank:Type.rank -> Type.ty list -> unit
+val generalize : Fresh.t -> rank:Type.Rank.t -> Type.ty list -> unit
 
 (** Makes the [Generic] variables of [tys], type and mode, ones of [rank] again,
     in place, with the constraints the scheme kept with variables it was not
@@ -35,7 +35,7 @@ val generalize : Fresh.t -> rank:Type.rank -> Type.ty list -> unit
     longer holds, as a variable outside the scheme has changed since. *)
 val reopen
   :  Fresh.t
-  -> rank:Type.rank
+  -> rank:Type.Rank.t
   -> Type.ty list
   -> (unit, Unification_error.t) Result.t
 
@@ -44,7 +44,7 @@ val reopen
     depends on the constraints they may add. *)
 val generalize_watchers
   :  Fresh.t
-  -> rank:Type.rank
+  -> rank:Type.Rank.t
   -> Type.ty list
   -> Unification_error.t list
 
@@ -54,4 +54,4 @@ val generalize_watchers
 val fix_joins : Fresh.t -> Type.ty list -> Unification_error.t list
 
 (** The ids of the variables [generalize] would generalize. *)
-val reachable_ids : rank:Type.rank -> Type.ty list -> Int.Hash_set.t
+val reachable_ids : rank:Type.Rank.t -> Type.ty list -> Int.Hash_set.t

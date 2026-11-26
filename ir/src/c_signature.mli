@@ -9,7 +9,7 @@ module Arg : sig
     | Int (** [int64_t]. *)
     | Bool (** [bool]. *)
     | Char (** [char]. *)
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of, equal, compare, hash]
 end
 
 module Result : sig
@@ -18,14 +18,14 @@ module Result : sig
     | Bool
     | Char
     | Unit (** [void]. *)
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of, equal, compare, hash]
 end
 
 type t =
   { args : Arg.t list (** Empty for [unit -> r]. *)
   ; result : Result.t
   }
-[@@deriving sexp_of, equal]
+[@@deriving sexp_of, equal, compare, hash]
 
 (** The number of arguments of its stag type, at least one. *)
 val arity : t -> int

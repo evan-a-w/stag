@@ -586,7 +586,9 @@ end
       (expansion
        (Tuple
         ((Construct ((type_name t) (name B) (index 1)) () : t)
-         (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+         (Record (record r)
+          (fields ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int)))) :
+          r))
         : "t * r"))
       : "t * r"))
     (M.y/6
@@ -596,7 +598,8 @@ end
         (expansion
          (Tuple
           ((Construct ((type_name t) (name B) (index 1)) () : t)
-           (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) :
+           (Record (record r)
+            (fields ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int)))) :
             r))
           : "t * r"))
         : "t * r"))
@@ -611,14 +614,16 @@ end
      (Code
       (Tuple
        ((Construct ((type_name t) (name B) (index 1)) () : t)
-        (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+        (Record (record r)
+         (fields ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int)))) : r))
        : "t * r")))
     -- evaluated
     (code
      (Code
       (Tuple
        ((Construct ((type_name t) (name B) (index 1)) () : t)
-        (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+        (Record (record r)
+         (fields ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int)))) : r))
        : "t * r")))
     (M.x (Tuple (B) (r (a 1))))
     (M.y 1)

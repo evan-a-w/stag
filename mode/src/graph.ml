@@ -164,7 +164,10 @@ let is_generic t =
 
 let lower_rank t ~rank =
   match t.state with
-  | Rank r when r > rank -> t.state <- Rank rank
+  | Rank r when r > rank ->
+    Undo.change
+      ~undo:(fun () -> t.state <- Rank r)
+      (fun () -> t.state <- Rank rank)
   | Rank _ | Generic _ -> ()
 ;;
 
@@ -288,6 +291,13 @@ module Attempted = struct
 end
 
 let attempted : Attempted.t option ref = ref None
+
+let () =
+  Undo.register_scoped ~set_aside:(fun () ->
+    let outer = !attempted in
+    attempted := None;
+    fun () -> attempted := outer)
+;;
 
 let fire dormant ~because =
   if dormant.fired
@@ -503,32 +513,17 @@ module Layout = struct
         mine.failed
         @ List.concat_map mine.raised ~f:(fun layout -> layout.waiting)
       in
-      atomically (fun () ->
+      Undo.atomically_exn (fun () ->
         List.iter dropped ~f:(fun dormant ->
           if not dormant.fired
           then (
             log (fun () -> dormant.fired <- false);
-            dormant.fired <- true));
-        Ok ())
-      |> Mode_error.ok_exn;
+            dormant.fired <- true)));
       result
   ;;
 
-  let pointer_free t =
-    atomically (fun () ->
-      pointer_free t;
-      Ok ())
-    |> Mode_error.ok_exn
-  ;;
-
-  let both ids a b =
-    let result = ref None in
-    atomically (fun () ->
-      result := Some (both ids a b);
-      Ok ())
-    |> Mode_error.ok_exn;
-    Option.value_exn !result
-  ;;
+  let pointer_free t = Undo.atomically_exn (fun () -> pointer_free t)
+  let both ids a b = Undo.atomically_exn (fun () -> both ids a b)
 
   let guard_edge lo morphism hi ~guards reason =
     guard (Edge (lo, morphism, hi)) ~guards [ reason ]
@@ -546,10 +541,17 @@ let add_edge lo morphism hi reason =
 let at_least t point reason = add_kind (Lower (t, point)) [ reason ]
 let at_most t point reason = add_kind (Upper (t, point)) [ reason ]
 
+module Direction = struct
+  (** Along edges to the nodes above, or below. *)
+  type t =
+    | Up
+    | Down
+end
+
 (* The constraints between [start] and the nodes [stop] accepts, through paths
-   in nodes [through] accepts: [start <= m(other)] when [forward],
-   [other <= m(start)] otherwise. *)
-let implied start ~forward ~stop ~through =
+   in nodes [through] accepts: [start <= m(other)] going [Up],
+   [other <= m(start)] going [Down]. *)
+let implied start ~(direction : Direction.t) ~stop ~through =
   let visited = Int.Table.create () in
   let found = ref [] in
   let seen node morphism =
@@ -557,13 +559,17 @@ let implied start ~forward ~stop ~through =
     List.mem morphisms morphism ~equal:(fun a b -> Morphism.compare a b = 0)
   in
   let rec visit node morphism path =
-    let edges = if forward then node.succ else node.pred in
+    let edges =
+      match direction with
+      | Up -> node.succ
+      | Down -> node.pred
+    in
     List.iter edges ~f:(fun edge ->
       let other, morphism, path =
-        if forward
-        then
+        match direction with
+        | Up ->
           edge.hi, Morphism.compose morphism edge.morphism, path @ edge.reasons
-        else
+        | Down ->
           edge.lo, Morphism.compose edge.morphism morphism, edge.reasons @ path
       in
       if stop other
@@ -647,7 +653,7 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
       | [] -> None
       | roots -> Some (List.sort roots ~compare:by_id))
   in
-  let search ~forward =
+  let search ~(direction : Direction.t) =
     (* By node and morphism: the guards it was last visited with, [[]] once
        reached by a path not guarded. *)
     let visited = Hashtbl.Poly.create () in
@@ -671,12 +677,17 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
         then visit (union guards current)
     in
     let step other morphism guards path =
-      if (forward && is_kept other) || is_outer other
+      let kept =
+        match direction with
+        | Up -> is_kept other
+        | Down -> false
+      in
+      if kept || is_outer other
       then
         add
-          (if forward
-           then Edge (x, morphism, other)
-           else Edge (other, morphism, x))
+          (match direction with
+           | Up -> Edge (x, morphism, other)
+           | Down -> Edge (other, morphism, x))
           guards
           path
       else if internal other
@@ -690,51 +701,56 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
            (Hashtbl.find_exn visited (node.id, Morphism.code morphism))
       then (
         if (not (List.is_empty guards)) && not (phys_equal node x)
-        then
-          add
-            (if forward
-             then Upper (x, Morphism.right morphism node.upper)
-             else Lower (x, Morphism.left morphism node.lower))
-            guards
-            path;
+        then (
+          match direction with
+          | Up ->
+            add
+              (Upper (x, Morphism.right morphism node.upper))
+              guards
+              (Why.to_list node.upper_why @ List.rev path)
+          | Down ->
+            add
+              (Lower (x, Morphism.left morphism node.lower))
+              guards
+              (Why.to_list node.lower_why @ path));
         List.iter node.dormant ~f:(fun dormant ->
           match guards_of dormant with
           | None -> ()
           | Some dormant_guards ->
             let guards = union guards dormant_guards in
-            (match dormant.kind, forward with
-             | Upper (n, point), true when phys_equal n node ->
+            (match dormant.kind, direction with
+             | Upper (n, point), Up when phys_equal n node ->
                add
                  (Upper (x, Morphism.right morphism point))
                  guards
-                 (path @ dormant.dormant_reasons)
-             | Lower (n, point), false when phys_equal n node ->
+                 (dormant.dormant_reasons @ List.rev path)
+             | Lower (n, point), Down when phys_equal n node ->
                add
                  (Lower (x, Morphism.left morphism point))
                  guards
                  (dormant.dormant_reasons @ path)
-             | Edge (lo, edge_morphism, hi), true when phys_equal lo node ->
+             | Edge (lo, edge_morphism, hi), Up when phys_equal lo node ->
                step
                  hi
                  (Morphism.compose morphism edge_morphism)
                  guards
                  (path @ dormant.dormant_reasons)
-             | Edge (lo, edge_morphism, hi), false when phys_equal hi node ->
+             | Edge (lo, edge_morphism, hi), Down when phys_equal hi node ->
                step
                  lo
                  (Morphism.compose edge_morphism morphism)
                  guards
                  (dormant.dormant_reasons @ path)
              | (Edge _ | Upper _ | Lower _), _ -> ()));
-        if forward
-        then
+        match direction with
+        | Up ->
           List.iter node.succ ~f:(fun edge ->
             step
               edge.hi
               (Morphism.compose morphism edge.morphism)
               guards
               (path @ edge.reasons))
-        else
+        | Down ->
           List.iter node.pred ~f:(fun edge ->
             step
               edge.lo
@@ -751,8 +767,8 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
       visit (Queue.dequeue_exn guarded)
     done
   in
-  search ~forward:true;
-  search ~forward:false;
+  search ~direction:Up;
+  search ~direction:Down;
   let found =
     Hashtbl.data found
     |> List.map ~f:(fun (kind, guards, path) ->
@@ -833,13 +849,13 @@ let generalize nodes ~rank =
       ~data:
         (implied
            node
-           ~forward:true
+           ~direction:Up
            ~stop:(fun other -> is_kept other || is_outer other)
            ~through:internal);
     Hashtbl.set
       below
       ~key:node.id
-      ~data:(implied node ~forward:false ~stop:is_outer ~through:internal));
+      ~data:(implied node ~direction:Down ~stop:is_outer ~through:internal));
   let find table node =
     Hashtbl.find table node.id |> Option.value ~default:[]
   in
@@ -1069,13 +1085,76 @@ let holding t =
         dormant.kind)
 ;;
 
-(* A generic node's constraints are those its scheme keeps, which imply the
-   rest. *)
-let scheme_lower t =
-  List.fold (holding t) ~init:t.lower ~f:(fun lower -> function
-    | Lower (_, point) -> Int.max lower point
-    | Edge _ | Upper _ -> lower)
-;;
+module Floors = struct
+  type t = int Int.Table.t
+
+  let create () = Int.Table.create ()
+
+  (* A generic node's constraints are those its scheme keeps, which imply the
+     rest. The nodes of edges into it may have schemes of their own, generalized
+     later, so their floors count too: to a fixpoint, as the edges may form
+     cycles. A floor computed is final, as it is a fixpoint over all the nodes
+     it comes from, so [t] keeps it for later queries. *)
+  let lower (known : t) node =
+    match Hashtbl.find known node.id with
+    | Some floor -> floor
+    | None ->
+      let floors = Int.Table.create () in
+      let into = Int.Table.create () in
+      let dependents = Int.Table.create () in
+      let nodes = Queue.create () in
+      let todo = Stack.singleton node in
+      while not (Stack.is_empty todo) do
+        let node = Stack.pop_exn todo in
+        if not (Hashtbl.mem floors node.id)
+        then (
+          Hashtbl.set floors ~key:node.id ~data:node.lower;
+          Hashtbl.set
+            into
+            ~key:node.id
+            ~data:
+              (List.filter_map (holding node) ~f:(function
+                | Lower (_, point) -> Some (`Point point)
+                | Edge (lo, morphism, hi) when phys_equal hi node ->
+                  (match Hashtbl.find known lo.id with
+                   | Some floor -> Some (`Point (Morphism.left morphism floor))
+                   | None ->
+                     Stack.push todo lo;
+                     Hashtbl.add_multi dependents ~key:lo.id ~data:node;
+                     Some (`From (lo, morphism)))
+                | Edge _ | Upper _ -> None));
+          Queue.enqueue nodes node)
+      done;
+      let floor node = Hashtbl.find_exn floors node.id in
+      let queued = Int.Hash_set.create () in
+      Queue.iter nodes ~f:(fun node -> Hash_set.add queued node.id);
+      while not (Queue.is_empty nodes) do
+        let node = Queue.dequeue_exn nodes in
+        Hash_set.remove queued node.id;
+        let lower =
+          List.fold
+            (Hashtbl.find_exn into node.id)
+            ~init:(floor node)
+            ~f:(fun lower -> function
+            | `Point point -> Int.max lower point
+            | `From (lo, morphism) ->
+              Int.max lower (Morphism.left morphism (floor lo)))
+        in
+        if lower > floor node
+        then (
+          Hashtbl.set floors ~key:node.id ~data:lower;
+          List.iter (Hashtbl.find_multi dependents node.id) ~f:(fun dependent ->
+            if not (Hash_set.mem queued dependent.id)
+            then (
+              Hash_set.add queued dependent.id;
+              Queue.enqueue nodes dependent)))
+      done;
+      Hashtbl.iteri floors ~f:(fun ~key ~data -> Hashtbl.set known ~key ~data);
+      floor node
+  ;;
+end
+
+let scheme_lower t = Floors.lower (Floors.create ()) t
 
 let scheme_upper t =
   List.fold (holding t) ~init:t.upper ~f:(fun upper -> function
@@ -1094,13 +1173,19 @@ let forward t =
       | Edge _ | Upper _ | Lower _ -> None)
 ;;
 
-let raised seeds =
+let raised ?(floors = Floors.create ()) seeds =
   let estimates = Int.Table.create () in
   let raised = Int.Table.create () in
-  let estimate node =
-    Hashtbl.find estimates node.id |> Option.value ~default:node.lower
-  in
   let nodes = Queue.create () in
+  let estimate node =
+    Hashtbl.find_or_add estimates node.id ~default:(fun () ->
+      let lower = Floors.lower floors node in
+      if lower > node.lower
+      then (
+        Hashtbl.set raised ~key:node.id ~data:node;
+        Queue.enqueue nodes node);
+      lower)
+  in
   let raise_to node point =
     if point <= estimate node
     then Ok ()

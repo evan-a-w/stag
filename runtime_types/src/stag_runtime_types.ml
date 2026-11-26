@@ -23,7 +23,7 @@ module Binding = struct
   type t =
     | Ty of Type.ty
     | Row of
-        { id : Type.id
+        { id : Type.Id.t
         ; row : Type.row
         }
   [@@deriving sexp_of]
@@ -31,11 +31,11 @@ end
 
 (* Raised while substituting a variable bound, through other variables, to
    itself: the type is not concrete. *)
-exception Cycle of Type.id
+exception Cycle of Type.Id.t
 
 (* A row variable bound to a type: the parameter and argument disagree, which
    [bind_parameters] rejects. *)
-exception Not_a_row of Type.id
+exception Not_a_row of Type.Id.t
 
 (* The expansions whose bodies are being mapped, innermost first. Arguments and
    rows are substituted through the bindings in effect before a step is
@@ -49,8 +49,8 @@ module Path = struct
           { name : string
           ; args : Type.arg list
           }
-      | Record of Type.id * Type.row
-      | Variant of Type.id * Type.row
+      | Record of Type.Id.t * Type.row
+      | Variant of Type.Id.t * Type.row
   end
 
   type t = Step.t list

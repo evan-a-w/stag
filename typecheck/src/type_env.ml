@@ -92,7 +92,7 @@ end
 
 type t =
   { fresh : Fresh.t
-  ; mutable evaluate_splice :
+  ; evaluate_splice :
       Module_scope.t
       -> Expr.t
       -> loc:Loc.t
@@ -116,11 +116,9 @@ type t =
   (** Set by [create]: what a layout is depends on the types declared. *)
   }
 
-let create_tables fresh ~record_references ~report =
+let create_tables fresh ~record_references ~report ~evaluate_splice =
   { fresh
-  ; evaluate_splice =
-      (fun _ _ ~loc:_ ->
-        raise_s [%message "Type_env: no type splice evaluator"])
+  ; evaluate_splice
   ; type_splices = Loc.Table.create ()
   ; report
   ; types = String.Table.create ()
@@ -165,8 +163,6 @@ let resolve_type module_ (path : Decl_path.t) ~loc =
     Module_scope.find module_ Type path ~loc ~unbound:(fun path ->
       Unbound_type path)
 ;;
-
-let set_evaluate_splice t f = t.evaluate_splice <- f
 
 let rec has_splice (expr : Type_expr.t) =
   match expr.txt with
@@ -273,7 +269,7 @@ module Annotation_vars = struct
   type t =
     { fresh : Fresh.t
     ; layouts : Var_layout.t
-    ; rank : Type.rank
+    ; rank : Type.Rank.t
     ; tys : Type.ty String.Table.t
     ; rows : Type.row String.Table.t
     ; modes : Mode.Var.t String.Table.t
@@ -1142,7 +1138,7 @@ and expand t (decl : Decl.t) ~args ~expansions body =
           then Infinite_type_layout decl.name
           else Cyclic_type_alias decl.name))
   else (
-    knot.state <- Link body;
+    Type.Var.set_state knot (Link body);
     expansion.expanded <- true;
     Ok (Type.TVar knot, syntax))
 ;;
@@ -1395,16 +1391,21 @@ let prepare_kind t (decl : Decl.t) =
     , Some (Reflected_decl.Kind.Record reflected) )
 ;;
 
+(* What is cached of a declaration is computed by [Undo.permanent]: it is the
+   declaration's, whatever attempt first needed it. *)
 let prepare t (decl : Decl.t) =
   match decl.prepared with
   | Some prepared -> Ok prepared
   | None ->
-    let%map.Result prepared = prepare_kind t decl in
-    decl.prepared <- Some prepared;
-    prepared
+    Undo.permanent (fun () ->
+      let%map.Result prepared = prepare_kind t decl in
+      decl.prepared <- Some prepared;
+      prepared)
 ;;
 
 let value_parameters t (root : Decl.t) =
+  Undo.permanent
+  @@ fun () ->
   let visiting = String.Hash_set.create () in
   (* A generated definition that is being evaluated is still opaque. Do not
      cache any summaries that could depend (even indirectly) on its layout. *)
@@ -1492,6 +1493,8 @@ let variances t =
       (match Hashtbl.find assumed decl.name with
        | Some variances -> Some variances
        | None ->
+         Undo.permanent
+         @@ fun () ->
          (match
             match decl.decl.kind with
             | Splice _ -> Error `Splice
@@ -1782,6 +1785,9 @@ let layout_of' t ~check root : Var_layout.Layout_of.t =
    was being computed. *)
 let decide_pending t (decl : Decl.t) ~check =
   Option.iter decl.pending_layouts ~f:(fun { whole; args } ->
+    (* What depends on them may be in an attempt, which mustn't keep them. *)
+    Undo.when_settled
+    @@ fun () ->
     decl.pending_layouts <- None;
     let reason why =
       Mode.Reason.layout
@@ -1819,6 +1825,8 @@ let rec check t name =
   | Some checked -> Ok checked
   | None when decl.failed -> Error Typecheck_error.already_reported
   | None ->
+    Undo.permanent
+    @@ fun () ->
     (match decl.decl.kind with
      | Splice _ ->
        Module_scope.force_definition
@@ -1840,10 +1848,6 @@ let rec check t name =
       if not (Typecheck_error.is_already_reported error)
       then t.report (decl.wrap_error error);
       Typecheck_error.already_reported)
-;;
-
-let find_decl_exn t name =
-  Option.value_exn (Hashtbl.find_exn t.types name).checked
 ;;
 
 let members t type_name ~kind ~members =
@@ -1990,14 +1994,18 @@ let layout_of t ty : Var_layout.Layout_of.t =
   layout_of' t ~check:(check t) (`Ty ty)
 ;;
 
-let create ?(record_references = false) fresh ~report =
-  let t = create_tables fresh ~record_references ~report in
-  Fresh.set_value_parameters fresh (fun name ->
-    Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
-      match value_parameters t decl with
-      | Ok params -> params
-      | Error _ -> None));
-  Fresh.set_variances fresh (variances t);
+let create ?(record_references = false) fresh ~report ~evaluate_splice =
+  let t = create_tables fresh ~record_references ~report ~evaluate_splice in
+  Fresh.set_cons
+    fresh
+    { value_parameters =
+        (fun name ->
+          Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
+            match value_parameters t decl with
+            | Ok params -> params
+            | Error _ -> None))
+    ; variances = variances t
+    };
   Set_once.set_exn t.layouts (Var_layout.create ~layout_of:(layout_of t));
   t
 ;;
