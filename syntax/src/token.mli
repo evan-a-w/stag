@@ -13,6 +13,7 @@ type t =
   | False
   | Let
   | Rec
+  | Nonrec
   | Mut
   | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)

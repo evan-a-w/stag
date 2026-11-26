@@ -466,3 +466,32 @@ let f x = match x with A n | B n -> n
         1:36 -> a.stag 1:25-1:26
         |}])
 ;;
+
+let%expect_test "a nonrec let refers to the outer binding" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|let s = "abc"
+let f (u : unit) = let nonrec s = String.length s in s
+module N = struct let nonrec s = String.append s "!" end
+type t = int
+module M = struct type nonrec t = list[t] end
+|}
+        )
+      ]
+    (fun client ->
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 1, 48; 1, 53; 2, 47; 4, 39 ];
+      [%expect
+        {|
+        1:48 1:48-1:49 ```stag A.s : string ```
+        1:48 -> a.stag 0:4-0:5
+        1:53 1:53-1:54 ```stag s : int ```
+        1:53 -> a.stag 1:30-1:31
+        2:47 2:47-2:48 ```stag A.s : string ```
+        2:47 -> a.stag 0:4-0:5
+        4:39 4:39-4:40 ```stag type A.t ```
+        4:39 -> a.stag 3:5-3:6
+        |}])
+;;

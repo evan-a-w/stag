@@ -13,6 +13,7 @@ type t =
   | False
   | Let
   | Rec
+  | Nonrec
   | Mut
   | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
@@ -73,6 +74,7 @@ let keyword = function
   | "false" -> Some False
   | "let" -> Some Let
   | "rec" -> Some Rec
+  | "nonrec" -> Some Nonrec
   | "mut" -> Some Mut
   | "stack_" -> Some Stack_
   | "exclave_" -> Some Exclave_
@@ -106,6 +108,7 @@ let to_string = function
   | False -> "false"
   | Let -> "let"
   | Rec -> "rec"
+  | Nonrec -> "nonrec"
   | Mut -> "mut"
   | Stack_ -> "stack_"
   | Exclave_ -> "exclave_"
@@ -180,6 +183,7 @@ let ends_atom : t -> bool = function
   | Char _ -> true
   | Let
   | Rec
+  | Nonrec
   | Mut
   | Stack_
   | Exclave_
@@ -278,6 +282,7 @@ let ends_code : t -> bool = function
   | True
   | False
   | Rec
+  | Nonrec
   | Mut
   | In
   | With

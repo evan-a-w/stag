@@ -53,9 +53,9 @@ let n = 1
 let main (u : unit) = let n = Int.add n 1 in n|};
   [%expect
     {|
-    t.stag:1:59-60: s is used before its value is defined (a value may not depend on itself). Lets are recursive, so this s is the one being defined, not the s outside it: rename one of them
-    t.stag:1:37-38: n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: rename one of them
-    t.stag:3:38-39: n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: rename one of them
+    t.stag:1:59-60: s is used before its value is defined (a value may not depend on itself). Lets are recursive, so this s is the one being defined, not the s outside it: write `let nonrec s` to use the outer one, or rename one of them
+    t.stag:1:37-38: n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: write `let nonrec n` to use the outer one, or rename one of them
+    t.stag:3:38-39: n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: write `let nonrec n` to use the outer one, or rename one of them
     |}]
 ;;
 
@@ -247,9 +247,9 @@ let m = 1|};
   check {|let main (u : unit) = .< let x = 1 in .~(let x = x in .< x >.) >.|};
   [%expect
     {|
-    t.stag:4:40-41: n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: rename one of them
-    t.stag:2:38-39: m is used before its value is defined (a value may not depend on itself). Lets are recursive, so this m is the one being defined, not the m outside it: rename one of them
-    t.stag:1:42-55: print_endline is used before its value is defined (a value may not depend on itself). Lets are recursive, so this print_endline is the one being defined, not the print_endline outside it: rename one of them
+    t.stag:4:40-41: n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: write `let nonrec n` to use the outer one, or rename one of them
+    t.stag:2:38-39: m is used before its value is defined (a value may not depend on itself). Lets are recursive, so this m is the one being defined, not the m outside it: write `let nonrec m` to use the outer one, or rename one of them
+    t.stag:1:42-55: print_endline is used before its value is defined (a value may not depend on itself). Lets are recursive, so this print_endline is the one being defined, not the print_endline outside it: write `let nonrec print_endline` to use the outer one, or rename one of them
     t.stag:1:49-50: x is used before its value is defined (a value may not depend on itself)
     t.stag:1:57-58: The quote can't embed x, as it may not be portable. Bind it as (x @ portable) to embed it, or write [forget x in ...] to make x a free variable of the quote
     |}]

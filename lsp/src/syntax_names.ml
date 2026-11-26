@@ -54,13 +54,14 @@ let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
     let rec type_expr ty = walk_type_expr ~add ~expr ty
     and expr e = walk_expr ~add ~type_expr ~toplevels e in
     match toplevel.txt with
-    | Let (binder, bindings, annot, body) ->
+    | Let (binder, bindings, annot, body)
+    | Let_nonrec (binder, bindings, annot, body) ->
       let_ ~add ~type_expr binder bindings annot body;
       expr body
     | Let_mut (binder, annot, body) ->
       let_ ~add ~type_expr binder [] annot body;
       expr body
-    | Type { name = type_name; params = _; kind } ->
+    | Type { name = type_name; params = _; kind; nonrec_ = _ } ->
       name ~declaration:true Type type_name;
       let rec decl_kind : Syntax.Type_decl.Kind.t -> unit = function
         | Variant constructors ->
@@ -205,7 +206,8 @@ let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
     | App (f, arg) | Seq (f, arg) ->
       recurse f;
       recurse arg
-    | Let (binder, bindings, annot, body, in_) ->
+    | Let (binder, bindings, annot, body, in_)
+    | Let_nonrec (binder, bindings, annot, body, in_) ->
       let_ ~add ~type_expr binder bindings annot body;
       recurse body;
       recurse in_

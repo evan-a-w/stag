@@ -58,12 +58,16 @@ let shout (s : string) : string = String.append s "!"
 (* Every `let` is recursive: there is no `rec`. There is no `if` either:
    match on a bool. As a `let` is recursive, a value can't use the one it
    shadows, nor itself: `let s = String.length s` is an error (the `s` is
-   the one being defined), so give it another name. *)
+   the one being defined). Write `let nonrec s = String.length s` to use the
+   outer `s` (`type nonrec` is the same for types). *)
 let fact n =
   match Int.equal n 0 with
   | true -> 1
   | false -> Int.mul n (fact (Int.sub n 1))
 let fact10 = fact 10               (* val fact10 : int = 3628800 *)
+let word = "hello"
+let word_length = let nonrec word = String.length word in word
+(* val word_length : int = 5 *)
 
 (* Toplevels may be used before they are defined, and mutually recursive. *)
 let is_even n = match n with 0 -> true | _ -> is_odd (Int.sub n 1)

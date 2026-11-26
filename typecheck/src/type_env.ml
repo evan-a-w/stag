@@ -182,13 +182,18 @@ let builtins =
   List.map
     [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
     ~f:(fun name ->
-      { Type_decl.name = Located.create name; params = []; kind = Abstract })
+      { Type_decl.name = Located.create name
+      ; params = []
+      ; kind = Abstract
+      ; nonrec_ = false
+      })
   @ [ { Type_decl.name = Located.create "ptr"
       ; params =
           [ Located.create (Type_decl.Param.Ty "a")
           ; Located.create (Type_decl.Param.Mode "p")
           ]
       ; kind = Abstract
+      ; nonrec_ = false
       }
     ]
 ;;
@@ -1249,7 +1254,10 @@ let declare
     ~data:
       { Decl.decl
       ; name
-      ; module_
+      ; module_ =
+          (if decl.nonrec_
+           then Module_scope.without module_ Type decl.name.txt
+           else module_)
       ; params
       ; wrap_error
       ; used_while_defined = false

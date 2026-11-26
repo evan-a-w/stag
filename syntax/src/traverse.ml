@@ -188,6 +188,11 @@ let rec expr (v : _ Visitor_type.t) ctx (e : Expr.t) : Expr.t =
       let a = annot a in
       let value = child (Child.binding (n.txt :: binding_names bs)) value in
       Let (n, bs', a, value, child (Child.binding [ n.txt ]) body)
+    | Let_nonrec (n, bs, a, value, body) ->
+      let bs' = bindings v ctx bs in
+      let a = annot a in
+      let value = child (Child.binding (binding_names bs)) value in
+      Let_nonrec (n, bs', a, value, child (Child.binding [ n.txt ]) body)
     | Let_mut (n, a, value, body) ->
       let a = annot a in
       let value = sub value in
@@ -294,10 +299,14 @@ and toplevel (v : _ Visitor_type.t) ctx (t : Toplevel.t) : Toplevel.t =
       let bs' = bindings v ctx bs in
       let a = annot a in
       Let (n, bs', a, child (Child.binding (binding_names bs)) body)
+    | Let_nonrec (n, bs, a, body) ->
+      let bs' = bindings v ctx bs in
+      let a = annot a in
+      Let_nonrec (n, bs', a, child (Child.binding (binding_names bs)) body)
     | Let_mut (n, a, body) ->
       let a = annot a in
       Let_mut (n, a, sub body)
-    | Type { name; params; kind } ->
+    | Type { name; params; kind; nonrec_ } ->
       let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
         | Malformed kind -> Malformed (decl_kind kind)
         | Variant cs -> Variant (map_snd cs ~f:(map ~f:type_expr))
@@ -311,7 +320,7 @@ and toplevel (v : _ Visitor_type.t) ctx (t : Toplevel.t) : Toplevel.t =
                 child (Child.splice Type_kind ~loc:e.loc ~has_subs:false) e.txt
             }
       in
-      Type { name; params; kind = decl_kind kind }
+      Type { name; params; kind = decl_kind kind; nonrec_ }
     | Exception (n, ts) -> Exception (n, map ts ~f:type_expr)
     | External { name; ty; symbol } ->
       External { name; ty = type_expr ty; symbol }
