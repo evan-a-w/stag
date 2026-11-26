@@ -55,9 +55,10 @@ module Alternative = struct
       left.ident
   ;;
 
-  (* Once the right alternative is checked: each variable is of the same type on
-     both sides, and bound by both. *)
-  let finish t fresh_ty (scope : Scope.t) =
+  (* Once the right alternative is checked: each variable is bound by both
+     sides, and, unless [types] is false (the sides' types already differ), of
+     the same type on both. *)
+  let finish t fresh_ty (scope : Scope.t) ~types =
     Map.iteri t.left ~f:(fun ~key:name ~data:(left : Pattern_var.t) ->
       match Hashtbl.find t.matched name with
       | None ->
@@ -66,6 +67,7 @@ module Alternative = struct
           (Typecheck_error.create
              ~loc:left.loc
              (Or_pattern_variable_missing name))
+      | Some _ when not types -> ()
       | Some (ty, loc) ->
         Unify.unify_ty fresh_ty ~ty1:left.ty ~ty2:ty
         |> Result.iter_error ~f:(fun error ->
@@ -282,11 +284,14 @@ let rec pattern_type'
         ~pattern:right
         ?expected
     in
-    Alternative.finish right_alternative t scope;
+    (* The sides' types first, so that a variable's type is compared within
+       them: [{`x = n; ..r} | {`y = n; ..r}] is an error about [r]. *)
+    let same_type =
+      Scope.unifies t scope ~ty1:left.ty ~ty2:right.ty ~loc:right.loc
+    in
+    Alternative.finish right_alternative t scope ~types:same_type;
     let right =
-      if Scope.unifies t scope ~ty1:left.ty ~ty2:right.ty ~loc:right.loc
-      then right
-      else Typed.Pattern.error [ right ] ~loc:right.loc
+      if same_type then right else Typed.Pattern.error [ right ] ~loc:right.loc
     in
     ( node (Or (left, right)) left.ty
     , Pattern_var.alternatives left_vars right_vars )

@@ -96,6 +96,8 @@ let missing_left x = match x with | A _ | B n -> n | C _ -> 1
 let types x = match x with | A n | C n -> 0 | B _ -> 1
 let nested x = match x with | Some (A n | B m) -> n | _ -> 0
 let ok x = match x with | (A n, m) | (m, A n) -> (n, m) | _ -> (0, A 0)
+let rests x = match x with {`x = n; ..r} | {`y = n; ..r} -> n
+let sides x = match x with | A n | 1 -> 0 | _ -> 1
 |};
   [%expect
     {|
@@ -104,6 +106,10 @@ let ok x = match x with | (A n, m) | (m, A n) -> (n, m) | _ -> (0, A 0)
     t.stag:5:37-38: The variable n has different types on the two sides of this or-pattern: This expression has type string but an expression was expected of type int
     t.stag:6:38-39: The variable n is bound by only one side of this or-pattern, but both sides must bind the same variables
     t.stag:6:44-45: The variable m is bound by only one side of this or-pattern, but both sides must bind the same variables
+    t.stag:8:54-55: The variable r has different types on the two sides of this or-pattern: The row {`x : 'a; `y?'b : 'a; ..'c} is incompatible with the row {`y : 'a; `y?'b : 'a; ..'c}
+    The row would be cyclic.
+    t.stag:9:31-32: The variable n is bound by only one side of this or-pattern, but both sides must bind the same variables
+    t.stag:9:35-36: This expression has type int but an expression was expected of type t
     |}]
 ;;
 
