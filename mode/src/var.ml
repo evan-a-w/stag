@@ -276,11 +276,9 @@ module Instance = struct
         let provenance = instantiate var.provenance in
         let locality = instantiate var.locality in
         let copy = { id; stage; provenance; locality } in
-        Graph.atomically (fun () ->
+        Undo.atomically_exn (fun () ->
           Hashtbl.set t.vars ~key:var.id ~data:copy;
-          Undo.record (fun () -> Hashtbl.remove t.vars var.id);
-          Ok ())
-        |> Mode_error.ok_exn;
+          Undo.record (fun () -> Hashtbl.remove t.vars var.id));
         copy)
   ;;
 end

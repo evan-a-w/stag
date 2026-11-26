@@ -7,7 +7,7 @@ type parameters = string -> Int.Set.t option
     [ptr]), and uses the returned parameter summary to visit their arguments. *)
 val iter
   :  con:(string -> (Int.Set.t option, 'e) Result.t)
-  -> var:(Type.id -> (unit, 'e) Result.t)
+  -> var:(Type.Id.t -> (unit, 'e) Result.t)
   -> cycle:(unit -> (unit, 'e) Result.t)
   -> Type.arg list
   -> (unit, 'e) Result.t
@@ -22,6 +22,6 @@ val reaches_unguarded
   :  ?through_structure:bool
   -> con:(string -> Int.Set.t option)
   -> needs_structure:bool
-  -> var:Type.id
+  -> var:Type.Id.t
   -> Type.arg list
   -> bool

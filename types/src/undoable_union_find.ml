@@ -19,21 +19,12 @@ let rec root t =
 let get t = (root t).value
 let same_class t other = phys_equal (root t) (root other)
 
-let undoably ~undo f =
-  match
-    Mode.Private.Undo.atomically (fun () ->
-      Mode.Private.Undo.record undo;
-      f ();
-      Ok ())
-  with
-  | Ok () -> ()
-  | Error (_ : Nothing.t) -> .
-;;
-
 let set t value =
   let root = root t in
   let old = root.value in
-  undoably ~undo:(fun () -> root.value <- old) (fun () -> root.value <- value)
+  Mode.Private.Undo.change
+    ~undo:(fun () -> root.value <- old)
+    (fun () -> root.value <- value)
 ;;
 
 let union t other ~f =
@@ -45,7 +36,7 @@ let union t other ~f =
     let child, parent = if a.size <= b.size then a, b else b, a in
     let size = parent.size
     and old = parent.value in
-    undoably
+    Mode.Private.Undo.change
       ~undo:(fun () ->
         child.parent <- None;
         parent.size <- size;

@@ -9,7 +9,14 @@ open! Import
     Errs on a variable bound outside the code that is not a toplevel, a local
     function the code embeds, as nothing names it where the code is spliced. *)
 
-(** Raised by [expr] on code with what did not check ([Typed.Expr.Desc.Error]). *)
-exception Reached_error
+module Error : sig
+  type t =
+    | Reached_error
+    (** Of code with what did not check ([Typed.Expr.Desc.Error]). *)
+    | Inexpressible of Base.Error.t
+    (** Of what no syntax names where the code is spliced: a local it embeds, an
+        external, or an intrinsic only the prelude may use. *)
+  [@@deriving sexp_of]
+end
 
-val expr : Typed.Expr.t -> Syntax.Expr.t Or_error.t
+val expr : Typed.Expr.t -> (Syntax.Expr.t, Error.t) Result.t

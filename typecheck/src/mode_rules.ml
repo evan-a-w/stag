@@ -473,8 +473,10 @@ let read ctx block (modality : Modality.t) ~loc ~why =
    modes are found if [want]ed. *)
 let own ?ty ~want ctx (expected : Expected.t) (modality : Modality.t) f =
   let global = Modality.is_global modality in
-  let allocates = Option.map expected.stack ~f:(fun _ -> ref false) in
   (* What a [global] part holds is not allocated with the block. *)
+  let allocates =
+    if global then None else Option.map expected.stack ~f:(fun _ -> ref false)
+  in
   let sub =
     if global
     then Expected.fresh ctx

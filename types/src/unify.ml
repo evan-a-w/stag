@@ -15,32 +15,32 @@ let tidy (var : (Type.presence, Type.presence_bound) Type.Var.t) =
       | _, If_present (ty1, ty2) ->
         if Type.same_ty ty1 ty2 then First None else Second bound)
   in
-  var.bounds
-  <- (List.filter_opt presences
+  Type.Var.set_bounds
+    var
+    ((List.filter_opt presences
       |> List.dedup_and_sort ~compare:(fun (side1, var1) (side2, var2) ->
-        [%compare: [ `At_most | `At_least ] * Type.id]
+        [%compare: [ `At_most | `At_least ] * Type.Id.t]
           (side1, var1.Type.Var.id)
           (side2, var2.id))
       |> List.map ~f:(function
         | `At_most, other -> Type.At_most (PVar other)
         | `At_least, other -> At_least (PVar other)))
-     @ equalities
+     @ equalities)
 ;;
 
-let undoably ~undo f =
-  match
-    Mode.Private.Undo.atomically (fun () ->
-      Mode.Private.Undo.record undo;
-      f ();
-      Ok ())
-  with
-  | Ok () -> ()
-  | Error (_ : Nothing.t) -> .
-;;
+module Presence_error = struct
+  type t =
+    | Conflict
+    | Unification of Unification_error.t
+  [@@deriving sexp_of]
 
-let set_state (var : (_, _) Type.Var.t) state =
-  let old = var.state in
-  undoably ~undo:(fun () -> var.state <- old) (fun () -> var.state <- state)
+  let unification error = Unification error
+end
+
+let on_conflict result ~error =
+  Result.map_error result ~f:(function
+    | Presence_error.Conflict -> error ()
+    | Unification unification_error -> unification_error)
 ;;
 
 (* Binds [var] to [target], running its watchers. If one fails, none of their
@@ -50,17 +50,11 @@ let set_state (var : (_, _) Type.Var.t) state =
    classes and edge lists merged apart. *)
 let link (var : (_, _) Type.Var.t) target ~failed =
   Mode.Layout.attempt (fun () ->
-    set_state var (Link target);
+    Type.Var.set_state var (Link target);
     Watcher.bind var.watchers target)
   |> Result.map_error ~f:(fun error ->
-    set_state var (Link failed);
+    Type.Var.set_state var (Link failed);
     error)
-;;
-
-let lower_presence (var : (Type.presence, _) Type.Var.t) ~rank =
-  match var.state with
-  | Unbound rank' when rank' > rank -> var.state <- Unbound rank
-  | Unbound _ | Generic | Link _ -> ()
 ;;
 
 (* Entries for variables no longer unbound have no bounds to keep, so are
@@ -82,10 +76,11 @@ let add_in_bounds_of (var : _ Type.Var.t) bounded =
              (List.exists var.in_bounds_of ~f:(fun bounded ->
                 [%equal: int option] (unbound_id bounded) (Some id)))
         then
-          var.in_bounds_of
-          <- bounded
+          Type.Var.set_in_bounds_of
+            var
+            (bounded
              :: List.filter var.in_bounds_of ~f:(fun bounded ->
-               Option.is_some (unbound_id bounded)))
+               Option.is_some (unbound_id bounded))))
   | Generic | Link _ -> ()
 ;;
 
@@ -115,9 +110,7 @@ let adjuster ~rank ~seen ~in_bounds_of : Unification_error.t Type.Iter.t =
   let adjust ~guarded:_ (var : _ Type.Var.t) =
     seen var.id;
     add_in_bounds_of var in_bounds_of;
-    (match var.state with
-     | Unbound rank' when rank' > rank -> var.state <- Unbound rank
-     | Unbound _ | Generic | Link _ -> ());
+    Type.Var.lower_rank var ~rank;
     Ok ()
   in
   { ty = adjust
@@ -140,7 +133,7 @@ let adjust_binding fresh iter ~id ~rank ~in_bounds_of ~occurs target =
   if not !recursive
   then Ok ()
   else if Value_layout.reaches_unguarded
-            ~con:(Fresh.value_parameters fresh)
+            ~con:(Fresh.cons fresh).value_parameters
             ~needs_structure:false
             ~var:id
             [ target ]
@@ -214,7 +207,7 @@ let fits_presence presence ~(var : (Type.row, Type.bound) Type.Var.t) =
 
 (* Whether entries of [presence] of types [ty1] and [ty2] are known to have
    equal types when present, so bounds with either are equivalent. *)
-let bounded_id : Type.bounded -> Type.id = function
+let bounded_id : Type.bounded -> Type.Id.t = function
   | Row_var var -> var.id
   | Presence_var var -> var.id
 ;;
@@ -321,7 +314,7 @@ let clash ty1 ty2 =
 let poison ty =
   let bind ~guarded:_ (var : _ Type.Var.t) =
     (match var.state with
-     | Unbound _ -> var.state <- Link Type.error
+     | Unbound _ -> Type.Var.set_state var (Link Type.error)
      | Generic | Link _ -> ());
     Ok ()
   in
@@ -603,7 +596,7 @@ and bind_rvar state (var : _ Type.Var.t) row =
     if var.in_record then in_record' state row ~whole:row else Ok ()
   in
   let bounds = var.bounds in
-  var.bounds <- [];
+  Type.Var.set_bounds var [];
   List.fold_result bounds ~init:() ~f:(fun () (bound : Type.bound) ->
     constrain_row' state ~row ~bound:bound.row ~shadowed:bound.shadowed)
 
@@ -612,15 +605,13 @@ and in_record' state row ~whole =
   | REmpty -> Ok ()
   | RExtend (name, _, assigned, _, rest) ->
     let%bind.Result () =
-      unify_presence'
-        state
-        ~presence1:assigned
-        ~presence2:Type.Absent
-        ~error:(Unification_error.Assigned_in_record (name, whole))
+      unify_presence' state ~presence1:assigned ~presence2:Type.Absent
+      |> on_conflict ~error:(fun () ->
+        Unification_error.Assigned_in_record (name, whole))
     in
     in_record' state rest ~whole
   | RVar var ->
-    var.in_record <- true;
+    Type.Var.mark_in_record var;
     Ok ()
 
 and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
@@ -645,20 +636,15 @@ and unify_row_structure state ~row1 ~row2 =
       | _ -> Ok ()
     in
     let%bind.Result () =
-      unify_presence'
-        state
-        ~presence1:p1
-        ~presence2:p2
-        ~error:
-          (Unification_error.Row_mismatch
-             (row1, row2, presence_mismatch_reason x ~found:t2))
+      unify_presence' state ~presence1:p1 ~presence2:p2
+      |> on_conflict ~error:(fun () ->
+        Unification_error.Row_mismatch
+          (row1, row2, presence_mismatch_reason x ~found:t2))
     in
     let%bind.Result () =
-      unify_presence'
-        state
-        ~presence1:a1
-        ~presence2:a2
-        ~error:(Unification_error.Row_mismatch (row1, row2, Assigned x))
+      unify_presence' state ~presence1:a1 ~presence2:a2
+      |> on_conflict ~error:(fun () ->
+        Unification_error.Row_mismatch (row1, row2, Assigned x))
     in
     let%bind.Result () =
       match t2 with
@@ -668,11 +654,9 @@ and unify_row_structure state ~row1 ~row2 =
     unify_row' state ~row1:rest1 ~row2:rest2
   | REmpty, RExtend (x, p2, _, _, rest2) ->
     let%bind.Result () =
-      unify_presence'
-        state
-        ~presence1:Absent
-        ~presence2:p2
-        ~error:(Unification_error.Row_mismatch (row1, row2, Missing_label x))
+      unify_presence' state ~presence1:Absent ~presence2:p2
+      |> on_conflict ~error:(fun () ->
+        Unification_error.Row_mismatch (row1, row2, Missing_label x))
     in
     unify_row' state ~row1 ~row2:rest2
   | RVar var1, RVar var2 when phys_equal var1 var2 -> Ok ()
@@ -734,20 +718,15 @@ and constrain_row' state ~row ~bound ~shadowed =
           rewrite state name bound
         in
         let%bind.Result () =
-          presence_at_most'
-            state
-            ~presence:assigned
-            ~bound:bound_assigned
-            ~error:(Unification_error.Row_mismatch (row, bound, Assigned name))
+          presence_at_most' state ~presence:assigned ~bound:bound_assigned
+          |> on_conflict ~error:(fun () ->
+            Unification_error.Row_mismatch (row, bound, Assigned name))
         in
         let%bind.Result () =
-          presence_at_most'
-            state
-            ~presence
-            ~bound:bound_presence
-            ~error:
-              (Unification_error.Row_mismatch
-                 (row, bound, presence_mismatch_reason name ~found:bound_ty))
+          presence_at_most' state ~presence ~bound:bound_presence
+          |> on_conflict ~error:(fun () ->
+            Unification_error.Row_mismatch
+              (row, bound, presence_mismatch_reason name ~found:bound_ty))
         in
         (match bound_ty with
          | None -> Ok ()
@@ -767,42 +746,49 @@ and constrain_row' state ~row ~bound ~shadowed =
                 bound') -> Ok ()
      | _ ->
        record_in_bounds_of (fun iter -> Type.iter_row iter bound) (Row_var var);
-       var.bounds <- { row = bound; shadowed } :: var.bounds;
+       Type.Var.add_bound var { row = bound; shadowed };
        Ok ())
 
 (* Binding a variable passes its bounds on to what it is bound to. *)
-and unify_presence' state ~presence1 ~presence2 ~error =
+and unify_presence' state ~presence1 ~presence2
+  : (unit, Presence_error.t) Result.t
+  =
   match
     Type.canonical_presence presence1, Type.canonical_presence presence2
   with
   | Present, Present | Absent, Absent -> Ok ()
-  | Present, Absent | Absent, Present -> Error error
+  | Present, Absent | Absent, Present -> Error Conflict
   | PVar var1, PVar var2 when phys_equal var1 var2 -> Ok ()
   | PVar var, presence | presence, PVar var ->
     (match presence with
      | PVar var' ->
-       lower_presence var' ~rank:(Type.Var.rank_exn var);
+       Type.Var.lower_rank var' ~rank:(Type.Var.rank_exn var);
        add_in_bounds_of var' var.in_bounds_of
      | Present | Absent -> ());
-    let%bind.Result () = link var presence ~failed:presence in
+    let%bind.Result () =
+      link var presence ~failed:presence
+      |> Result.map_error ~f:Presence_error.unification
+    in
     let bounds = var.bounds in
-    var.bounds <- [];
+    Type.Var.set_bounds var [];
     let%map.Result () =
       List.fold_result bounds ~init:() ~f:(fun () -> function
-        | At_most bound -> presence_at_most' state ~presence ~bound ~error
+        | At_most bound -> presence_at_most' state ~presence ~bound
         | At_least lower ->
-          presence_at_most' state ~presence:lower ~bound:presence ~error
-        | If_present (ty1, ty2) -> unify_if_present' state ~presence ~ty1 ~ty2)
+          presence_at_most' state ~presence:lower ~bound:presence
+        | If_present (ty1, ty2) ->
+          unify_if_present' state ~presence ~ty1 ~ty2
+          |> Result.map_error ~f:Presence_error.unification)
     in
     (match Type.canonical_presence presence with
      | PVar var -> tidy var
      | Present | Absent -> ())
 
-and presence_at_most' state ~presence ~bound ~error =
+and presence_at_most' state ~presence ~bound =
   match Type.canonical_presence presence, Type.canonical_presence bound with
   | Absent, _ | _, Present -> Ok ()
   | Present, _ | _, Absent ->
-    unify_presence' state ~presence1:presence ~presence2:bound ~error
+    unify_presence' state ~presence1:presence ~presence2:bound
   | PVar lower, PVar upper when phys_equal lower upper -> Ok ()
   | PVar lower, PVar upper ->
     let has bounds ~side ~(other : (Type.presence, _) Type.Var.t) =
@@ -822,8 +808,8 @@ and presence_at_most' state ~presence ~bound ~error =
     in
     if not known
     then (
-      lower.bounds <- At_most (PVar upper) :: lower.bounds;
-      upper.bounds <- At_least (PVar lower) :: upper.bounds);
+      Type.Var.add_bound lower (At_most (PVar upper));
+      Type.Var.add_bound upper (At_least (PVar lower)));
     Ok ()
 
 (* The types of entries with [presence] matter only if it is [Present], so their
@@ -837,17 +823,15 @@ and unify_if_present' state ~presence ~ty1 ~ty2 =
     | Absent -> Ok ()
     | PVar _ when equal_if_present presence ty1 ty2 -> Ok ()
     | PVar _ when clash ty1 ty2 ->
-      unify_presence'
-        state
-        ~presence1:presence
-        ~presence2:Absent
-        ~error:(Type_mismatch (ty1, ty2, Structural_mismatch))
+      unify_presence' state ~presence1:presence ~presence2:Absent
+      |> on_conflict ~error:(fun () ->
+        Unification_error.Type_mismatch (ty1, ty2, Structural_mismatch))
       |> Result.map_error ~f:(fun error ->
         match unify_ty' state ~ty1 ~ty2 with
         | Ok () -> error
         | Error error -> error)
     | PVar var ->
-      var.bounds <- If_present (ty1, ty2) :: var.bounds;
+      Type.Var.add_bound var (If_present (ty1, ty2));
       List.iter [ ty1; ty2 ] ~f:(fun ty ->
         record_in_bounds_of
           (fun iter -> Type.iter_ty iter ty)
@@ -916,7 +900,7 @@ let fresh_modes_copy fresh ~rank top =
     | TVar { state = Generic; _ } | TRecord _ | TVariant _ -> None
     | TCon (name, args) ->
       let variances =
-        match Fresh.variances fresh name with
+        match (Fresh.cons fresh).variances name with
         | Some variances when List.length variances = List.length args ->
           variances
         | Some _ | None -> List.map args ~f:(fun _ -> Variance.Invariant)
@@ -970,7 +954,7 @@ let fresh_modes_copy fresh ~rank top =
       let copied =
         match copy target with
         | Some copied ->
-          link.state <- Link copied;
+          Type.Var.set_state link (Link copied);
           Some (Type.TVar link)
         | None when !used ->
           raise_s
@@ -997,9 +981,22 @@ let as_bound
   | result -> result
 ;;
 
+(* Which of [lower] and [upper] errors name as the expected type: [Upper], but
+   in a contravariant position. *)
+module Expected = struct
+  type t =
+    | Lower
+    | Upper
+
+  let flip = function
+    | Lower -> Upper
+    | Upper -> Lower
+  ;;
+end
+
 (* Relates by variance even while a side is unknown if [join], or either side is
    a join variable ([join_var]): then within it too. *)
-let rec sub_ty' state sub ~join ~flip ~lower ~upper
+let rec sub_ty' state sub ~join ~expected ~lower ~upper
   : (unit, Unification_error.t) Result.t
   =
   let rec is_join : Type.ty -> bool = function
@@ -1013,33 +1010,37 @@ let rec sub_ty' state sub ~join ~flip ~lower ~upper
     , Type.TVar { id = id2; state = Link _; _ } )
     when Sub_state.assume sub id1 id2 -> Ok ()
   | Type.TVar { state = Link _; _ }, Type.TVar { state = Link _; _ } ->
-    sub_structure state sub ~join ~flip ~lower ~upper
+    sub_structure state sub ~join ~expected ~lower ~upper
   | _ when Sub_state.seen sub lower upper -> Ok ()
-  | _ -> sub_structure state sub ~join ~flip ~lower ~upper
+  | _ -> sub_structure state sub ~join ~expected ~lower ~upper
 
-(* Errors name the expected type first, which is [upper] unless [flip]: in a
-   contravariant position, the expected type's part is [lower]. *)
-and sub_structure state sub ~join ~flip ~lower ~upper =
+and sub_structure state sub ~join ~expected:side ~lower ~upper =
   let ty1 = Type.canonical_ty lower in
   let ty2 = Type.canonical_ty upper in
-  let expected, actual = if flip then ty1, ty2 else ty2, ty1 in
+  let expected, actual =
+    match side with
+    | Expected.Lower -> ty1, ty2
+    | Upper -> ty2, ty1
+  in
   let modes_error error = modes_error expected actual error in
-  let co ~lower ~upper = sub_ty' state sub ~join ~flip ~lower ~upper in
+  let co ~lower ~upper = sub_ty' state sub ~join ~expected:side ~lower ~upper in
   let contra ~lower ~upper =
-    sub_ty' state sub ~join ~flip:(not flip) ~lower ~upper
+    sub_ty' state sub ~join ~expected:(Expected.flip side) ~lower ~upper
   in
   (* Exact unification, naming the expected type first. *)
   let unify_ty ~lower ~upper =
-    if flip
-    then unify_ty' state ~ty1:lower ~ty2:upper
-    else unify_ty' state ~ty1:upper ~ty2:lower
+    match side with
+    | Lower -> unify_ty' state ~ty1:lower ~ty2:upper
+    | Upper -> unify_ty' state ~ty1:upper ~ty2:lower
   in
   let mode_arg (variance : Variance.t) mode1 mode2 =
     (match variance with
      | Covariant -> Mode_arg.sub ~lower:mode1 ~upper:mode2
      | Contravariant -> Mode_arg.sub ~lower:mode2 ~upper:mode1
      | Invariant | Bivariant ->
-       if flip then Mode_arg.equate mode1 mode2 else Mode_arg.equate mode2 mode1)
+       (match side with
+        | Lower -> Mode_arg.equate mode1 mode2
+        | Upper -> Mode_arg.equate mode2 mode1))
     |> Result.map_error ~f:modes_error
   in
   (* [var], not bound yet, takes [ty]'s structure with modes and variables of
@@ -1068,15 +1069,22 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
   | _, TVar ({ state = Unbound _; _ } as var) when join -> bind_copy var ty1
   | TCon (name1, args1), TCon (name2, args2)
     when String.equal name1 name2 && List.length args1 = List.length args2 ->
-    let known, variances =
-      match Fresh.variances state.fresh name1 with
+    let%bind.Result known, variances =
+      match (Fresh.cons state.fresh).variances name1 with
       | Some variances when List.length variances = List.length args1 ->
-        true, variances
-      | Some _ | None -> false, List.map args1 ~f:(fun _ -> Variance.Invariant)
+        Ok (true, variances)
+      | Some variances ->
+        Error
+          (Unification_error.Type_mismatch
+             ( expected
+             , actual
+             , Args_length_mismatch (List.length variances, List.length args1)
+             ))
+      | None -> Ok (false, List.map args1 ~f:(fun _ -> Variance.Invariant))
     in
     let unknown_variances : Unification_error.t -> Unification_error.t
       = function
-      | (Type_mismatch (_, _, Modes error) | Bound_var error) when not known ->
+      | Type_mismatch (_, _, Modes error) when not known ->
         Type_mismatch (expected, actual, Unknown_variances (name1, error))
       | error -> error
     in
@@ -1105,9 +1113,9 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
   | ( TCode { inner = inner1; context = row1 }
     , TCode { inner = inner2; context = row2 } ) ->
     let%bind.Result () = co ~lower:inner1 ~upper:inner2 in
-    if flip
-    then unify_row' state ~row1 ~row2
-    else unify_row' state ~row1:row2 ~row2:row1
+    (match side with
+     | Lower -> unify_row' state ~row1 ~row2
+     | Upper -> unify_row' state ~row1:row2 ~row2:row1)
   | _ -> unify_ty ~lower:ty1 ~upper:ty2
 
 (* [lower <= upper], kept on both until either is bound to a structure, then
@@ -1143,29 +1151,26 @@ and edges fresh ~join (var : Sub_edge.var) =
       ; join
       }
     in
-    let watchers = var.watchers in
-    undoably
-      ~undo:(fun () -> var.watchers <- watchers)
-      (fun () ->
-        var.watchers
-        <- Watcher.create
-             Sub_edge.key
-             state
-             ~bind:(fun state ty ->
-               match Type.canonical_ty ty with
-               | TVar ({ state = Unbound _; _ } as other) ->
-                 let other_state = edges fresh ~join:state.join other in
-                 if state.join && not other_state.join
-                 then (
-                   Mode.Private.Undo.record (fun () ->
-                     other_state.join <- false);
-                   other_state.join <- true);
-                 Sub_edge.merge_edges state other_state;
-                 Ok ()
-               | _ -> Fresh.settle fresh (fun () -> settle fresh state))
-             ~instantiate:(fun (_ : Sub_edge.State.t) ~at:_ -> None)
-             ~generalize:(fun (_ : Sub_edge.State.t) -> fix fresh var)
-           :: watchers);
+    Type.Var.set_watchers
+      var
+      (Watcher.create
+         Sub_edge.key
+         state
+         ~bind:(fun state ty ->
+           match Type.canonical_ty ty with
+           | TVar ({ state = Unbound _; _ } as other) ->
+             let other_state = edges fresh ~join:state.join other in
+             if state.join && not other_state.join
+             then
+               Mode.Private.Undo.change
+                 ~undo:(fun () -> other_state.join <- false)
+                 (fun () -> other_state.join <- true);
+             Sub_edge.merge_edges state other_state;
+             Ok ()
+           | _ -> Fresh.settle fresh (fun () -> settle fresh state))
+         ~instantiate:(fun (_ : Sub_edge.State.t) ~at:_ -> None)
+         ~generalize:(fun (_ : Sub_edge.State.t) -> fix fresh var)
+       :: var.watchers);
     state
 
 (* Each edge is settled once: it is in the lists of both its sides, which may be
@@ -1179,14 +1184,15 @@ and settle fresh (state : Sub_edge.State.t) =
     if edge.settled
     then result
     else (
-      Mode.Private.Undo.record (fun () -> edge.settled <- false);
-      edge.settled <- true;
+      Mode.Private.Undo.change
+        ~undo:(fun () -> edge.settled <- false)
+        (fun () -> edge.settled <- true);
       let settled =
         sub_ty'
           (State.create fresh)
           (Sub_state.create ())
           ~join:true
-          ~flip:false
+          ~expected:Upper
           ~lower:edge.lower
           ~upper:edge.upper
         |> as_bound
@@ -1221,7 +1227,7 @@ let sub_ty fresh ~lower ~upper =
     (State.create fresh)
     (Sub_state.create ())
     ~join:false
-    ~flip:false
+    ~expected:Upper
     ~lower
     ~upper
 ;;
@@ -1239,16 +1245,12 @@ let unify_row fresh ~row1 ~row2 = unify_row' (State.create fresh) ~row1 ~row2
 (* Making a presence [Absent] drops its equalities and only makes others
    [Absent], so fails only if one is [Present]. *)
 let make_absent fresh presence ~error =
-  unify_presence'
-    (State.create fresh)
-    ~presence1:presence
-    ~presence2:Absent
-    ~error:(Row_mismatch (REmpty, REmpty, Presence_mismatch ""))
-  |> Result.map_error ~f:(fun (_ : Unification_error.t) -> error)
+  unify_presence' (State.create fresh) ~presence1:presence ~presence2:Absent
+  |> Result.map_error ~f:(fun (_ : Presence_error.t) -> error)
 ;;
 
-let presence_at_most fresh ~presence ~bound ~error =
-  presence_at_most' (State.create fresh) ~presence ~bound ~error
+let presence_at_most fresh ~presence ~bound =
+  presence_at_most' (State.create fresh) ~presence ~bound
 ;;
 
 let unify_if_present fresh ~presence ~ty1 ~ty2 =
@@ -1271,25 +1273,19 @@ let present_entry ?(assigned = false) fresh ~row ~name ~rank =
       Type.TVar (Fresh.var fresh ~rank))
   in
   let%bind.Result () =
-    unify_presence'
-      state
-      ~presence1:Present
-      ~presence2:presence
-      ~error:
-        (Unification_error.Row_mismatch
-           ( RExtend (name, Present, assigned', ty, REmpty)
-           , row
-           , presence_mismatch_reason name ~found ))
+    unify_presence' state ~presence1:Present ~presence2:presence
+    |> on_conflict ~error:(fun () ->
+      Unification_error.Row_mismatch
+        ( RExtend (name, Present, assigned', ty, REmpty)
+        , row
+        , presence_mismatch_reason name ~found ))
   in
   if assigned
   then
-    unify_presence'
-      state
-      ~presence1:Present
-      ~presence2:assigned'
-      ~error:
-        (Unification_error.Row_mismatch
-           (RExtend (name, Present, Present, ty, REmpty), row, Assigned name))
+    unify_presence' state ~presence1:Present ~presence2:assigned'
+    |> on_conflict ~error:(fun () ->
+      Unification_error.Row_mismatch
+        (RExtend (name, Present, Present, ty, REmpty), row, Assigned name))
     |> Result.map ~f:(fun () -> ty)
   else Ok ty
 ;;

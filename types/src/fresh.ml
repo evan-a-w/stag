@@ -1,28 +1,43 @@
 open! Import
 
+module Cons = struct
+  type t =
+    { value_parameters : Value_layout.parameters
+    ; variances : Variance.of_con
+    }
+
+  let conservative =
+    { value_parameters = (fun _ -> None); variances = (fun _ -> None) }
+  ;;
+end
+
 type t =
   { mutable next_id : int
-  ; mutable value_parameters : Value_layout.parameters
-  ; mutable variances : Variance.of_con
+  ; mutable cons : Cons.t option
   ; modes : Mode.Id_source.t
   ; mutable settling :
       (unit -> (unit, Unification_error.t) Result.t) Queue.t option
   }
 
-let create () =
-  { next_id = 0
-  ; value_parameters = (fun _ -> None)
-  ; variances = (fun _ -> None)
-  ; modes = Mode.Id_source.create ()
-  ; settling = None
-  }
+let make cons =
+  { next_id = 0; cons; modes = Mode.Id_source.create (); settling = None }
 ;;
 
+let create () = make None
+let conservative () = make (Some Cons.conservative)
 let modes t = t.modes
-let set_value_parameters t f = t.value_parameters <- f
-let value_parameters t = t.value_parameters
-let set_variances t f = t.variances <- f
-let variances t = t.variances
+let set_cons t cons = t.cons <- Some cons
+
+let cons t =
+  match t.cons with
+  | Some cons -> cons
+  | None ->
+    raise_s
+      [%message
+        "Fresh.cons: no type env was created with it (without one, make it \
+         with [Fresh.conservative])"]
+;;
+
 let next_id t = t.next_id
 
 let settle t f =
@@ -57,7 +72,7 @@ let var t ~rank = Type.Var.create (id t) (Unbound rank)
 
 let mark_in_record row =
   Option.iter (Type.tail_var row) ~f:(fun (var : _ Type.Var.t) ->
-    var.in_record <- true)
+    Type.Var.mark_in_record var)
 ;;
 
 let record t row =

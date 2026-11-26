@@ -118,7 +118,7 @@ let f x =
   [%expect
     {|
     ((members
-      (((ident f/4) (args (x/13)) (scheme "'a -> int * int")
+      (((ident f/4) (kind (Function (x/13))) (scheme "'a -> int * int")
         (body
          (Let (ident x/14) (args ()) (generalized true)
           (body (Lit (Int 1) : int))

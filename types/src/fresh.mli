@@ -6,16 +6,32 @@ open! Import
     meet. *)
 type t
 
+(** What is known of the type constructors of its types. *)
+module Cons : sig
+  type t =
+    { value_parameters : Value_layout.parameters
+    ; variances : Variance.of_con
+    }
+
+  (** Of none: those of every parameter are taken to be stored by value and
+      invariant. *)
+  val conservative : t
+end
+
+(** Its [cons] are set by each [Type_env] created with it, and raise if read
+    before. *)
 val create : unit -> t
-val id : t -> Type.id
+
+(** For types built without a [Type_env]: its [cons] are [Cons.conservative]. *)
+val conservative : unit -> t
+
+val id : t -> Type.Id.t
 
 (** What [id] gives next, without taking it. *)
-val next_id : t -> Type.id
+val next_id : t -> Type.Id.t
 
-val set_value_parameters : t -> Value_layout.parameters -> unit
-val value_parameters : t -> Value_layout.parameters
-val set_variances : t -> Variance.of_con -> unit
-val variances : t -> Variance.of_con
+val set_cons : t -> Cons.t -> unit
+val cons : t -> Cons.t
 
 (** Runs [f], unless within another [settle]: then once what that one runs is
     done, so watchers binding variables whose watchers bind others don't nest.
@@ -30,7 +46,7 @@ val settle
 val modes : t -> Mode.Id_source.t
 
 (** An [Unbound] variable with a fresh id. *)
-val var : t -> rank:Type.rank -> (_, _) Type.Var.t
+val var : t -> rank:Type.Rank.t -> (_, _) Type.Var.t
 
 (** A record or variant with a fresh id. Its row's variable gets [in_record]:
     its entries must not be [assigned] already ([Unify.in_record] checks that). *)

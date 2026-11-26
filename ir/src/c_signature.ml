@@ -5,7 +5,7 @@ module Arg = struct
     | Int
     | Bool
     | Char
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of, equal, compare, hash]
 end
 
 module Result = struct
@@ -14,14 +14,14 @@ module Result = struct
     | Bool
     | Char
     | Unit
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of, equal, compare, hash]
 end
 
 type t =
   { args : Arg.t list
   ; result : Result.t
   }
-[@@deriving sexp_of, equal]
+[@@deriving sexp_of, equal, compare, hash]
 
 let arity t = Int.max 1 (List.length t.args)
 

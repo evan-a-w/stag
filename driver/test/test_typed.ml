@@ -16,7 +16,7 @@ let f x =
   [%expect
     {|
     ((members
-      (((ident f/4) (args (x/13)) (scheme "'a -> int * int")
+      (((ident f/4) (kind (Function (x/13))) (scheme "'a -> int * int")
         (body
          (Let (ident x/14) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
@@ -48,7 +48,7 @@ let use = let pair x = (x, x) in (id 1, id true, pair (), pair)
   [%expect
     {|
     ((members
-      (((ident use/4) (args ())
+      (((ident use/4) (kind Value)
         (scheme "int * bool * (unit * unit) * ('_a -> '_a * '_a)")
         (body
          (Let (ident pair/14) (args (x/13)) (generalized true)
@@ -88,35 +88,39 @@ let get r = r.M.x
   [%expect
     {|
     ((members
-      (((ident M.in_m/4) (args ()) (scheme M.t)
+      (((ident M.in_m/4) (kind Value) (scheme M.t)
         (body
          (Construct ((type_name M.t) (name M.C) (index 2))
           ((Lit (Bool true) : bool) (Lit (Int 1) : int)) : M.t))))))
     ((members
-      (((ident outside/5) (args (v/15)) (scheme "M.t -> M.r")
+      (((ident outside/5) (kind (Function (v/15))) (scheme "M.t -> M.r")
         (body
          (Match (scrutinee (Var (Bound (Local v/15)) : M.t))
           (cases
            (((Construct ((type_name M.t) (name M.A) (index 0)) () : M.t)
-             (Record
-              ((((type_name M.r) (name M.y) (index 1)) (Lit (Bool true) : bool))
-               (((type_name M.r) (name M.x) (index 0)) (Lit (Int 1) : int)))
+             (Record (record M.r)
+              (fields
+               ((((type_name M.r) (name M.y) (index 1)) (Lit (Bool true) : bool))
+                (((type_name M.r) (name M.x) (index 0)) (Lit (Int 1) : int))))
               : M.r))
             ((Construct ((type_name M.t) (name M.B) (index 1)) ((Var n/16 : int))
               : M.t)
-             (Record
-              ((((type_name M.r) (name M.x) (index 0))
-                (Var (Bound (Local n/16)) : int))
-               (((type_name M.r) (name M.y) (index 1)) (Lit (Bool false) : bool)))
+             (Record (record M.r)
+              (fields
+               ((((type_name M.r) (name M.x) (index 0))
+                 (Var (Bound (Local n/16)) : int))
+                (((type_name M.r) (name M.y) (index 1))
+                 (Lit (Bool false) : bool))))
               : M.r))
             ((Construct ((type_name M.t) (name M.C) (index 2))
               ((Any : bool) (Lit (Int 2) : int)) : M.t)
              (Let (ident r/17) (args ()) (generalized true)
               (body
-               (Record
-                ((((type_name M.r) (name M.x) (index 0)) (Lit (Int 2) : int))
-                 (((type_name M.r) (name M.y) (index 1))
-                  (Lit (Bool true) : bool)))
+               (Record (record M.r)
+                (fields
+                 ((((type_name M.r) (name M.x) (index 0)) (Lit (Int 2) : int))
+                  (((type_name M.r) (name M.y) (index 1))
+                   (Lit (Bool true) : bool))))
                 : M.r))
               (in_
                (Match (scrutinee (Var (Bound (Local r/17)) : M.r))
@@ -129,7 +133,7 @@ let get r = r.M.x
               : M.r))))
           : M.r))))))
     ((members
-      (((ident get/6) (args (r/19)) (scheme "M.r -> int")
+      (((ident get/6) (kind (Function (r/19))) (scheme "M.r -> int")
         (body
          (Field (Var (Bound (Local r/19)) : M.r)
           ((type_name M.r) (name M.x) (index 0)) : int))))))
@@ -147,7 +151,7 @@ let open_ r = match r with {`a = a; ..} -> a
   [%expect
     {|
     ((members
-      (((ident ops/4) (args (r/15))
+      (((ident ops/4) (kind (Function (r/15)))
         (scheme
          "{`a : 'a; `b : 'b; ..'c} -> 'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}")
         (body
@@ -166,7 +170,7 @@ let open_ r = match r with {`a = a; ..} -> a
           :
           "'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}"))))))
     ((members
-      (((ident rest/5) (args (r/16))
+      (((ident rest/5) (kind (Function (r/16)))
         (scheme "{`a : 'a; `b : 'b; ..'c} -> 'a * {..'c}")
         (body
          (Match
@@ -180,7 +184,7 @@ let open_ r = match r with {`a = a; ..} -> a
               : "'a * {..'c}"))))
           : "'a * {..'c}"))))))
     ((members
-      (((ident open_/6) (args (r/19)) (scheme "{`a : 'a; ..'b} -> 'a")
+      (((ident open_/6) (kind (Function (r/19))) (scheme "{`a : 'a; ..'b} -> 'a")
         (body
          (Match (scrutinee (Var (Bound (Local r/19)) : "{`a : 'a; ..'b}"))
           (cases
@@ -208,14 +212,15 @@ let handle v = match v with `A -> 0 | `B n -> n | other -> 2
   [%expect
     {|
     ((members
-      (((ident tags/4) (args ()) (scheme "[`A; ..'a] * [`B of int; ..'b]")
+      (((ident tags/4) (kind Value) (scheme "[`A; ..'a] * [`B of int; ..'b]")
         (body
          (Tuple
           ((Poly_variant A () : "[`A; ..'a]")
            (Poly_variant B ((Lit (Int 1) : int)) : "[`B of int; ..'b]"))
           : "[`A; ..'a] * [`B of int; ..'b]"))))))
     ((members
-      (((ident handle/5) (args (v/14)) (scheme "[`A | `B of int; ..'a] -> int")
+      (((ident handle/5) (kind (Function (v/14)))
+        (scheme "[`A | `B of int; ..'a] -> int")
         (body
          (Match (scrutinee (Var (Bound (Local v/14)) : "[`A | `B of int; ..'a]"))
           (cases
@@ -240,7 +245,7 @@ let nested = .<.<add x 1>.>.
   [%expect
     {|
     ((members
-      (((ident closed/4) (args ()) (scheme <int>{..'a})
+      (((ident closed/4) (kind Value) (scheme <int>{..'a})
         (body
          (Quote
           (Let (ident y/14) (args ()) (generalized true)
@@ -248,7 +253,7 @@ let nested = .<.<add x 1>.>.
            int)
           : <int>{..'a}))))))
     ((members
-      (((ident nested/5) (args ()) (scheme "<<int>{x : int; ..'a}>{..'b}")
+      (((ident nested/5) (kind Value) (scheme "<<int>{x : int; ..'a}>{..'b}")
         (body
          (Quote
           (Quote
@@ -275,22 +280,24 @@ let local_not_persistent = let k = 1 in .<k>.
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
-      (((ident not_persistent/5) (args ()) (scheme <int>{..'a})
+      (((ident n/4) (kind Value) (scheme int) (body (Lit (Int 3) : int))))))
+    ((members
+      (((ident not_persistent/5) (kind Value) (scheme <int>{..'a})
         (body (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{..'a}))))))
     ((members
-      (((ident persistent/6) (args ()) (scheme <int>{..'a})
+      (((ident persistent/6) (kind Value) (scheme <int>{..'a})
         (body
          (Quote
           (App (Var (Persistent (Toplevel id/3)) : "int -> int")
            (Lit (Int 1) : int) : int)
           : <int>{..'a}))))))
     ((members
-      (((ident outer_arg/7) (args (x/18)) (scheme "'a -> <'b>{x : 'b; ..'c}")
+      (((ident outer_arg/7) (kind (Function (x/18)))
+        (scheme "'a -> <'b>{x : 'b; ..'c}")
         (body (Quote (Var (Free x) : 'b) : "<'b>{x : 'b; ..'c}"))))))
     ((members
-      (((ident local_persistent/8) (args (n/19))
+      (((ident local_persistent/8) (kind (Function (n/19)))
         (scheme "int -> <'a>{g : int -> 'a; ..'b}")
         (body
          (Let (ident g/21) (args (x/20)) (generalized true)
@@ -304,7 +311,7 @@ let local_not_persistent = let k = 1 in .<k>.
             "<'a>{g : int -> 'a; ..'b}"))
           : "<'a>{g : int -> 'a; ..'b}"))))))
     ((members
-      (((ident local_not_persistent/9) (args ()) (scheme <int>{..'a})
+      (((ident local_not_persistent/9) (kind Value) (scheme <int>{..'a})
         (body
          (Let (ident k/22) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
@@ -320,7 +327,7 @@ let explicit = .<let x = 1 in .~(.<add x y>.).{x; y = z}>.
   [%expect
     {|
     ((members
-      (((ident explicit/4) (args ()) (scheme "<int>{z : int; ..'a}")
+      (((ident explicit/4) (kind Value) (scheme "<int>{z : int; ..'a}")
         (body
          (Quote
           (Let (ident x/13) (args ()) (generalized true)
@@ -355,7 +362,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
   [%expect
     {|
     ((members
-      (((ident bound/4) (args ()) (scheme <int>{..'a})
+      (((ident bound/4) (kind Value) (scheme <int>{..'a})
         (body
          (Quote
           (Let (ident x/16) (args ()) (generalized true)
@@ -374,7 +381,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
           : <int>{..'a}))
         (where "..'_b <= {..'a}")))))
     ((members
-      (((ident propagates/5) (args ()) (scheme "<int>{x : int; ..'a}")
+      (((ident propagates/5) (kind Value) (scheme "<int>{x : int; ..'a}")
         (body
          (Quote
           (Splice
@@ -389,7 +396,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
           : "<int>{x : int; ..'a}"))
         (where "..'_b <= {x : int; ..'a}")))))
     ((members
-      (((ident tail/6) (args (c/17))
+      (((ident tail/6) (kind (Function (c/17)))
         (scheme
          "<'a>{f?'b : immut 'c -> 'c; y?'d : immut int; ..'e} -> <'a>{..'f}")
         (body
@@ -414,7 +421,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
           : <'a>{..'f}))
         (where "..'e <= {..'f}")))))
     ((members
-      (((ident later_level/7) (args (c/22))
+      (((ident later_level/7) (kind (Function (c/22)))
         (scheme "<<'a>{y?'b : immut int; ..'c}>{-y; ..'d} -> <<'a>{..'e}>{..'f}")
         (body
          (Quote
@@ -464,12 +471,13 @@ let closed = .~(.<1>.)
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
-      (((ident m/5) (args ()) (scheme int)
+      (((ident n/4) (kind Value) (scheme int) (body (Lit (Int 3) : int))))))
+    ((members
+      (((ident m/5) (kind Value) (scheme int)
         (body (Var (Bound (Toplevel n/4)) : int))))))
     ((members
-      (((ident f/6) (args (x/16)) (scheme "int -> int")
+      (((ident f/6) (kind (Function (x/16))) (scheme "int -> int")
         (body
          (Toplevel_splice
           (code
@@ -494,7 +502,7 @@ let closed = .~(.<1>.)
             : int))
           : int))))))
     ((members
-      (((ident closed/7) (args ()) (scheme int)
+      (((ident closed/7) (kind Value) (scheme int)
         (body
          (Toplevel_splice (code (Quote (Lit (Int 1) : int) : <int>{}))
           (expansion (Lit (Int 1) : int)) : int))))))
@@ -516,7 +524,7 @@ let gen n = forget n in .<let _ = gen in n>.
   [%expect
     {|
     ((members
-      (((ident even/5) (args (n/18)) (scheme "int -> bool")
+      (((ident even/5) (kind (Function (n/18))) (scheme "int -> bool")
         (body
          (App
           (App
@@ -530,7 +538,7 @@ let gen n = forget n in .<let _ = gen in n>.
           (App (Var (Bound (Toplevel odd/6)) : "int -> bool")
            (Var (Bound (Local n/18)) : int) : bool)
           : bool)))
-       ((ident odd/6) (args (n/19)) (scheme "int -> bool")
+       ((ident odd/6) (kind (Function (n/19))) (scheme "int -> bool")
         (body
          (App
           (App
@@ -545,16 +553,18 @@ let gen n = forget n in .<let _ = gen in n>.
            (Var (Bound (Local n/19)) : int) : bool)
           : bool))))))
     ((members
-      (((ident main/4) (args ()) (scheme bool)
+      (((ident main/4) (kind Value) (scheme bool)
         (body
          (App (Var (Bound (Toplevel even/5)) : "int -> bool") (Lit (Int 3) : int)
           : bool))))))
-    ((members (((ident b/8) (args ()) (scheme int) (body (Lit (Int 1) : int))))))
     ((members
-      (((ident a/7) (args ()) (scheme int)
+      (((ident b/8) (kind Value) (scheme int) (body (Lit (Int 1) : int))))))
+    ((members
+      (((ident a/7) (kind Value) (scheme int)
         (body (Var (Bound (Toplevel b/8)) : int))))))
     ((members
-      (((ident gen/9) (args (n/20)) (scheme "'a -> <'b>{n : 'b; ..'c}")
+      (((ident gen/9) (kind (Function (n/20)))
+        (scheme "'a -> <'b>{n : 'b; ..'c}")
         (body
          (Quote
           (Let (ident _/21) (args ()) (generalized false)
@@ -577,7 +587,8 @@ let captured x = .~(.<captured x>.)
   [%expect
     {|
     ((members
-      (((ident gen/4) (args (n/17)) (scheme "'a -> <'b>{n : 'b; ..'c}")
+      (((ident gen/4) (kind (Function (n/17)))
+        (scheme "'a -> <'b>{n : 'b; ..'c}")
         (body
          (Quote
           (Let (ident _/18) (args ()) (generalized false)
@@ -586,7 +597,7 @@ let captured x = .~(.<captured x>.)
            (in_ (Var (Free n) : 'b)) : 'b)
           : "<'b>{n : 'b; ..'c}"))))))
     ((members
-      (((ident b/6) (args ()) (scheme <int>{..'a})
+      (((ident b/6) (kind Value) (scheme <int>{..'a})
         (body
          (Quote
           (Let (ident _/20) (args ()) (generalized false)
@@ -594,7 +605,7 @@ let captured x = .~(.<captured x>.)
            (in_ (Lit (Int 2) : int)) : int)
           : <int>{..'a}))))))
     ((members
-      (((ident a/5) (args ()) (scheme <int>{..'a})
+      (((ident a/5) (kind Value) (scheme <int>{..'a})
         (body
          (Quote
           (Let (ident _/19) (args ()) (generalized true)
@@ -602,12 +613,12 @@ let captured x = .~(.<captured x>.)
            (in_ (Lit (Int 1) : int)) : int)
           : <int>{..'a}))))))
     ((members
-      (((ident loop/7) (args (x/21)) (scheme "'a -> 'b")
+      (((ident loop/7) (kind (Function (x/21))) (scheme "'a -> 'b")
         (body
          (App (Var (Bound (Toplevel loop/7)) : "'a -> 'b")
           (Var (Bound (Local x/21)) : 'a) : 'b))))))
     ((members
-      (((ident captured/8) (args (x/22)) (scheme "'a -> 'b")
+      (((ident captured/8) (kind (Function (x/22))) (scheme "'a -> 'b")
         (body
          (Toplevel_splice
           (code
@@ -629,7 +640,8 @@ let lits s = match s with "\0000" -> ('\000', "\0003")
   [%expect
     {|
     ((members
-      (((ident lits/4) (args (s/13)) (scheme "string -> char * string")
+      (((ident lits/4) (kind (Function (s/13)))
+        (scheme "string -> char * string")
         (body
          (Match (scrutinee (Var (Bound (Local s/13)) : string))
           (cases
@@ -652,9 +664,10 @@ let n_shadowed = let n = 1 in .~(.<n>.)
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
-      (((ident persistent_local/5) (args ()) (scheme <int>{..'_a})
+      (((ident n/4) (kind Value) (scheme int) (body (Lit (Int 3) : int))))))
+    ((members
+      (((ident persistent_local/5) (kind Value) (scheme <int>{..'_a})
         (body
          (Quote
           (Let (ident f/18) (args (x/17)) (generalized true)
@@ -674,7 +687,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
           : <int>{..'_a}))
         (where "..'_c <= {..'_a}")))))
     ((members
-      (((ident outside_binder/6) (args ()) (scheme <int>{..'a})
+      (((ident outside_binder/6) (kind Value) (scheme <int>{..'a})
         (body
          (Let (ident x/19) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
@@ -687,7 +700,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
           : <int>{..'a}))
         (where "..'_b <= {..'a}")))))
     ((members
-      (((ident shadowed/7) (args (c/20))
+      (((ident shadowed/7) (kind (Function (c/20)))
         (scheme "<'a>{x?'b : immut int; ..'c} -> <'a>{..'d}")
         (body
          (Quote
@@ -705,7 +718,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
           : <'a>{..'d}))
         (where "..'c <= {..'d}")))))
     ((members
-      (((ident n_shadowed/8) (args ()) (scheme int)
+      (((ident n_shadowed/8) (kind Value) (scheme int)
         (body
          (Let (ident n/23) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
@@ -734,9 +747,10 @@ let deep =
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
-      (((ident deep/5) (args ()) (scheme int)
+      (((ident n/4) (kind Value) (scheme int) (body (Lit (Int 3) : int))))))
+    ((members
+      (((ident deep/5) (kind Value) (scheme int)
         (body
          (Toplevel_splice
           (code
@@ -786,9 +800,10 @@ let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
-      (((ident deep/5) (args ()) (scheme int)
+      (((ident n/4) (kind Value) (scheme int) (body (Lit (Int 3) : int))))))
+    ((members
+      (((ident deep/5) (kind Value) (scheme int)
         (body
          (Toplevel_splice
           (code
@@ -824,12 +839,12 @@ let at_toplevel = .~(forget n in .<String.append n y>.).{n; y = "1"}
   [%expect
     {|
     ((members
-      (((ident n/4) (args ()) (scheme string)
+      (((ident n/4) (kind Value) (scheme string)
         (body
          (App (Var (Prim Int.to_string) : "int -> string") (Lit (Int 3) : int) :
           string))))))
     ((members
-      (((ident persistent_shorthand/5) (args ()) (scheme <int>{..'a})
+      (((ident persistent_shorthand/5) (kind Value) (scheme <int>{..'a})
         (body
          (Let (ident f/16) (args (y/15)) (generalized true)
           (body (Var (Bound (Local y/15)) : 'b))
@@ -851,7 +866,7 @@ let at_toplevel = .~(forget n in .<String.append n y>.).{n; y = "1"}
             : <int>{..'a}))
           : <int>{..'a}))))))
     ((members
-      (((ident at_toplevel/6) (args ()) (scheme string)
+      (((ident at_toplevel/6) (kind Value) (scheme string)
         (body
          (Toplevel_splice
           (code
@@ -883,7 +898,7 @@ let in_quote = let f x = forget f, x in .<f x>. in .<f>.
   [%expect
     {|
     ((members
-      (((ident direct/4) (args (y/14)) (scheme "'a -> 'b")
+      (((ident direct/4) (kind (Function (y/14))) (scheme "'a -> 'b")
         (body
          (Let (ident f/16) (args (x/15)) (generalized true)
           (body
@@ -894,7 +909,7 @@ let in_quote = let f x = forget f, x in .<f x>. in .<f>.
             (Var (Bound (Local y/14)) : 'a) : 'b))
           : 'b))))))
     ((members
-      (((ident in_quote/5) (args ())
+      (((ident in_quote/5) (kind Value)
         (scheme "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")
         (body
          (Let (ident f/18) (args (x/17)) (generalized true)
@@ -917,7 +932,7 @@ let first p = match p with (a, _) -> (a : int)
   [%expect
     {|
     ((members
-      (((ident first/4) (args (p/13)) (scheme "int * 'a -> int")
+      (((ident first/4) (kind (Function (p/13))) (scheme "int * 'a -> int")
         (body
          (Match (scrutinee (Var (Bound (Local p/13)) : "int * 'a"))
           (cases
@@ -939,12 +954,12 @@ let c = .< f >.
   [%expect
     {|
     ((members
-      (((ident c/5) (args ()) (scheme "<int -> int>{..'a}")
+      (((ident c/5) (kind Value) (scheme "<int -> int>{..'a}")
         (body
          (Quote (Var (Persistent (Toplevel f/4)) : "int -> int") :
           "<int -> int>{..'a}"))))))
     ((members
-      (((ident f/4) (args (x/14)) (scheme "int -> int")
+      (((ident f/4) (kind (Function (x/14))) (scheme "int -> int")
         (body
          (Toplevel_splice
           (code

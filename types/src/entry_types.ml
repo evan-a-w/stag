@@ -25,23 +25,25 @@ let same_equality (ty1, ty2) (ty1', ty2') =
 
 let dedup_presence_bounds (var : Presence_var.t) =
   var.bounds
-  <- List.fold var.bounds ~init:[] ~f:(fun acc (bound : Type.presence_bound) ->
-       match bound with
-       | If_present (ty1, ty2)
-         when Type.same_ty ty1 ty2
-              || List.exists acc ~f:(function
-                | Type.If_present (ty1', ty2') ->
-                  same_equality (ty1, ty2) (ty1', ty2')
-                | At_most _ | At_least _ -> false) -> acc
-       | If_present _ | At_most _ | At_least _ -> bound :: acc)
-     |> List.rev
+  |> List.fold ~init:[] ~f:(fun acc (bound : Type.presence_bound) ->
+    match bound with
+    | If_present (ty1, ty2)
+      when Type.same_ty ty1 ty2
+           || List.exists acc ~f:(function
+             | Type.If_present (ty1', ty2') ->
+               same_equality (ty1, ty2) (ty1', ty2')
+             | At_most _ | At_least _ -> false) -> acc
+    | If_present _ | At_most _ | At_least _ -> bound :: acc)
+  |> List.rev
+  |> Type.Var.set_bounds var
 ;;
 
 let dedup_row_bounds (var : (Type.row, Type.bound) Type.Var.t) =
   var.bounds
-  <- List.fold var.bounds ~init:[] ~f:(fun acc bound ->
-       if List.exists acc ~f:(Type.same_bound bound) then acc else bound :: acc)
-     |> List.rev
+  |> List.fold ~init:[] ~f:(fun acc bound ->
+    if List.exists acc ~f:(Type.same_bound bound) then acc else bound :: acc)
+  |> List.rev
+  |> Type.Var.set_bounds var
 ;;
 
 let same_kept (kept1 : Type.kept) (kept2 : Type.kept) =
@@ -175,7 +177,7 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
       then (
         List.iter !other_vars ~f:(Hash_set.add frozen);
         Hash_set.add frozen var.id;
-        var.state <- Link other)
+        Type.Var.set_state var (Link other))
     | Generic | Unbound _ | Link _ -> ())
 ;;
 

@@ -370,7 +370,7 @@ module Expr = struct
           }
       | Assign of Var_ref.t * 'e
       | Fun of
-          { args : Ident.t list
+          { args : Ident.t Nonempty_list.t
           ; annots : (Ident.t * Syntax.Annot.t) list [@sexp.list]
           ; body : 'e
           }
@@ -388,7 +388,10 @@ module Expr = struct
       | Tuple of 'e list
       | Deref of 'e
       | Construct of Constructor_ref.t * 'e list
-      | Record of (Field_ref.t * 'e) list
+      | Record of
+          { record : Record_type.t
+          ; fields : (Field_ref.t * 'e) list
+          }
       | Field of 'e * Field_ref.t
       | Record_update of 'e * (Field_ref.t * 'e) list
       | Store of 'e * 'e
@@ -510,7 +513,9 @@ module Expr = struct
           let%bindl_fun value = same value in
           M.return (Desc.Store (target, value))
         | Fun fun_ ->
-          let%bindl_fun body = f (Child.binding fun_.args) fun_.body in
+          let%bindl_fun body =
+            f (Child.binding (Nonempty_list.to_list fun_.args)) fun_.body
+          in
           M.return (Desc.Fun { fun_ with body })
         | Annotated (e, annot) ->
           let%bindl_fun e = same e in
@@ -546,9 +551,9 @@ module Expr = struct
         | Error es ->
           let%bindl_fun es = all es ~f:same in
           M.return (Desc.Error es)
-        | Record fields ->
+        | Record { record; fields } ->
           let%bindl_fun fields = snds Child.same fields in
-          M.return (Desc.Record fields)
+          M.return (Desc.Record { record; fields })
         | Field (e, field) ->
           let%bindl_fun e = same e in
           M.return (Desc.Field (e, field))
@@ -622,21 +627,46 @@ module Expr = struct
     | _ -> List.exists (sub_exprs t) ~f:has_error
   ;;
 
-  let rec refers_to t ~(local_ f) =
+  module Ref = struct
+    type t =
+      | Binder of Binder.t
+      | Free of string
+  end
+
+  let iter_own_refs t ~(f @ local) =
+    let var : Var_ref.t -> unit = function
+      | Bound binder | Persistent binder -> f (Ref.Binder binder)
+      | Free name -> f (Free name)
+      | Prim _ | Intrinsic _ -> ()
+    in
     match t.desc with
-    | Var (Bound binder | Persistent binder) -> f binder
-    | Assign ((Bound binder | Persistent binder), _) when f binder -> true
-    | Splice { subs = Implicit providers; _ } when Map.exists providers ~f ->
-      true
-    | _ -> List.exists (sub_exprs t) ~f:(refers_to ~f) [@nontail]
+    | Var var_ref | Assign (var_ref, _) -> var var_ref [@nontail]
+    | Splice { subs = Implicit providers; _ } ->
+      Map.iter providers ~f:(fun binder -> f (Binder binder)) [@nontail]
+    | _ -> ()
+  ;;
+
+  let rec refers_to t ~(local_ f) =
+    let found = ref false in
+    iter_own_refs t ~f:(function
+      | Binder binder -> if f binder then found := true
+      | Free _ -> ());
+    !found || (List.exists (sub_exprs t) ~f:(refers_to ~f) [@nontail])
   ;;
 end
 
 module Toplevel = struct
+  module Kind = struct
+    type t =
+      | Value
+      | Mut
+      | Function of Ident.t Nonempty_list.t
+    [@@deriving sexp_of]
+  end
+
   type t =
     { ident : Ident.t
-    ; mut : bool [@sexp.bool]
-    ; args : Ident.t list
+    ; kind : Kind.t
     ; scheme : Hum.Ty.t
     ; body : Expr.t
     ; partials : Allocation.Id.t list [@sexp.list]

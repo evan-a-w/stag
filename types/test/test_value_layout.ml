@@ -16,7 +16,7 @@ let show = function
 ;;
 
 let%expect_test "structural occurs check visits every by-value path" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let field ty = Type.RExtend ("next", Present, Absent, ty, REmpty) in
   show (bind fresh (fun t -> Fresh.record fresh (field t)));
   show (bind fresh (fun t -> Fresh.variant fresh (field t)));
@@ -47,7 +47,7 @@ let%expect_test "structural occurs check visits every by-value path" =
 ;;
 
 let%expect_test "cycles consisting only of pointers can print and unify" =
-  let fresh = Fresh.create () in
+  let fresh = Fresh.conservative () in
   let a = var fresh in
   let b = var fresh in
   show (Unify.unify_ty fresh ~ty1:a ~ty2:(ptr (ptr a)));

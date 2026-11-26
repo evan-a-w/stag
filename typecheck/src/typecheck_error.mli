@@ -297,6 +297,12 @@ val create : loc:Loc.t -> Kind.t -> t
     change it. *)
 val unification_error : loc:Loc.t -> Unification_error.t -> t
 
+(** [unification_error] of an [Error]. *)
+val lift : loc:Loc.t -> ('a, Unification_error.t) Result.t -> ('a, t) Result.t
+
+(** [Error] of [create]. *)
+val error : loc:Loc.t -> Kind.t -> ('a, t) Result.t
+
 val already_reported : t
 val is_already_reported : t -> bool
 

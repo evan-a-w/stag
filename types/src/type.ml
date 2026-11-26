@@ -1,15 +1,20 @@
 open! Import
 
-type id = int [@@deriving sexp, compare, equal]
-type rank = int [@@deriving sexp, compare, equal]
+module Id = struct
+  type t = int [@@deriving sexp, compare, equal]
+end
+
+module Rank = struct
+  type t = int [@@deriving sexp, compare, equal]
+end
 
 type 'a var_state =
-  | Unbound of rank
+  | Unbound of Rank.t
   | Generic
   | Link of 'a
 
 type ('a, 'bound) var =
-  { id : id
+  { id : Id.t
   ; mutable state : 'a var_state
   ; mutable bounds : 'bound list
   ; mutable in_bounds_of : bounded list
@@ -27,11 +32,11 @@ and ty =
       ; context : row
       }
   | TRecord of
-      { id : id
+      { id : Id.t
       ; row : row
       }
   | TVariant of
-      { id : id
+      { id : Id.t
       ; row : row
       }
   | TVar of (ty, Nothing.t) var
@@ -67,12 +72,12 @@ and bounded =
 
 and kept =
   | Row_bound of
-      { id : id
+      { id : Id.t
       ; lower : (row, bound) var
       ; bound : bound
       }
   | If_present_kept of
-      { id : id
+      { id : Id.t
       ; presence : (presence, presence_bound) var
       ; ty1 : ty
       ; ty2 : ty
@@ -105,12 +110,12 @@ let kept_id = function
 
 module Var = struct
   type 'a state = 'a var_state =
-    | Unbound of rank
+    | Unbound of Rank.t
     | Generic
     | Link of 'a
 
   type ('a, 'bound) t = ('a, 'bound) var =
-    { id : id
+    { id : Id.t
     ; mutable state : 'a state
     ; mutable bounds : 'bound list
     ; mutable in_bounds_of : bounded list
@@ -130,6 +135,53 @@ module Var = struct
     }
   ;;
 
+  let change ~undo f = Mode.Private.Undo.change ~undo f
+
+  let set_state t state =
+    let old = t.state in
+    change ~undo:(fun () -> t.state <- old) (fun () -> t.state <- state)
+  ;;
+
+  let lower_rank t ~rank =
+    match t.state with
+    | Unbound rank' when rank' > rank -> set_state t (Unbound rank)
+    | Unbound _ | Generic | Link _ -> ()
+  ;;
+
+  let set_bounds t bounds =
+    let old = t.bounds in
+    change ~undo:(fun () -> t.bounds <- old) (fun () -> t.bounds <- bounds)
+  ;;
+
+  let add_bound t bound = set_bounds t (bound :: t.bounds)
+
+  let set_in_bounds_of t in_bounds_of =
+    let old = t.in_bounds_of in
+    change
+      ~undo:(fun () -> t.in_bounds_of <- old)
+      (fun () -> t.in_bounds_of <- in_bounds_of)
+  ;;
+
+  let set_kept t kept =
+    let old = t.kept in
+    change ~undo:(fun () -> t.kept <- old) (fun () -> t.kept <- kept)
+  ;;
+
+  let mark_in_record t =
+    if not t.in_record
+    then
+      change
+        ~undo:(fun () -> t.in_record <- false)
+        (fun () -> t.in_record <- true)
+  ;;
+
+  let set_watchers t watchers =
+    let old = t.watchers in
+    change
+      ~undo:(fun () -> t.watchers <- old)
+      (fun () -> t.watchers <- watchers)
+  ;;
+
   let layout_key = Type_equal.Id.create ~name:"layout" sexp_of_opaque
   let layout t = Watcher.find t.watchers layout_key
 
@@ -137,13 +189,13 @@ module Var = struct
     match t.state with
     | Unbound rank -> rank
     | Generic | Link _ ->
-      raise_s [%message "Type.Var.rank_exn: variable not unbound" (t.id : id)]
+      raise_s [%message "Type.Var.rank_exn: variable not unbound" (t.id : Id.t)]
   ;;
 
   let sexp_of_t sexp_of_a _ t =
     match t.state with
-    | Unbound rank -> [%sexp "Unbound", (t.id : id), (rank : rank)]
-    | Generic -> [%sexp "Generic", (t.id : id)]
+    | Unbound rank -> [%sexp "Unbound", (t.id : Id.t), (rank : Rank.t)]
+    | Generic -> [%sexp "Generic", (t.id : Id.t)]
     | Link a -> [%sexp "Link", (a : a)]
   ;;
 end
@@ -163,7 +215,7 @@ let arrow arg res = TArrow (arg, res, Arrow_modes.default)
    [Link] is the only allocation of the [canonical_*] functions, and rare once
    paths are compressed, so it is not checked. *)
 let[@cold] [@zero_alloc assume] relink (var : (_, _) Var.t) target =
-  var.state <- Link target
+  Var.set_state var (Link target)
 ;;
 
 let[@zero_alloc] rec canonical_ty ty =
@@ -513,7 +565,7 @@ module Mapper = struct
     ; row : (row, bound) Var.t -> row
     ; presence : (presence, presence_bound) Var.t -> presence
     ; keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
-    ; id : unit -> id
+    ; id : unit -> Id.t
     ; mode : Mode.Var.t -> Mode.Var.t
     }
 end
@@ -542,7 +594,7 @@ module Changes = struct
     ; tys : State.t Int.Table.t
     ; rows : State.t Int.Table.t
     ; nodes : State.t Int.Table.t
-    ; stack : (State.t Int.Table.t * id * Visiting.t) Stack.t
+    ; stack : (State.t Int.Table.t * Id.t * Visiting.t) Stack.t
     ; mutable next_index : int
     }
 
@@ -669,7 +721,7 @@ module Copy = struct
       Hashtbl.set table ~key:id ~data:copy;
       let result = f () in
       copy.result <- Some result;
-      Option.iter copy.knot ~f:(fun knot -> knot.state <- Link result);
+      Option.iter copy.knot ~f:(fun knot -> Var.set_state knot (Link result));
       result
   ;;
 end
@@ -691,7 +743,7 @@ let mapper (f : Mapper.t) =
       let var' = Var.create (f.id ()) Generic in
       let copy = wrap var' in
       Hashtbl.set table ~key:var.id ~data:copy;
-      var'.state <- Link (map_target ());
+      Var.set_state var' (Link (map_target ()));
       copy
   in
   (* Unchanged parts are kept as they are. *)
@@ -886,8 +938,8 @@ module Sexper = struct
 
   let var t table (var : _ Var.t) ~structural ~sexp_of_link : Sexp.t =
     match var.state with
-    | Unbound rank -> [%sexp "Unbound", (var.id : id), (rank : rank)]
-    | Generic -> [%sexp "Generic", (var.id : id)]
+    | Unbound rank -> [%sexp "Unbound", (var.id : Id.t), (rank : Rank.t)]
+    | Generic -> [%sexp "Generic", (var.id : Id.t)]
     | Link target ->
       let memo = if structural target then closed else cycle in
       memo t table var.id ~sexp:(fun () ->

@@ -202,10 +202,11 @@ end
         : <M.t>{}))
       (expansion
        (Field
-        (Record
-         ((((type_name M.r) (name M.f) (index 0))
-           (Construct ((type_name M.t) (name M.A) (index 0))
-            ((Lit (Int 1) : int)) : M.t)))
+        (Record (record M.r)
+         (fields
+          ((((type_name M.r) (name M.f) (index 0))
+            (Construct ((type_name M.t) (name M.A) (index 0))
+             ((Lit (Int 1) : int)) : M.t))))
          : M.r)
         ((type_name M.r) (name M.f) (index 0)) : M.t))
       : M.t))
@@ -302,5 +303,29 @@ module M = struct end
      @ t.stag:2:14-18)
     ((Duplicate_constructor M.A) @ t.stag:4:15-16)
     ((Duplicate_module M) @ t.stag:6:7-8)
+    |}]
+;;
+
+(* [t] is first elaborated while an attempt that fails is under way: what is
+   cached of it must outlive the attempt's rollback. *)
+let%expect_test "a later type first elaborated under a failed attempt" =
+  print_s
+    [%sexp
+      (Mode_helpers.located_errors
+         {|
+let ident x = x
+let use (x @ local) (k : t -> unit) = let r @ global = ident x in k r
+let later (x : t) = match x with A n -> Int.add n 1 | B -> 0
+type al = string
+type t = A of al | B
+|}
+       : (unit, (Loc.t * string) list) Result.t)];
+  [%expect
+    {|
+    (Error
+     ((t.stag:3:68-69
+       "This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:38-69), then x is used (at t.stag:3:61-62), then its type turned out to be t, which has pointers, then it is passed to a function (at t.stag:3:55-62), but must be at most global, because it is annotated global (at t.stag:3:46-52), then it is bound by an annotated let (at t.stag:3:46-52), then the function returns it (at t.stag:3:55-62), then a function is used at a type with other modes, then the function returns it (at t.stag:2:14-15), then x is used (at t.stag:2:14-15), then x is passed to the function (at t.stag:2:14-15), then a function is used at a type with other modes")
+      (t.stag:4:48-49
+       "This expression has type string but an expression was expected of type int")))
     |}]
 ;;

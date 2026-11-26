@@ -11,7 +11,7 @@ open! Import
     types generalized together, [presences] and [rows] the generalized variables
     with bounds, and [kept] the bounds kept with them. *)
 val simplify
-  :  is_generalized:(Type.id -> bool)
+  :  is_generalized:(Type.Id.t -> bool)
   -> tys:Type.ty list
   -> presences:(Type.presence, Type.presence_bound) Type.Var.t list
   -> rows:(Type.row, Type.bound) Type.Var.t list

@@ -122,6 +122,18 @@ module Toplevel_state = struct
         }
 end
 
+module Phase = struct
+  type t =
+    | Run_time
+    | Compile_time of { reflect : string -> Value.t Or_error.t }
+    | Expect_test of { on_expect : string Located.t -> unit }
+
+  let is_compile_time = function
+    | Compile_time _ -> true
+    | Run_time | Expect_test _ -> false
+  ;;
+end
+
 type t =
   { toplevels : Toplevel_state.t Typed.Ident.Table.t
   (** Each has a slot in [env] once queued, filled once [Evaluated]. Once
@@ -132,9 +144,8 @@ type t =
   ; stamps : Stamp_counter.t
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
-  ; mutable on_expect : (string Located.t -> unit) option
-  ; mutable reflect : (string -> Value.t Or_error.t) option
-  (** While evaluating at compile time. *)
+  ; mutable phase : Phase.t
+  ; c_functions : C_call.t
   }
 
 let captures t ~ident ~args ~body =
@@ -151,22 +162,14 @@ let captures t ~ident ~args ~body =
     then Hash_set.add captures ident
   in
   let use ~depth ident = use_at ~depth ident ~level:(level ident) in
-  let var ~depth : Typed.Var_ref.t -> unit = function
-    | Free _ | Prim _ | Intrinsic _ -> ()
-    (* In a quote, a toplevel is referred to by symbol: only its value is
-       captured, and it may still be being checked. *)
-    | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
-      if depth = 0 then use_at ~depth ident ~level:0
-    | Bound (Local ident) | Persistent (Local ident) -> use ~depth ident
-  in
   let rec go ~depth (expr : Typed.Expr.t) =
-    (match expr.desc with
-     | Var var_ref | Assign (var_ref, _) -> var ~depth var_ref
-     | Splice { subs = Implicit providers; _ } ->
-       Map.iter providers ~f:(function
-         | Toplevel ident -> if depth = 0 then use_at ~depth ident ~level:0
-         | Local ident -> use ~depth ident)
-     | _ -> ());
+    Typed.Expr.iter_own_refs expr ~f:(function
+      | Free _ -> ()
+      (* In a quote, a toplevel is referred to by symbol: only its value is
+         captured, and it may still be being checked. *)
+      | Binder (Toplevel ident) ->
+        if depth = 0 then use_at ~depth ident ~level:0
+      | Binder (Local ident) -> use ~depth ident);
     Typed.Expr.iter_children expr ~f:(fun child expr ->
       List.iter child.binds ~f:(Hash_set.add defined);
       go ~depth:(depth + child.depth) expr)
@@ -185,8 +188,8 @@ let create ~stamps () =
   ; stamps
   ; budget = Budget.create Limits.unlimited
   ; output = Out_channel.output_string stdout
-  ; on_expect = None
-  ; reflect = None
+  ; phase = Run_time
+  ; c_functions = C_call.create ()
   }
 ;;
 
@@ -337,7 +340,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
         let args = List.map let_.args ~f:fresh in
         Let { let_ with ident; args; annots = rename_annots let_.annots }
       | Fun fun_ ->
-        let args = List.map fun_.args ~f:fresh in
+        let args = Nonempty_list.map fun_.args ~f:fresh in
         Fun { fun_ with args; annots = rename_annots fun_.annots }
       | Match { scrutinee; cases; exception_cases } ->
         let rename = List.map ~f:(fun (p, body) -> pattern p, body) in
@@ -447,8 +450,9 @@ let pattern_mismatch pattern value = exclave_
       "Pattern does not fit value" (pattern : Typed.Pattern.t) (value : Value.t)]
 ;;
 
-let reached_error () = exclave_
-  Eval_result.error (Error.of_exn Erase.Reached_error)
+let reached_error ~loc = exclave_
+  Eval_result.error
+    (Runtime_error.to_error { Runtime_error.loc; kind = Reached_error })
 ;;
 
 (* Binds the variables of [pattern] in [env] if it matches [value]. *)
@@ -457,7 +461,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t)
   = exclave_
   match pattern.desc, value with
   | Any, _ -> Eval_result.return true
-  | Error _, _ -> reached_error ()
+  | Error _, _ -> reached_error ~loc:pattern.loc
   | Var ident, _ ->
     Env.set env ~ident ~value;
     Eval_result.return true
@@ -607,7 +611,7 @@ let rec force t ident : unit Eval_result.t @ local = exclave_
                    "Initialization of %s raised %s"
                    ident.name
                    (Runtime_error.Raised.to_string_for_message exn)))
-         | Some { kind = Message _; loc = _ } | None -> error
+         | Some { kind = Message _ | Reached_error; loc = _ } | None -> error
        in
        Hashtbl.set t.toplevels ~key:ident ~data:(Failed { error; uncatchable });
        Eval_result.error error)
@@ -649,11 +653,16 @@ and bind_functions t ({ members } : Typed.Scc.t) : unit Eval_result.t @ local
       | Some (Unevaluated _ | Evaluating | Evaluated | Failed _) | None -> false)
   in
   let functions, values =
-    List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
+    List.partition_map members ~f:(fun member ->
+      match member.kind with
+      | Function args -> First (member, Nonempty_list.to_list args)
+      | Value | Mut -> Second member)
   in
   match
-    Eval_result.List.map functions ~f:(fun { ident; args; body; _ } -> exclave_
-      closure t ~env:t.env ~level:0 ~ident ~args ~body)
+    Eval_result.List.map
+      functions
+      ~f:(fun ({ ident; body; _ }, args) -> exclave_
+        closure t ~env:t.env ~level:0 ~ident ~args ~body)
   with
   | Error { global = error } ->
     List.iter members ~f:(fun { ident; _ } ->
@@ -663,7 +672,7 @@ and bind_functions t ({ members } : Typed.Scc.t) : unit Eval_result.t @ local
         ~data:(Failed { error; uncatchable = error }));
     Eval_result.error error
   | Ok { global = closures } ->
-    List.iter2_exn functions closures ~f:(fun { ident; _ } value ->
+    List.iter2_exn functions closures ~f:(fun ({ ident; _ }, _) value ->
       Env.set t.env ~ident ~value;
       Hashtbl.set t.toplevels ~key:ident ~data:Evaluated);
     List.iter values ~f:(fun { ident; body; _ } ->
@@ -761,11 +770,11 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
   match expr.desc with
   | Lit lit -> Eval_result.return (Value.of_lit lit)
   | Expect expected ->
-    (match t.on_expect with
-     | Some on_expect ->
+    (match t.phase with
+     | Expect_test { on_expect } ->
        on_expect expected;
        Eval_result.return Value.Unit
-     | None ->
+     | Run_time | Compile_time _ ->
        Eval_result.error_s [%message "[%expect] outside a running expect test"])
   | Var (Bound (Local ident | Toplevel ident))
   | Var (Persistent (Local ident | Toplevel ident)) ->
@@ -802,12 +811,12 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
   | Marked _
   | Toplevel_splice _
   | Match _ -> run t ~env ~level expr
-  | Fun { args; annots = _; body } ->
+  | Fun { args = first :: _ as args; annots = _; body } ->
     (* Its first parameter identifies it, as a let's name does. *)
-    closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
+    closure t ~env ~level ~ident:first ~args:(Nonempty_list.to_list args) ~body
   | Splice _ ->
     Eval_result.error_s [%message "Splice outside a quote evaluated"]
-  | Error _ -> reached_error ()
+  | Error _ -> reached_error ~loc:expr.loc
   | Quote body ->
     let embedded = Embedded.create () in
     (match build t ~env ~level ~embedded ~depth:1 body with
@@ -824,11 +833,10 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
       eval_all t ~env ~level exprs
     in
     { global = Value.Construct (constructor, values) }
-  | Record fields ->
+  | Record { record = record_type; fields } ->
     let%mapl_fun.Local_result { global = values } =
       eval_fields t ~env ~level fields
     in
-    let record_type = (fst (List.hd_exn values) : Typed.Field_ref.t).record in
     let record =
       Array.create ~len:(Array.length record_type.fields) Value.Unit
     in
@@ -992,12 +1000,14 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
         (Value.External { symbol; signature; at_compile_time; applied })
     else (
       match at_compile_time with
-      | Denied { external_; library } when Option.is_some t.reflect ->
+      | Denied { external_; library } when Phase.is_compile_time t.phase ->
         runtime_error
           ~loc
           (Compile_time_c_calls.Policy.denial ~external_ ~library)
       | Allowed | Denied _ ->
-        (match C_call.call ~symbol signature (List.rev applied) with
+        (match
+           C_call.call t.c_functions ~symbol signature (List.rev applied)
+         with
          | Ok result -> Eval_result.return result
          | Error message ->
            runtime_error
@@ -1018,9 +1028,9 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
      | Assume_global, value -> Eval_result.return value
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with
-        | exception Erase.Reached_error -> reached_error ()
         | Ok expr -> Eval_result.return (Syntax_value.Expr.to_value expr)
-        | Error error ->
+        | Error Reached_error -> reached_error ~loc
+        | Error (Inexpressible error) ->
           runtime_error
             ~loc
             (sprintf
@@ -1028,9 +1038,9 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
                (Intrinsic.public_name intrinsic)
                (Error.to_string_hum error)))
      | Type_decl, Ref { kind = Type; name } ->
-       (match t.reflect with
-        | Some reflect -> Eval_result.of_or_error (reflect name)
-        | None ->
+       (match t.phase with
+        | Compile_time { reflect } -> Eval_result.of_or_error (reflect name)
+        | Run_time | Expect_test _ ->
           runtime_error
             ~loc
             (sprintf
@@ -1130,18 +1140,26 @@ and eval_code t ~env ~level code =
      code_of_value value) [@nontail]
 ;;
 
-let at_compile_time t ~reflect ~f =
-  let outer = t.reflect in
-  t.reflect
-  <- Some
-       (fun name ->
-         let%map ({ decl; decl_type } : Reflected_decl.Reflection.t) =
-           reflect name
-         in
-         Syntax_value.reflected_decl decl ~decl_type);
+let in_phase t phase ~f =
+  let outer = t.phase in
+  t.phase <- phase;
   Exn.protect
     ~f:(fun () -> Budget.protect_depth t.budget ~f)
-    ~finally:(fun () -> t.reflect <- outer)
+    ~finally:(fun () -> t.phase <- outer)
+;;
+
+let at_compile_time t ~reflect ~f =
+  in_phase
+    t
+    (Compile_time
+       { reflect =
+           (fun name ->
+             let%map ({ decl; decl_type } : Reflected_decl.Reflection.t) =
+               reflect name
+             in
+             Syntax_value.reflected_decl decl ~decl_type)
+       })
+    ~f
 ;;
 
 let splice t ~code ~level ~entry ~reflect =
@@ -1162,12 +1180,11 @@ let run t expr ~level ~reflect =
 ;;
 
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
-  t.on_expect <- Some on_expect;
-  Exn.protect
+  in_phase
+    t
+    (Expect_test { on_expect })
     ~f:(fun () ->
-      Budget.protect_depth t.budget ~f:(fun () ->
-        eval_global t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m))
-    ~finally:(fun () -> t.on_expect <- None)
+      eval_global t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m)
 ;;
 
 let eval_expr ?(bindings = []) t expr =

@@ -139,23 +139,30 @@ let le a b =
 
 let right t x = t.right.(x)
 let left t x = t.left.(x)
-let composed = Int.Table.create ()
+
+module Code_pair = struct
+  module T = struct
+    type t = int * int [@@deriving compare, hash, sexp_of]
+  end
+
+  include T
+  include Hashable.Make_plain (T)
+end
+
+let composed = Code_pair.Table.create ()
 
 let compose m1 m2 =
   assert (m1.src_index = m2.dst_index);
-  Hashtbl.find_or_add
-    composed
-    ((m1.code * 1_000_000) + m2.code)
-    ~default:(fun () ->
-      let right = Array.map m2.right ~f:(fun y -> m1.right.(y)) in
-      { src = m2.src
-      ; dst = m1.dst
-      ; src_index = m2.src_index
-      ; dst_index = m1.dst_index
-      ; right
-      ; left = Array.map m1.left ~f:(fun x -> m2.left.(x))
-      ; code = make_code ~src_index:m2.src_index ~dst_index:m1.dst_index right
-      })
+  Hashtbl.find_or_add composed (m1.code, m2.code) ~default:(fun () ->
+    let right = Array.map m2.right ~f:(fun y -> m1.right.(y)) in
+    { src = m2.src
+    ; dst = m1.dst
+    ; src_index = m2.src_index
+    ; dst_index = m1.dst_index
+    ; right
+    ; left = Array.map m1.left ~f:(fun x -> m2.left.(x))
+    ; code = make_code ~src_index:m2.src_index ~dst_index:m1.dst_index right
+    })
 ;;
 
 let meet_with axis point =

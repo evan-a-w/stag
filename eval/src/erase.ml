@@ -1,6 +1,13 @@
 open! Import
 
-exception Reached_error
+module Error = struct
+  type t =
+    | Reached_error
+    | Inexpressible of Base.Error.t
+  [@@deriving sexp_of]
+end
+
+exception Reached
 
 module Uses = struct
   type t =
@@ -14,26 +21,14 @@ module Uses = struct
     { idents = Set.union a.idents b.idents; free = Set.union a.free b.free }
   ;;
 
-  (* What [expr] uses itself, not its children. *)
   let own (expr : Typed.Expr.t) =
-    match expr.desc with
-    | Var (Bound (Local ident) | Persistent (Local ident))
-    | Assign ((Bound (Local ident) | Persistent (Local ident)), _) ->
-      { empty with idents = Typed.Ident.Set.singleton ident }
-    | Var (Free name) | Assign (Free name, _) ->
-      { empty with free = String.Set.singleton name }
-    | Splice { subs = Implicit providers; _ } ->
-      { empty with
-        idents =
-          Map.fold
-            providers
-            ~init:Typed.Ident.Set.empty
-            ~f:(fun ~key:_ ~data acc ->
-              match (data : Typed.Binder.t) with
-              | Local ident -> Set.add acc ident
-              | Toplevel _ -> acc)
-      }
-    | _ -> empty
+    let uses = ref empty in
+    Typed.Expr.iter_own_refs expr ~f:(function
+      | Binder (Local ident) ->
+        uses := { !uses with idents = Set.add !uses.idents ident }
+      | Free name -> uses := { !uses with free = Set.add !uses.free name }
+      | Binder (Toplevel _) -> ());
+    !uses
   ;;
 
   (* The uses within the scope of each local [expr] binds, computed in one pass. *)
@@ -65,12 +60,10 @@ module Names = struct
     let taken = String.Hash_set.create () in
     let take (i : Typed.Ident.t) = Hash_set.add taken i.name in
     let rec add (expr : Typed.Expr.t) =
-      (match expr.desc with
-       | Var (Free name) | Assign (Free name, _) -> Hash_set.add taken name
-       | Var (Bound (Local ident) | Persistent (Local ident))
-       | Assign ((Bound (Local ident) | Persistent (Local ident)), _) ->
-         take ident
-       | _ -> ());
+      Typed.Expr.iter_own_refs expr ~f:(function
+        | Free name -> Hash_set.add taken name
+        | Binder (Local ident) -> take ident
+        | Binder (Toplevel _) -> ());
       Typed.Expr.iter_children expr ~f:(fun child expr ->
         List.iter child.binds ~f:take;
         add expr)
@@ -97,6 +90,8 @@ module Names = struct
      capture a variable the scope uses, of that name but bound elsewhere. *)
   let bind t idents =
     List.fold idents ~init:t ~f:(fun t (ident : Typed.Ident.t) ->
+      (* Each of [idents] is bound in a child of its binder
+         ([Typed.Expr.Child.binds]), so has a scope. *)
       let scope = Hashtbl.find_exn t.scopes ident in
       let captures =
         Set.mem scope.free ident.name
@@ -124,17 +119,29 @@ module Names = struct
             Set.add (Option.value others ~default:Typed.Ident.Set.empty) ident)
       })
   ;;
+
+  (* The name [bind] gave [ident]: the code's binders are bound before their
+     scopes are erased. *)
+  let binder t ident = Map.find_exn t.names ident
+
+  let local t (ident : Typed.Ident.t) =
+    match Map.find t.names ident with
+    | Some name -> Ok name
+    | None ->
+      Or_error.error_string
+        (sprintf
+           "the code embeds %s, a local from outside it, which nothing names \
+            where the code is spliced"
+           ident.name)
+  ;;
 end
 
 let ty_annot ty : Syntax.Annot.t = { ty; mode = None }
 let resolved name : Syntax.Decl_path.t = Resolved name
 
-let expr (expr : Typed.Expr.t) =
+let expr_or_error (expr : Typed.Expr.t) =
   let open Or_error.Let_syntax in
   let located loc txt = Located.create ~loc txt in
-  let name (names : Names.t) (ident : Typed.Ident.t) =
-    Map.find_exn names.names ident
-  in
   let rec pattern names (p : Typed.Pattern.t) : Syntax.Pattern.t =
     let go = pattern names in
     let decl_path name = located p.loc (resolved name) in
@@ -142,8 +149,8 @@ let expr (expr : Typed.Expr.t) =
       p.loc
       (match p.desc with
        | Any -> Syntax.Pattern.Any
-       | Error (_ : Typed.Pattern.t list) -> raise Reached_error
-       | Var ident -> Var (name names ident)
+       | Error (_ : Typed.Pattern.t list) -> raise Reached
+       | Var ident -> Var (Names.binder names ident)
        | Lit lit -> Lit lit
        | Tuple ps -> Tuple (List.map ps ~f:go)
        | Deref p -> Deref (go p)
@@ -162,19 +169,13 @@ let expr (expr : Typed.Expr.t) =
                (match rest with
                 | Closed -> Closed
                 | Open -> Open
-                | Bind ident -> Bind (located p.loc (name names ident)))
+                | Bind ident -> Bind (located p.loc (Names.binder names ident)))
            })
   in
   let var_path (names : Names.t) : Typed.Var_ref.t -> _ = function
     | Bound (Local ident) | Persistent (Local ident) ->
-      (match Map.find names.names ident with
-       | Some name -> Ok (Syntax.Decl_path.Path (Syntax.Path.name name))
-       | None ->
-         Or_error.error_string
-           (sprintf
-              "the code embeds %s, a local from outside it, which nothing \
-               names where the code is spliced"
-              ident.name))
+      let%map name = Names.local names ident in
+      Syntax.Decl_path.Path (Syntax.Path.name name)
     | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
       Ok (resolved ident.name)
     | Free name -> Ok (Path (Syntax.Path.of_string name))
@@ -202,7 +203,7 @@ let expr (expr : Typed.Expr.t) =
     in
     let field_path f = located loc (resolved (Typed.Field_ref.name f)) in
     let binding names annots ident : Syntax.Binding.t =
-      ( label (name names ident)
+      ( label (Names.binder names ident)
       , List.Assoc.find annots ident ~equal:Typed.Ident.equal
         |> Option.value ~default:Syntax.Annot.none )
     in
@@ -229,7 +230,10 @@ let expr (expr : Typed.Expr.t) =
       let%bind in_ = go names in_ in
       node
         (Let_mut
-           (label (name names ident), { (ty_annot annot) with mode }, body, in_))
+           ( label (Names.binder names ident)
+           , { (ty_annot annot) with mode }
+           , body
+           , in_ ))
     | Marked (marker, e) ->
       let%bind e = go names e in
       node
@@ -257,12 +261,13 @@ let expr (expr : Typed.Expr.t) =
       let%bind in_ = go outer in_ in
       node
         (Let
-           ( label (name outer ident)
+           ( label (Names.binder outer ident)
            , List.map args ~f:(binding inner annots)
            , { (ty_annot result_annot) with mode }
            , body
            , in_ ))
     | Fun { args; annots; body } ->
+      let args = Nonempty_list.to_list args in
       let names = Names.bind names args in
       let%bind body = go names body in
       node (Fun (List.map args ~f:(binding names annots), body))
@@ -271,19 +276,27 @@ let expr (expr : Typed.Expr.t) =
       let%bind subs =
         match subs with
         | Implicit providers ->
+          let%bind providers =
+            Map.map providers ~f:(fun (binder : Typed.Binder.t) ->
+              match binder with
+              | Local ident ->
+                let%map name = Names.local names ident in
+                `Local name
+              | Toplevel ident -> Ok (`Toplevel ident))
+            |> Map.combine_errors
+          in
           let renamed =
             Map.existsi providers ~f:(fun ~key ~data ->
-              match (data : Typed.Binder.t) with
-              | Local ident -> not (String.equal (name names ident) key)
-              | Toplevel _ -> false)
+              match data with
+              | `Local name -> not (String.equal name key)
+              | `Toplevel _ -> false)
           in
           (* Toplevels free by canonical name are provided even so. *)
-          let sub ~key (binder : Typed.Binder.t) =
-            match binder with
-            | Local ident ->
-              Some (Syntax.Decl_path.Path (Syntax.Path.name (name names ident)))
-            | Toplevel _ when String.mem key '.' -> None
-            | Toplevel ident -> Some (resolved ident.name)
+          let sub ~key = function
+            | `Local name ->
+              Some (Syntax.Decl_path.Path (Syntax.Path.name name))
+            | `Toplevel _ when String.mem key '.' -> None
+            | `Toplevel (ident : Typed.Ident.t) -> Some (resolved ident.name)
           in
           if not renamed
           then Ok None
@@ -316,7 +329,7 @@ let expr (expr : Typed.Expr.t) =
     | Construct (c, es) ->
       let%bind es = all es in
       node (Construct (located loc (resolved c.name), es))
-    | Record fs ->
+    | Record { fields = fs; record = _ } ->
       let%bind fs = fields fs ~key:field_path in
       node (Record fs)
     | Field (e, f) ->
@@ -370,7 +383,14 @@ let expr (expr : Typed.Expr.t) =
     | External { symbol; signature = _; at_compile_time = _ } ->
       Or_error.error_s [%message "An external is not code" (symbol : string)]
     | Type ty -> node (Type ty)
-    | Error (_ : Typed.Expr.t list) -> raise Reached_error
+    | Error (_ : Typed.Expr.t list) -> raise Reached
   in
   go (Names.create expr) expr
+;;
+
+let expr expr : (_, Error.t) Result.t =
+  match expr_or_error expr with
+  | Ok expr -> Ok expr
+  | Error error -> Error (Inexpressible error)
+  | exception Reached -> Error Reached_error
 ;;

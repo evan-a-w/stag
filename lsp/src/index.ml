@@ -357,7 +357,11 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
    | Fun { args; _ } ->
      typed ();
      Option.iter (at syntax.funs) ~f:(fun bindings ->
-       local_binders t program (List.map bindings ~f:fst) args)
+       local_binders
+         t
+         program
+         (List.map bindings ~f:fst)
+         (Nonempty_list.to_list args))
    | Construct (constructor, _) ->
      typed ();
      Option.iter (at syntax.constructors) ~f:(fun path ->
@@ -368,7 +372,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
          ; ty = Some e.ty
          ; target = Syntax_at.declaration syntax path.loc
          })
-   | Record record | Record_update (_, record) ->
+   | Record { fields = record; record = _ } | Record_update (_, record) ->
      typed ();
      fields (Option.value (at syntax.fields) ~default:[]) record
    | Field (_, field) ->
@@ -603,7 +607,7 @@ let create
         | Parameter
         | Pattern_var -> ()));
   List.iter program.sccs ~f:(fun scc ->
-    List.iter scc.members ~f:(fun { ident; args; scheme; body } ->
+    List.iter scc.members ~f:(fun { ident; kind; scheme; body; partials = _ } ->
       if at_splice t body.loc
       then Hashtbl.add t.values ~key:ident.name ~data:body.loc |> ignore
       else
@@ -613,7 +617,13 @@ let create
             if Span.equal (Span.of_loc written.loc) (Span.of_loc body.loc)
             then (
               add_binder t name ~label:ident.name ~ty:scheme ~ident:None;
-              local_binders t program (List.map bindings ~f:fst) args));
+              local_binders
+                t
+                program
+                (List.map bindings ~f:fst)
+                (match kind with
+                 | Function args -> Nonempty_list.to_list args
+                 | Value | Mut -> [])));
       expr t ~syntax ~program body));
   List.iter program.declaration_splices ~f:(expr t ~syntax ~program);
   List.iter program.expect_tests ~f:(fun test ->

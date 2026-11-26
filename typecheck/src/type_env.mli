@@ -11,11 +11,19 @@ type t
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
-(** With [record_references], [references] are recorded. *)
+(** With [record_references], [references] are recorded. [evaluate_splice]
+    evaluates a type splice [.~e] at [loc], in the scope it is written in, to
+    the type it gives (located at [loc]). Types and exceptions are always
+    declarations, so evaluate theirs. *)
 val create
   :  ?record_references:bool
   -> Fresh.t
   -> report:(Typecheck_error.t -> unit)
+  -> evaluate_splice:
+       (Module_scope.t
+        -> Syntax.Expr.t
+        -> loc:Loc.t
+        -> (Syntax.Type_expr.t, Typecheck_error.t) Result.t)
   -> t
 
 (** Declares [decl], a member of [module_], whose parameters are distinct. Types
@@ -121,9 +129,6 @@ val variant_constructors
   -> string
   -> (Constructor.t list option, Typecheck_error.t) Result.t
 
-(** Like [check], for a type already checked. *)
-val find_decl_exn : t -> string -> Signature.Type_decl.t
-
 (** Whether the type of canonical name [name] is a variant with no constructors,
     checking its declaration. *)
 val is_empty_variant : t -> string -> (bool, Typecheck_error.t) Result.t
@@ -136,7 +141,7 @@ module Annotation_vars : sig
   type t
 
   (** Variables are created at [rank] on first use. *)
-  val create : env -> rank:Type.rank -> t
+  val create : env -> rank:Type.Rank.t -> t
 
   (** The mode a mode variable stands for, an error if the name is also a type
       or row variable. *)
@@ -167,17 +172,6 @@ val elaborate_declared
   -> Module_scope.t
   -> Syntax.Type_expr.t
   -> (Type.ty, Typecheck_error.t) Result.t
-
-(** How a type splice [.~e] at [loc] is evaluated, in the scope it is written
-    in, to the type it gives (located at [loc]). Types and exceptions are always
-    declarations, so evaluate theirs. *)
-val set_evaluate_splice
-  :  t
-  -> (Module_scope.t
-      -> Syntax.Expr.t
-      -> loc:Loc.t
-      -> (Syntax.Type_expr.t, Typecheck_error.t) Result.t)
-  -> unit
 
 (** Gives the type [name], declared as [type t = .~e], the definition [e]
     evaluated to at [loc]. Errs (reported to [create]'s [report], the type then

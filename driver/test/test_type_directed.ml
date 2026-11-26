@@ -481,9 +481,10 @@ let ran = (via_alias alias_built, param {v = true; w = 2}, (param_updated {v = 1
     (param_updated <fun>)
     (quoted
      (Code
-      (Record
-       ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 2) : int))
-        (((type_name N.r) (name N.y) (index 1)) (Lit (Bool false) : bool)))
+      (Record (record N.r)
+       (fields
+        ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 2) : int))
+         (((type_name N.r) (name N.y) (index 1)) (Lit (Bool false) : bool))))
        : N.r)))
     (arms <fun>)
     (seq (N.r (x 4) (y true)))
@@ -743,9 +744,10 @@ let ran = .~(upd spliced)
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
        (generalized false)
        (body
-        (Record
-         ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
-          (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool)))
+        (Record (record N.r)
+         (fields
+          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
+           (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool))))
          : N.r))
        (in_ (Var (Bound (Local v/17)) : N.r)) : N.r)))
     (upd <fun>)
@@ -757,18 +759,20 @@ let ran = .~(upd spliced)
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
        (generalized false)
        (body
-        (Record
-         ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
-          (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool)))
+        (Record (record N.r)
+         (fields
+          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
+           (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool))))
          : N.r))
        (in_ (Var (Bound (Local v/17)) : N.r)) : N.r)))
     (upd <fun>)
     (updated
      (Code
       (Record_update
-       (Record
-        ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
-         (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool)))
+       (Record (record N.r)
+        (fields
+         ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
+          (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool))))
         : N.r)
        ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 7) : int))) : N.r)))
     (ran (N.r (x 7) (y true)))

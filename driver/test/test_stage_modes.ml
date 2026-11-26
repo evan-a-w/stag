@@ -63,6 +63,27 @@ let code = .<n>.
     |}]
 ;;
 
+let%expect_test "a toplevel a function not generalized returned is a free \
+                 variable of quotes, as a later use may raise it"
+  =
+  check
+    {|
+let ident x = x
+let g = ident (fun x -> x)
+let r = g "a"
+let c = .< r >.
+let s = g (Int.to_string 3)
+|};
+  [%expect
+    {|
+    val ident : 'a -> 'a
+    val g : string -> string
+    val r : string
+    val c : <string>{..'a}
+    val s : string
+    |}]
+;;
+
 let%expect_test "quote lock: locals are embedded only when portable" =
   check
     {|

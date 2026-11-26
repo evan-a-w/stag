@@ -25,14 +25,20 @@ val make_absent
   -> error:'error
   -> (unit, 'error) Result.t
 
+module Presence_error : sig
+  type t =
+    | Conflict (** A presence must be both [Present] and [Absent]. *)
+    | Unification of Unification_error.t
+  [@@deriving sexp_of]
+end
+
 (** Constrains [presence <= bound]: if [presence] is [Present] so is [bound].
     Between unknown presences, this adds a bound to both, whatever their ranks. *)
 val presence_at_most
   :  Fresh.t
   -> presence:Type.presence
   -> bound:Type.presence
-  -> error:Unification_error.t
-  -> (unit, Unification_error.t) Result.t
+  -> (unit, Presence_error.t) Result.t
 
 (** Whether two types can't be unified whatever their variables become.
     Conservative: cyclic types may be found not to clash. *)
@@ -50,7 +56,7 @@ val unify_if_present
 
 (** Lowers the ranks of the variables of [ty] to at most [rank], so that they
     are not generalized at greater ranks. *)
-val lower_ty : rank:Type.rank -> Type.ty -> unit
+val lower_ty : rank:Type.Rank.t -> Type.ty -> unit
 
 (** Makes [row] a record's or variant's: none of its entries, including those it
     later gets, is [assigned]. *)
@@ -75,13 +81,13 @@ val present_entry
   -> Fresh.t
   -> row:Type.row
   -> name:string
-  -> rank:Type.rank
+  -> rank:Type.Rank.t
   -> (Type.ty, Unification_error.t) Result.t
 
 (** Like [Fresh.var], for a type that values are used at by variance (a scheme's
     instance, a match's result): [sub_ty] relates what is used at it by variance
     even while either is unknown, so it becomes their join. *)
-val join_var : Fresh.t -> rank:Type.rank -> (Type.ty, Nothing.t) Type.Var.t
+val join_var : Fresh.t -> rank:Type.Rank.t -> (Type.ty, Nothing.t) Type.Var.t
 
 (** Makes [var], if still unknown, equal to what is to have its structure, as
     generalizing it does ([Scheme.fix_joins]). *)
@@ -94,9 +100,9 @@ val fix_join
     expected. Their structures are unified as by [unify_ty], but the modes in
     them are related by variance: a function's argument contravariantly, its
     result and a tuple's components covariantly, a nominal type's parameters as
-    [Fresh.variances] says (invariantly if it doesn't know). Records, variants,
-    code contexts and arrows' [curry] are unified exactly, and so is a variable
-    with what it is bound to. *)
+    [Fresh.cons] says (invariantly if it doesn't know). Records, variants, code
+    contexts and arrows' [curry] are unified exactly, and so is a variable with
+    what it is bound to. *)
 val sub_ty
   :  Fresh.t
   -> lower:Type.ty

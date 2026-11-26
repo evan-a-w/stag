@@ -30,6 +30,9 @@ module Kind : sig
     | Raised of Raised.t
     (** An exception, of type [exn], which a [match] may handle. Other errors
         can't be handled. *)
+    | Reached_error
+    (** Code that did not check ([Typed.Expr.Desc.Error]), whose error was
+        reported when checking it. *)
   [@@deriving sexp_of]
 end
 

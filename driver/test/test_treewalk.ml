@@ -22,9 +22,13 @@ let print source =
       List.iter (Typed.Expr.sub_exprs expr) ~f:locals
     in
     List.iter (members t) ~f:(fun (member : Typed.Toplevel.t) ->
-      if not (List.is_empty member.args)
-      then
-        print_captures ~ident:member.ident ~args:member.args ~body:member.body;
+      (match member.kind with
+       | Function args ->
+         print_captures
+           ~ident:member.ident
+           ~args:(Nonempty_list.to_list args)
+           ~body:member.body
+       | Value | Mut -> ());
       locals member.body))
 ;;
 
@@ -359,4 +363,41 @@ let y = x
     (Error ("Stag.Type.decl is only available at compile time" @ t.stag:5:38-70))
     (Error ("Stag.Type.decl is only available at compile time" @ t.stag:5:38-70))
     |}]
+;;
+
+let%expect_test "an expect test run within another leaves the outer one running"
+  =
+  let contents =
+    {x|
+let%expect_test "t" = [%expect {|first|}]; [%expect {|second|}]
+|x}
+  in
+  match Driver.check_files [ { Source_file.path = "t.stag"; contents } ] with
+  | Error errors -> print_s [%sexp (errors : Driver.Error.t list)]
+  | Ok driver ->
+    Driver.eval driver |> ok_exn;
+    let interpreter = Driver.interpreter driver in
+    let test = List.hd_exn (Driver.checked driver).program.expect_tests in
+    let nested = ref false in
+    let rec run name =
+      Interpreter.run_expect_test
+        interpreter
+        test
+        ~on_expect:(fun (expected : string Located.t) ->
+          printf "%s: %s\n" name expected.txt;
+          if not !nested
+          then (
+            nested := true;
+            print_s [%sexp (run "inner" : unit Or_error.t)]))
+    in
+    print_s [%sexp (run "outer" : unit Or_error.t)];
+    [%expect
+      {|
+      outer: first
+      inner: first
+      inner: second
+      (Ok ())
+      outer: second
+      (Ok ())
+      |}]
 ;;

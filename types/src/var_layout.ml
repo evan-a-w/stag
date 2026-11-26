@@ -7,19 +7,25 @@ module Layout_of = struct
     | Depends of Mode.Layout.t list
 end
 
+module Finality = struct
+  type t =
+    | Provisional
+    | Final
+end
+
 module Unbound = struct
   type t =
-    { id : Type.id
-    ; rank : unit -> Type.rank option
+    { id : Type.Id.t
+    ; rank : unit -> Type.Rank.t option
     ; layout : Mode.Layout.t
     }
 end
 
 module Frame = struct
   type t =
-    { first_id : Type.id
+    { first_id : Type.Id.t
     ; mutable unbound : Unbound.t list
-    ; mutable waiting : (final:bool -> bool) list
+    ; mutable waiting : (Finality.t -> bool) list
     }
 
   let create ~first_id = { first_id; unbound = []; waiting = [] }
@@ -88,7 +94,7 @@ let find_or_add t (var : (_, _) Type.Var.t) ~bind =
           generalize layout
           |> Result.map_error ~f:(fun error -> Type.Bound_var error))
     in
-    var.watchers <- watcher :: var.watchers;
+    Type.Var.set_watchers var (watcher :: var.watchers);
     (match var.state with
      | Unbound _ ->
        let rank () =
@@ -163,7 +169,7 @@ let check_waiting t =
   Stack.iter t.frames ~f:(fun (frame : Frame.t) ->
     frame.waiting
     <- List.filter (List.rev frame.waiting) ~f:(fun check ->
-         not (check ~final:false))
+         not (check Provisional))
        |> List.rev)
 ;;
 
@@ -172,7 +178,7 @@ let wait t check =
   frame.waiting <- check :: frame.waiting
 ;;
 
-let decide ?(except = fun _ -> false) ?(final = false) (frame : Frame.t) ~rank =
+let decide ?(except = fun _ -> false) (frame : Frame.t) ~rank ~finality =
   let decided, kept =
     List.partition_map frame.unbound ~f:(fun (entry : Unbound.t) ->
       match entry.rank () with
@@ -187,7 +193,7 @@ let decide ?(except = fun _ -> false) ?(final = false) (frame : Frame.t) ~rank =
       Option.bind layout ~f:(fun layout -> Result.error (generalize layout)))
   in
   frame.waiting
-  <- List.filter (List.rev frame.waiting) ~f:(fun check -> not (check ~final))
+  <- List.filter (List.rev frame.waiting) ~f:(fun check -> not (check finality))
      |> List.rev;
   errors
 ;;
