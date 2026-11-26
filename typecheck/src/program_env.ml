@@ -8,6 +8,7 @@ module Report = struct
     ; once : string option
     (** Only the first error reported with this key is shown. *)
     ; fallback : bool (** Shown only if no other error of [component] is. *)
+    ; seq : int (** [reported] once it was. *)
     }
 end
 
@@ -41,11 +42,14 @@ let allocation_id t =
 
 let report ?component ?once ?(fallback = false) t error =
   t.reported <- t.reported + 1;
-  t.reports <- { Report.error; component; once; fallback } :: t.reports
+  t.reports
+  <- { Report.error; component; once; fallback; seq = t.reported } :: t.reports
 ;;
 
 let retract t ~since ~f =
-  let #(recent, older) = List.split_n t.reports (t.reported - since) in
+  let recent, older =
+    List.split_while t.reports ~f:(fun { Report.seq; _ } -> seq > since)
+  in
   t.reports
   <- List.filter recent ~f:(fun { Report.error; _ } -> not (f error)) @ older
 ;;
@@ -87,7 +91,7 @@ let errors t =
   in
   let shown = String.Hash_set.create () in
   reports
-  |> List.filter ~f:(fun { Report.error; component; once; fallback } ->
+  |> List.filter ~f:(fun { Report.error; component; once; fallback; seq = _ } ->
     (not (Typecheck_error.is_already_reported error))
     && ((not fallback)
         || Option.for_all component ~f:(fun component ->

@@ -53,27 +53,50 @@ let expr_fail (scope : Scope.t) ~loc ?(children = []) error =
   expr_node ~loc (Error children) Type.error
 ;;
 
+(* Whether [error] follows from typing a use, at one of [uses], of a value at
+   its own type: an error at the use, or a cyclic type around it (as
+   [let m = (1, m)]'s). *)
+let caused_by_self_use (error : Typecheck_error.t) ~uses =
+  let contains (outer : Loc.t) (inner : Loc.t) =
+    Loc.File.equal outer.file inner.file
+    && outer.start.#offset <= inner.start.#offset
+    && inner.stop.#offset <= outer.stop.#offset
+  in
+  let cyclic =
+    match error.kind with
+    | Unification_error (Occurs_check_failed _ | Row_mismatch (_, _, Cyclic_row))
+      -> true
+    | _ -> false
+  in
+  List.exists uses ~f:(fun use ->
+    Loc.equal error.loc use || (cyclic && contains error.loc use))
+;;
+
+(* Whether a local of [name] defined by [scope] would refer to a binding outside
+   it, of its stage, were lets not recursive. *)
+let shadows (scope : Scope.t) ~name =
+  match Env.lookup scope.locals name ~level:scope.level with
+  | Bound entry -> Env.Level.equal entry.level scope.level
+  | Forgotten -> false
+  | Unbound ->
+    (match
+       Module_scope.find_value
+         scope.module_
+         (Path (Syntax.Path.of_string name))
+         ~loc:Loc.none
+     with
+     | Ok (Toplevel _ | Prim _ | Intrinsic _) -> true
+     | Ok Unbound | Error _ -> false)
+;;
+
 (* A local value's [body] may not use the value, which isn't there yet. The
-   errors reported since [since] at a use of it, as typing it at its own type is
-   wont to give (as [let m = (1, m)]'s cyclic type), follow from that. *)
+   errors reported since [since] that typing such a use gives follow from it. *)
 let check_self_uses (scope : Scope.t) ~since ~body ~(ident : Typed.Ident.t) =
   match Init_check.self_uses ~body ident with
   | [] -> ()
   | first :: _ as uses ->
-    let contains (outer : Loc.t) (inner : Loc.t) =
-      Loc.File.equal outer.file inner.file
-      && outer.start.#offset <= inner.start.#offset
-      && inner.stop.#offset <= outer.stop.#offset
-    in
-    Program_env.retract scope.program ~since ~f:(fun error ->
-      List.exists uses ~f:(contains error.loc));
-    let shadows =
-      match Env.lookup scope.locals ident.name ~level:scope.level with
-      | Bound _ -> true
-      | Forgotten -> false
-      | Unbound ->
-        Option.is_some (Program_env.find_toplevel scope.program ident.name)
-    in
+    Program_env.retract scope.program ~since ~f:(caused_by_self_use ~uses);
+    let shadows = shadows scope ~name:ident.name in
     Scope.report
       scope
       (Typecheck_error.create
