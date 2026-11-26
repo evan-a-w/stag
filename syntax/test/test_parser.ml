@@ -1312,7 +1312,8 @@ let%expect_test "or-patterns have the lowest precedence, and associate left" =
   pat "`A (x | y)";
   pat "exception (E | F)";
   pat "exception E | exception F";
-  [%expect {|
+  [%expect
+    {|
     (Or (Or (Construct A ()) (Construct B ())) (Construct C ()))
     A | B | C
     (Or (Construct A ()) (Or (Construct B ()) (Construct C ())))
