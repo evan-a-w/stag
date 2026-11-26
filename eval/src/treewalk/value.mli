@@ -41,7 +41,8 @@ type t =
   (** A [Stag.Type_ref.t], [Stag.Constructor_ref.t], [Stag.Field_ref.t] or
       [Stag.Value_ref.t]. *)
 
-val of_prim : Prim.Value.t -> t
+(** [con name args] is the prelude's constructor [name] applied to [args]. *)
+val of_prim : Prim.Value.t -> con:(string -> t list -> t) -> t
 val to_prim : t -> Prim.Value.t or_null
 val of_lit : Syntax.Lit.t -> t
 

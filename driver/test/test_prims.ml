@@ -364,3 +364,42 @@ let main = print_int a; print_int b; print_int c
     782
     |}]
 ;;
+
+let%expect_test "IO prims" =
+  let dir = Core_unix.mkdtemp "/tmp/stag_io" in
+  let file = dir ^/ "f.txt" in
+  run
+    (sprintf
+       {|
+let types = (prerr_string, prerr_endline, flush, read_line, read_all_stdin, read_file, write_file, argv, exit)
+let main =
+  write_file %S "contents";
+  print_endline (read_file %S);
+  print_int (Core.List.length (argv ()));
+  print_endline "";
+  match read_file %S with
+  | _ -> ()
+  | exception Sys_error message -> print_endline message
+|}
+       file
+       file
+       "/nonexistent/stag/missing");
+  Core_unix.unlink file;
+  Core_unix.rmdir dir;
+  [%expect
+    {|
+    val types : (string -> unit) * (string -> unit) * (unit -> unit) * (unit -> option[string]) * (unit -> string) * (string -> string) * (string -> string -> unit) * (unit -> list[string]) * (int -> 'a)
+    val main : unit
+    ---
+    contents
+    0
+    /nonexistent/stag/missing: No such file or directory
+    |}];
+  run {|let main = exit 2|};
+  [%expect
+    {|
+    val main : '_a
+    ---
+    ("Runtime error" ("Exited with code 2" @ t.stag:1:11-17))
+    |}]
+;;

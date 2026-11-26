@@ -144,6 +144,7 @@ type t =
   ; stamps : Stamp_counter.t
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
+  ; mutable argv : string list
   ; mutable phase : Phase.t
   ; c_functions : C_call.t
   }
@@ -188,12 +189,14 @@ let create ~stamps () =
   ; stamps
   ; budget = Budget.create Limits.unlimited
   ; output = Out_channel.output_string stdout
+  ; argv = []
   ; phase = Run_time
   ; c_functions = C_call.create ()
   }
 ;;
 
 let set_output t output = t.output <- output
+let set_argv t argv = t.argv <- argv
 
 let with_output t output ~f =
   let previous = t.output in
@@ -442,6 +445,8 @@ let prim_exception : Prim.Exception.t -> Value.t = function
     Construct (prelude_exception "Invalid_argument", [ String message ])
   | Failure message ->
     Construct (prelude_exception "Failure", [ String message ])
+  | Sys_error message ->
+    Construct (prelude_exception "Sys_error", [ String message ])
 ;;
 
 let pattern_mismatch pattern value = exclave_
@@ -611,7 +616,8 @@ let rec force t ident : unit Eval_result.t @ local = exclave_
                    "Initialization of %s raised %s"
                    ident.name
                    (Runtime_error.Raised.to_string_for_message exn)))
-         | Some { kind = Message _ | Reached_error; loc = _ } | None -> error
+         | Some { kind = Message _ | Reached_error | Exited _; loc = _ } | None
+           -> error
        in
        Hashtbl.set t.toplevels ~key:ident ~data:(Failed { error; uncatchable });
        Eval_result.error error)
@@ -988,9 +994,12 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
             "Prim applied to a non-base value"
               (prim : Prim.t)
               (applied : Value.t list)]
+      | This _ when Prim.run_time_only prim && Phase.is_compile_time t.phase ->
+        runtime_error ~loc (sprintf "%s can't be called at compile time" (Prim.name prim))
       | This args ->
-        (match Prim.apply prim ~output:t.output args with
-         | Ok result -> Eval_result.return (Value.of_prim result)
+        (match Prim.apply prim ~io:{ output = t.output; argv = t.argv } args with
+         | Ok result ->
+           Eval_result.return (Value.of_prim result ~con:Syntax_value.prelude_constructor)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
   | External { symbol; signature; at_compile_time; applied } ->
     let applied = arg :: applied in
@@ -1023,6 +1032,12 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
      | Type_ref_path, Ref ref_ ->
        Eval_result.return (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
+     | Exit, Int code ->
+       if Phase.is_compile_time t.phase
+       then runtime_error ~loc "exit can't be called at compile time"
+       else
+         Eval_result.error
+           (Runtime_error.to_error { Runtime_error.loc; kind = Exited code })
      | Ptr_make, value -> Eval_result.return (Value.Ptr (ref value))
      | Box_make, value -> Eval_result.return (Value.Box value)
      | Assume_global, value -> Eval_result.return value

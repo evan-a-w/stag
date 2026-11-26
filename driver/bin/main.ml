@@ -75,12 +75,15 @@ let check_with_prelude ?output config files =
 
 let check ?output config files = fst (check_with_prelude ?output config files)
 
-let eval ~limits files driver =
-  match Driver.eval ~limits driver with
+let eval ?argv ~limits files driver =
+  match Driver.eval ?argv ~limits driver with
   | Ok () -> ()
   | Error error ->
-    report files (Diagnostic.of_runtime_error error);
-    exit 1
+    (match Stag_eval.Runtime_error.exit_code error with
+     | Some code -> exit code
+     | None ->
+       report files (Diagnostic.of_runtime_error error);
+       exit 1)
 ;;
 
 let files_param =
@@ -199,12 +202,18 @@ let run_command =
     ~readme:(fun () ->
       Pipeline_config.limits_readme ~phases:"compile time and evaluation")
     (let%map_open.Command paths = files_param
-     and limits = Pipeline_config.limits_param () in
+     and limits = Pipeline_config.limits_param ()
+     and argv =
+       flag
+         "--"
+         escape
+         ~doc:"ARG... the program's arguments, as [argv ()] returns them"
+     in
      fun () ->
        let files = read_files paths in
        let driver = check (Pipeline_config.create ~limits paths) files in
        warn_stale files driver;
-       eval ~limits files driver)
+       eval ?argv ~limits files driver)
 ;;
 
 let test_command =

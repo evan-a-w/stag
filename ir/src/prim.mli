@@ -13,8 +13,8 @@ module Value : sig
     | String of string
     | Char of char
     | Unit
-    | String_list of string list
-    (** The prelude's [list[string]], only taken. *)
+    | String_list of string list (** The prelude's [list[string]]. *)
+    | String_option of string option (** The prelude's [option[string]]. *)
   [@@deriving sexp_of]
 end
 
@@ -24,7 +24,15 @@ module Exception : sig
     | Division_by_zero
     | Invalid_argument of string
     | Failure of string
+    | Sys_error of string (** A failed system call, eg. opening a file. *)
   [@@deriving sexp_of]
+end
+
+module Io : sig
+  type t =
+    { output : string -> unit (** Where printing to stdout goes. *)
+    ; argv : string list (** The program's arguments, without its name. *)
+    }
 end
 
 (** A prim only reads its arguments, and returns a new value, sharing nothing
@@ -32,6 +40,9 @@ end
     [global] (see [Mode_rules.prim]). Implementations copy where a library
     function may return an argument itself. *)
 type t [@@deriving sexp_of, equal]
+
+(** As written, eg. [print_string] or [String.length]. *)
+val name : t -> string
 
 (** The types of its arguments, in order. *)
 val args : t -> Type.ty list
@@ -41,13 +52,13 @@ val result : t -> Type.ty
 (** The number of arguments, at least one. *)
 val arity : t -> int
 
-(** Applies [t] to [arity t] arguments, of the types of [ty]. Printing goes to
-    [output]. *)
-val apply
-  :  t
-  -> output:(string -> unit)
-  -> Value.t list
-  -> (Value.t, Exception.t) Result.t
+(** Whether [t] acts on the world outside the compiler, beyond printing and
+    reading files (eg. writing files, reading stdin), so can't be called at
+    compile time. *)
+val run_time_only : t -> bool
+
+(** Applies [t] to [arity t] arguments, of the types of [ty]. *)
+val apply : t -> io:Io.t -> Value.t list -> (Value.t, Exception.t) Result.t
 
 (** By full path. *)
 val find : Syntax.Path.t -> t option

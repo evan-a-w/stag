@@ -156,8 +156,8 @@ let at_compile_time (program : t) f ~loc ~error =
      | Some reflection_error, _ -> Error reflection_error
      | None, Some { kind = Reached_error; loc = _ } ->
        Error Typecheck_error.already_reported
-     | None, (Some { kind = Message _ | Raised _; loc = _ } | None) ->
-       Error (error runtime_error))
+     | None, (Some { kind = Message _ | Raised _ | Exited _; loc = _ } | None)
+       -> Error (error runtime_error))
   | exception Uses_unfinished -> raise Uses_unfinished
   | exception exn ->
     Error

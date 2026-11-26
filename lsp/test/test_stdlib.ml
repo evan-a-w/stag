@@ -63,8 +63,8 @@ let%expect_test "the prelude's sources check cleanly, as the prelude" =
     at client list "let length" ~offset:4 ~f:Client.print_hover;
     [%expect
       {|
-      16:12 16:12-16:27 ```stag raise : exn -> 'a ```
-      16:22 16:12-16:27 ```stag raise : exn -> 'a ```
+      17:12 17:12-17:27 ```stag raise : exn -> 'a ```
+      17:22 17:12-17:27 ```stag raise : exn -> 'a ```
       15:36 15:32-15:40 ```stag Core.Int.succ : int -> int ```
       15:36 -> stag/core/int.stag 14:4-14:8
       11:4 11:4-11:10 ```stag Core.List.length : list['a] -> int ```

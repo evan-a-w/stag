@@ -186,8 +186,9 @@ let check_modules
   { checked; interpreter; eval_order }
 ;;
 
-let eval ?(limits = Limits.unlimited) t =
+let eval ?(limits = Limits.unlimited) ?(argv = []) t =
   Interpreter.set_limits t.interpreter limits;
+  Interpreter.set_argv t.interpreter argv;
   List.fold_result t.eval_order ~init:() ~f:(fun () ident ->
     Interpreter.eval_toplevel t.interpreter ~ident)
 ;;

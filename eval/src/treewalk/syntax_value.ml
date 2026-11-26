@@ -854,3 +854,5 @@ let type_ref_path path =
   | `Prelude path -> To_value.con "Stag.Type_ref.Path.Prelude" [ names path ]
   | `Program path -> To_value.con "Stag.Type_ref.Path.Program" [ names path ]
 ;;
+
+let prelude_constructor = To_value.con
