@@ -82,11 +82,16 @@ module Path = struct
 end
 
 let rec follow t (path : Path.t) =
+  let unknown () = t.whole, Path.modality path, None in
   match path with
   | [] -> t.whole, Modality.id, Some t
-  | Part (step, _) :: rest when Option.is_some (part t step) ->
-    follow (Option.value_exn (part t step)) rest
-  | (Part _ | Through _) :: _ -> t.whole, Path.modality path, None
+  | Part (step, (_ : Modality.t)) :: rest ->
+    (match part t step with
+     (* The component's mode was checked to fit the modality when the value
+        was made: reading it through that changes nothing. *)
+     | Some component -> follow component rest
+     | None -> unknown ())
+  | Through _ :: _ -> unknown ()
 ;;
 
 let rec lower_rank t ~rank =

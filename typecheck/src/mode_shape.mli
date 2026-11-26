@@ -39,6 +39,9 @@ val join
   -> component:(Mode.Var.t list -> Mode.Var.t)
   -> t
 
+(** The component at [step], if its mode is known. *)
+val part : t -> Step.t -> t option
+
 (** The path from a value to a part of it bound by a pattern, outermost first. *)
 module Path : sig
   module Step : sig

@@ -382,7 +382,7 @@ let%expect_test "a limit is reported once, at what first exceeds it" =
 let bad @ const = (Int.add 1 2, Int.add 3 4, Int.add (Int.add 5 6) 7)
 |};
   [%expect
-    {| This is portable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15), then it is bound by an annotated let (at t.stag:2:10-15) |}]
+    {| This is portable, because it applies a function (at t.stag:2:19-30), then it is held (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15), then it is bound by an annotated let (at t.stag:2:10-15) |}]
 ;;
 
 let%expect_test "substituting a name the code doesn't need is an error" =

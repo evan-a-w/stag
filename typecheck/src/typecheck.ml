@@ -3489,9 +3489,10 @@ and expr_type
       List.iter errors ~f:(fun error ->
         ignore (Scope.mode_holds scope ~loc (Error error) : bool))
     in
-    (* The binding is of this rank, so a closure capturing it and generalized
-       keeps its constraints with it. *)
-    Mode_shape.lower_rank shape ~rank:scope.rank;
+    (* A value's binding has the modes of [shape], which are of this rank, so a
+       closure capturing it and generalized keeps their constraints with it. A
+       function's is its closure's. *)
+    if Option.is_none closure then Mode_shape.lower_rank shape ~rank:scope.rank;
     if generalized
     then (
       Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
