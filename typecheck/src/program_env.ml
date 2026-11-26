@@ -74,8 +74,10 @@ let errors t =
       not (Option.exists component ~f:Component.is_abandoned))
   in
   let explained =
-    List.filter_map reports ~f:(fun { Report.component; fallback; _ } ->
-      if fallback then None else component)
+    List.filter_map reports ~f:(fun { Report.error; component; fallback; _ } ->
+      if fallback || Typecheck_error.is_already_reported error
+      then None
+      else component)
   in
   let shown = String.Hash_set.create () in
   reports
