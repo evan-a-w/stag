@@ -297,24 +297,31 @@ let level_name level =
 (* Why a type has pointers is given once in a message: [said] are the reasons
    given already. *)
 let mode_reasons ?(said = String.Hash_set.create ()) because =
-  let alone =
-    List.for_all because ~f:(fun (reason : Mode.Reason.t) ->
-      match reason.shown with
-      | If_alone -> true
-      | Always | Once -> false)
+  let candidates =
+    List.filter_map because ~f:(fun ({ loc; what; shown } : Mode.Reason.t) ->
+      let text =
+        if Loc.is_none loc
+        then what
+        else sprintf "%s (at %s)" what (Loc.to_string loc)
+      in
+      match shown with
+      | Always -> Some (`Shown, text)
+      | If_alone -> Some (`If_alone, text)
+      | Once ->
+        Option.some_if
+          (Hash_set.strict_add said text |> Hash_set.Ok_or_duplicate.is_ok)
+          (`Shown, text))
   in
-  List.filter_map because ~f:(fun ({ loc; what; shown } : Mode.Reason.t) ->
-    let text =
-      if Loc.is_none loc
-      then what
-      else sprintf "%s (at %s)" what (Loc.to_string loc)
-    in
-    Option.some_if
-      (match shown with
-       | Always -> true
-       | If_alone -> alone
-       | Once -> Hash_set.strict_add said text |> Hash_set.Ok_or_duplicate.is_ok)
-      text)
+  let alone =
+    List.for_all candidates ~f:(fun (kind, _) ->
+      match kind with
+      | `If_alone -> true
+      | `Shown -> false)
+  in
+  List.filter_map candidates ~f:(fun (kind, text) ->
+    match kind with
+    | `Shown -> Some text
+    | `If_alone -> Option.some_if alone text)
   |> List.remove_consecutive_duplicates ~equal:String.equal
   |> String.concat ~sep:", then "
 ;;
@@ -332,31 +339,31 @@ let mode_message : Mode.Error.t -> string =
   function
   | Has_pointers { because; bound } ->
     sprintf
-      "This type has pointers%s, but must be pointer-free, because %s"
+      "This type has pointers%s, but must be pointer-free%s"
       (because_clause (mode_reasons because))
-      (mode_reasons [ bound.reason ])
+      (because_clause (mode_reasons [ bound.reason ]))
   | Mismatch { var = _; axis; lower; upper; lower_because; upper_because } ->
     let said = String.Hash_set.create () in
     let lower_because = mode_reasons ~said lower_because in
     let upper_because = mode_reasons ~said upper_because in
     sprintf
-      "This is %s%s, but must be at most %s, because %s"
+      "This is %s%s, but must be at most %s%s"
       (point axis lower)
       (because_clause lower_because)
       (point axis upper)
-      upper_because
+      (because_clause upper_because)
   | Unequal { axis; first; second; because } ->
     sprintf
-      "The modes %s and %s must be equal, because %s"
+      "The modes %s and %s must be equal%s"
       (point axis first)
       (point axis second)
-      (mode_reasons [ because ])
+      (because_clause (mode_reasons [ because ]))
   | Exceeds { axis; lower; upper; because } ->
     sprintf
-      "This is %s, but must be at most %s, because %s"
+      "This is %s, but must be at most %s%s"
       (point axis lower)
       (point axis upper)
-      (mode_reasons [ because ])
+      (because_clause (mode_reasons [ because ]))
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =

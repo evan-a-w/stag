@@ -1179,6 +1179,21 @@ and store_target (target : Expr.t) : Expr.t -> Expr.desc =
       target.loc
       "only a field of a dereference is mutable, as in [p.*.x <- v]: records \
        are values, and are mutated through pointers"
+  | Stack inner | Exclave inner | Region inner ->
+    let keyword =
+      match target.txt with
+      | Stack _ -> "stack_"
+      | Exclave _ -> "exclave_"
+      | _ -> "region_"
+    in
+    ignore (store_target inner : Expr.t -> Expr.desc);
+    fail
+      target.loc
+      (sprintf
+         "%s applies to one item, not to an assignment: write [%s (x <- v)] to \
+          assign inside it"
+         keyword
+         keyword)
   | _ -> fail target.loc "only a variable or a dereference can be assigned to"
 
 and fun_ t ~seq : Expr.t =

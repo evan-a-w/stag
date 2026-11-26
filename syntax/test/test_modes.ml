@@ -123,6 +123,11 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
   expr "region_ (f x; g y)";
   expr "exclave_ match x with A -> f x | B -> g x";
   expr "p.* <- stack_ (Ptr.make 1)";
+  expr "region_ c <- Box.make 3";
+  expr "stack_ p.* <- v";
+  expr "exclave_ x <- v";
+  expr "region_ (c <- Box.make 3)";
+  expr "region_ f x <- v";
   [%expect
     {|
     (Stack (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
@@ -160,6 +165,11 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
       (((Construct A ()) (App (Var f ()) (Var x ())))
        ((Construct B ()) (App (Var g ()) (Var x ()))))))
     (Store (Deref (Var p ())) (Stack (App (Var Ptr.make ()) (Lit (Int 1)))))
+    t.stag:1:0-9: region_ applies to one item, not to an assignment: write [region_ (x <- v)] to assign inside it
+    t.stag:1:0-10: stack_ applies to one item, not to an assignment: write [stack_ (x <- v)] to assign inside it
+    t.stag:1:0-10: exclave_ applies to one item, not to an assignment: write [exclave_ (x <- v)] to assign inside it
+    (Region (Assign c (App (Var Box.make ()) (Lit (Int 3)))))
+    t.stag:1:8-11: only a variable or a dereference can be assigned to
     |}]
 ;;
 
