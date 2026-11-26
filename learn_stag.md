@@ -56,7 +56,9 @@ let sixteen = twice square 2       (* val sixteen : int = 16 *)
 let shout (s : string) : string = String.append s "!"
 
 (* Every `let` is recursive: there is no `rec`. There is no `if` either:
-   match on a bool. *)
+   match on a bool. As a `let` is recursive, a value can't use the one it
+   shadows, nor itself: `let s = String.length s` is an error (the `s` is
+   the one being defined), so give it another name. *)
 let fact n =
   match Int.equal n 0 with
   | true -> 1
