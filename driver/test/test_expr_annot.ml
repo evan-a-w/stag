@@ -35,7 +35,7 @@ let ext (x : string) = let y @ external = x in y
 let bad u = (ext "s" @ gc)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:3:13-20), but must be at most gc, because it is annotated gc (at t.stag:3:23-25) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function returns it (at t.stag:3:13-20), but must be at most gc, because it is annotated gc (at t.stag:3:23-25) |}];
   show {|
 let bad = (Int.to_string 1 : string @ const)
 |};

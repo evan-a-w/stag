@@ -1128,7 +1128,6 @@ let rec expr ?(seq = true) t : Expr.t =
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
-  | Stack_ | Exclave_ | Region_ -> region t ~seq
   | Forget -> forget t ~seq
   | _ ->
     let first = assignment t ~seq in
@@ -1213,6 +1212,21 @@ and store_target (target : Expr.t) : Expr.t -> Expr.desc =
       target.loc
       "only a field of a dereference is mutable, as in [p.*.x <- v]: records \
        are values, and are mutated through pointers"
+  | Stack inner | Exclave inner | Region inner ->
+    let keyword =
+      match target.txt with
+      | Stack _ -> "stack_"
+      | Exclave _ -> "exclave_"
+      | _ -> "region_"
+    in
+    ignore (store_target inner : Expr.t -> Expr.desc);
+    fail
+      target.loc
+      (sprintf
+         "%s applies to one item, not to an assignment: write [%s (x <- v)] to \
+          assign inside it"
+         keyword
+         keyword)
   | _ -> fail target.loc "only a variable or a dereference can be assigned to"
 
 and fun_ t ~seq : Expr.t =
@@ -1280,12 +1294,14 @@ and tuple_item t ~seq : Expr.t =
   | Forget -> forget t ~seq
   | _ -> construct t
 
-(** [stack_ e], [exclave_ e] or [region_ e]. *)
+(** [stack_ e], [exclave_ e] or [region_ e]: [e] is a tuple's item, so
+    [stack_ e1, e2] is [(stack_ e1), e2] and [region_ e1; e2] is
+    [(region_ e1); e2]. *)
 and region t ~seq : Expr.t =
   let start = loc t in
   let keyword = peek t in
   advance t;
-  let body = expr t ~seq in
+  let body = tuple_item t ~seq in
   expr_at
     ~loc:(Loc.merge start body.loc)
     (match keyword with

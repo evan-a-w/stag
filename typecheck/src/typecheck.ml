@@ -366,6 +366,7 @@ and check_toplevel_in
   let modes = Scope.modes scope in
   let fn =
     Function_type.create
+      ~result:(if Toplevel_binding.is_mut toplevel then `Join else `Fresh)
       t
       scope
       ~args:(List.map (Toplevel_binding.args toplevel) ~f:Source.Expr.binding)
@@ -1412,15 +1413,17 @@ and let_mut_type
   =
   let modes = Scope.modes scope in
   let node = expr_node ~loc in
+  (* Unannotated, the cell's type is the join of what is stored in it, so a
+     later value may be used at a more general type than the first. *)
   let ty, annot =
     match annot with
-    | None -> Scope.fresh_ty t scope, None
+    | None -> Scope.join_ty t scope, None
     | Some annot ->
       (match Scope.elaborate_resolved scope annot with
        | Ok (ty, resolved) -> ty, Some resolved
        | Error error ->
          Scope.report scope error;
-         Scope.fresh_ty t scope, None)
+         Scope.join_ty t scope, None)
   in
   let name = Source.Binder.name binder in
   let (body, ident), value =

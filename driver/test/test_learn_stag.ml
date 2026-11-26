@@ -29,11 +29,22 @@ module Transcript = struct
   let empty =
     { signature = []; values = []; output = ""; errors = ""; warnings = "" }
 
+  (* [...] in a claim stands for any text: its other pieces are in the text, in
+     order. *)
   let holds t (claim : Claim.t) =
     let contains text pattern =
-      String.is_substring
-        (Doc_blocks.normalize text)
-        ~substring:(Doc_blocks.normalize pattern)
+      let text = Doc_blocks.normalize text in
+      Doc_blocks.normalize pattern
+      |> String.Search_pattern.split_on (String.Search_pattern.create "...")
+      |> List.map ~f:String.strip
+      |> List.filter ~f:(Fn.non String.is_empty)
+      |> List.fold_until
+           ~init:0
+           ~f:(fun pos piece ->
+             match String.substr_index text ~pos ~pattern:piece with
+             | Some i -> Continue (i + String.length piece)
+             | None -> Stop false)
+           ~finish:(fun _ -> true)
     in
     match claim with
     | Item item -> List.mem t.signature item ~equal:String.equal
@@ -703,11 +714,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 564, characters 21-36:
     564 | let wrap (x : int) = Box.make (lb x)
                                ^^^^^^^^^^^^^^^
-    Error: This is local, because it is allocated by [stack_] (at doc.stag:563:28-47), then it is part of the value (at doc.stag:563:28-47), then the function returns it (at doc.stag:563:19-47), then a function is used at a type with other modes, then the function returns it (at doc.stag:564:30-36), then it is passed to a function (at doc.stag:564:21-36), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes, then the function returns it (at doc.stag:564:21-36), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at doc.stag:564:21-36)
-    ("!! CLAIM DOES NOT HOLD"
-     (claim
-      (Error
-       "... but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead)")))
+    Error: This is local, because it is allocated by [stack_] (at doc.stag:563:28-47), then it is part of the value (at doc.stag:563:28-47), then the function returns it (at doc.stag:563:19-47), then the function returns it (at doc.stag:564:30-36), then it is passed to a function (at doc.stag:564:21-36), then Box.make holds it, then the function returns it (at doc.stag:564:21-36), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at doc.stag:564:21-36)
     === learn_stag.md:569
     module Doc : sig
       val lb : int -> box[int] @ local
@@ -767,7 +774,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 645, characters 22-42:
     645 | let use (x @ local) = apply (fun y -> 0) x
                                 ^^^^^^^^^^^^^^^^^^^^
-    Error: This is regional, because it is annotated local (at doc.stag:645:13-18), then x is passed to the function (at doc.stag:645:22-42), then x is used (at doc.stag:645:41-42), then its type turned out to be string, which has pointers, then it is passed to a function (at doc.stag:645:22-42), but must be at most global, because its type is written without a mode (at doc.stag:644:15-21), then a function is used at a type with other modes, then it is passed to a function (at doc.stag:644:34-37), then x is used (at doc.stag:644:36-37), then x is passed to the function (at doc.stag:644:34-37), then a function is used at a type with other modes
+    Error: This is regional, because it is annotated local (at doc.stag:645:13-18), then x is passed to the function (at doc.stag:645:22-42), then x is used (at doc.stag:645:41-42), then its type turned out to be string, which has pointers, then it is passed to a function (at doc.stag:645:22-42), but must be at most global, because its type is written without a mode (at doc.stag:644:15-21), then it is passed to a function (at doc.stag:644:34-37), then x is used (at doc.stag:644:36-37), then x is passed to the function (at doc.stag:644:34-37)
     === learn_stag.md:649
     module Doc : sig
       val apply : (string -> int) -> string -> int
@@ -779,7 +786,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 656, characters 10-34:
     656 | let bad = capped (Int.to_string 3)
                     ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at doc.stag:656:17-34), then it is passed to a function (at doc.stag:656:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:655:37-51), then a function is used at a type with other modes, then the function returns it (at doc.stag:655:63-64), then x is used (at doc.stag:655:63-64), then x is passed to the function (at doc.stag:655:54-64), then a function is used at a type with other modes
+    Error: This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at doc.stag:656:17-34), then it is passed to a function (at doc.stag:656:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:655:37-51), then the function returns it (at doc.stag:655:63-64), then x is used (at doc.stag:655:63-64), then x is passed to the function (at doc.stag:655:54-64)
     === learn_stag.md:660
     File "doc.stag", line 667, characters 20-25:
     667 | let bad = cell.* <- exact
@@ -832,7 +839,7 @@ let%expect_test "learn_stag.md" =
     File "doc.stag", line 737, characters 45-51:
     737 | let bad = apply (fun (s : string) -> let g @ global = s in String.length g)
                                                        ^^^^^^
-    Error: This is regional, because it is annotated local (at doc.stag:736:24-29), then a function is used at a type with other modes, then s is passed to the function (at doc.stag:737:16-75), then s is used (at doc.stag:737:54-55), then it is bound by an annotated let (at doc.stag:737:45-51), but must be at most global, because it is annotated global (at doc.stag:737:45-51)
+    Error: This is regional, because it is annotated local (at doc.stag:736:24-29), then s is passed to the function (at doc.stag:737:16-75), then s is used (at doc.stag:737:54-55), then it is bound by an annotated let (at doc.stag:737:45-51), but must be at most global, because it is annotated global (at doc.stag:737:45-51)
     === learn_stag.md:741
     File "doc.stag", line 744, characters 16-17:
     744 | let bad = widen p

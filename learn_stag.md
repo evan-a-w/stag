@@ -528,7 +528,7 @@ let used = read_local (make_local 5)    (* val used : int = 5 *)
 (* The components of a by-value tuple or record keep their own modes: the
    global pointer can be returned though its pair holds a local one. *)
 let second x =
-  let pair = ((stack_ (Ptr.make x)), Ptr.make x) in
+  let pair = (stack_ (Ptr.make x), Ptr.make x) in
   match pair with (_, g) -> g
 (* val second : 'a -> ptr['a] *)
 ```

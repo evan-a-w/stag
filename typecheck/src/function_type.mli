@@ -31,9 +31,11 @@ val params : t -> (Typed.Ident.t * Type.ty) list
 (** An annotation that fails to elaborate is reported, and ignored. Mode
     annotations on the arguments, and with [res_mode] on the result, bound their
     modes. Unless [merge] is false, [fun]s directly nested in an unannotated
-    body are arguments of the same function. *)
+    body are arguments of the same function. An unannotated result is the join
+    of what is used at it with [~result:`Join] (a mutable value's). *)
 val create
   :  ?merge:bool
+  -> ?result:[ `Fresh | `Join ]
   -> Fresh.t
   -> Scope.t
   -> args:(Source.Binder.t * Syntax.Annot.t) list
