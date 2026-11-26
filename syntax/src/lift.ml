@@ -41,6 +41,7 @@ let indirect_constructors =
     ; "Expr.Poly_variant", 2
     ; "Expr.Stack", 1
     ; "Expr.Exclave", 1
+    ; "Expr.Region", 1
     ; "Expr.Nontail", 1
     ; "Expr.Annotated", 2
     ; "Expr.Forget", 2
@@ -301,6 +302,7 @@ module Make (B : Builder) = struct
       | Expect expected -> con "Expect" [ B.string expected.txt ]
       | Stack e -> con "Stack" [ expr e ]
       | Exclave e -> con "Exclave" [ expr e ]
+      | Region e -> con "Region" [ expr e ]
       | Nontail e -> con "Nontail" [ expr e ]
       | Annotated (e, a) -> con "Annotated" [ expr e; annot a ]
       | Forget (names, e) -> con "Forget" [ list name names; expr e ]

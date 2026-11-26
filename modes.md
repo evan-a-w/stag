@@ -577,6 +577,21 @@ Each step is a branch stacked on the previous one.
   inferred, an immutable `box['a]` (covariant, read as a part) that `list`
   is built of, so `list` is covariant. A mode variable written once and
   related to nothing prints as `_`, which reads back as a fresh variable.
+- **J. Allocation locality and regions**: an allocation returned by its
+  function has the function's result locality, so `let mk x = Box.make x`
+  is `'a -> box['a] @ 'm`, made on the heap or in the caller's region as
+  each use of the result chooses (see
+  [semantics.md](semantics.md#locality)); the placement of each allocation
+  site (closures, partial applications, boxes, pointers, captured `let mut`
+  cells) is recorded for its owner (toplevel or generalised `let`), as
+  fixed or following one side of the owner's type, for the monomorphiser
+  (`Typed.Program.allocations`), read once the whole component is checked; an
+  interpreter in the tests (`Region_check`) follows the record, failing on
+  any use after free, as an oracle. `region_ e` opens a region of its own,
+  freed when it ends (its value is checked as a function's result, and
+  `exclave_` ends it early). Chosen over a `with_region (fun () -> e)`
+  function: a keyword needs no closure, and reads like `stack_` and
+  `exclave_`.
 
 ## Later
 
@@ -586,7 +601,8 @@ Each step is a branch stacked on the previous one.
   signatures.
 - Pointers in `external` signatures, and callbacks (`@ static` closures
   passed to C).
-- A dynamic mode checker in the interpreter, as a test oracle.
+- A dynamic mode checker in the interpreter, as a test oracle, beyond the
+  locality of allocations, which `Region_check` checks.
 - Presence ordering constraints (`Absent <= Present`) are kept as bounds
   between presence variables, so are solved independently of the order they
   arise in, as are the type equalities of entries the code may use, which

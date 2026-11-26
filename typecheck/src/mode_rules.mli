@@ -4,17 +4,45 @@ open! Import
     it is expected at, and relates that to the mode its value is part of (or is
     only evaluated for). *)
 
+(** An allocation site, of the mode given. *)
+module Site : sig
+  module Position : sig
+    type t =
+      | Here (** Its mode is relative to the current region. *)
+      | Returned
+      (** What it makes is (part of) what its function (or [region_]) gives. *)
+      | Exclaved
+      (** In [exclave_], so its mode is relative to the caller's region. *)
+      | Caller
+      (** Made by the caller of its function, as the result of the call: the
+          closure of a partial application. *)
+    [@@deriving sexp_of]
+  end
+
+  type t =
+    { loc : Loc.t
+    ; kind : Typed.Allocation.Kind.t
+    ; mode : Mode.Var.t
+    ; position : Position.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Ctx : sig
   type t
 
   (** [holds] reports a constraint that doesn't hold, returning whether it did;
-      [report], an annotation that is invalid. *)
+      [report], an annotation that is invalid. [allocated] is told of each
+      allocation site checked, and names it if it is in run time code. [locks]
+      are those the expression checked is under. *)
   val create
     :  modes:Mode.Id_source.t
     -> rank:int
     -> holds:(loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool)
     -> crossing:(Type.ty -> Mode.Crossing.t)
     -> report:(Typecheck_error.t -> unit)
+    -> allocated:(Site.t -> Typed.Allocation.Id.t option)
+    -> locks:Env.Lock.t list
     -> t
 end
 
@@ -39,6 +67,10 @@ module Expected : sig
 
   (** [e [@nontail]]. *)
   val nontail : t -> t
+
+  (** What [Box.make] boxes, at [t], when the box is the value [whole] is (or
+      part of it): then so is what it boxes. *)
+  val boxed : t -> whole:t -> t
 end
 
 (** A mode on an arrow: of an argument, a result or a partial application. *)
@@ -152,14 +184,44 @@ val raised : Ctx.t -> loc:Loc.t -> Mode.Var.t
 
 (** Allocation sites: [stack_] applies to those the value is made of. *)
 module Alloc : sig
+  (** Each names the site, as [Ctx.create]'s [allocated] does. *)
+
   (** A closure of the mode given. *)
-  val closure : Ctx.t -> Expected.t -> loc:Loc.t -> (Mode.Var.t -> 'a) -> 'a
+  val closure
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> (Mode.Var.t -> 'a)
+    -> 'a * Typed.Allocation.Id.t option
 
   (** A quote: the mode of its code. *)
-  val code : Ctx.t -> Expected.t -> loc:Loc.t -> Mode.Var.t
+  val code
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> Mode.Var.t * Typed.Allocation.Id.t option
 
-  (** A pointer, whose mode is the value's. *)
-  val pointer : Expected.t -> unit
+  (** A [Ptr.make] or [Box.make] application, or a partial application of a
+      prim, of the mode given. *)
+  val pointer
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> kind:Typed.Allocation.Kind.t
+    -> Mode.Var.t
+    -> Typed.Allocation.Id.t option
+
+  (** What a prim, [Ptr.make] or [Box.make] used as a value (not applied where
+      it is named) makes when it is applied: on the heap, as where it is applied
+      isn't known. *)
+  val on_heap
+    :  Ctx.t
+    -> loc:Loc.t
+    -> kind:Typed.Allocation.Kind.t
+    -> Typed.Allocation.Id.t option
+
+  (** The cell of a [let mut], of the mode given: it outlives what captures it. *)
+  val cell : Ctx.t -> loc:Loc.t -> Mode.Var.t -> Typed.Allocation.Id.t option
 
   (** [stack_ e]: [Error] if [e] allocates nothing. *)
   val stack
@@ -178,14 +240,14 @@ module Function : sig
   val result_curry : Ctx.t -> loc:Loc.t -> Mode.Var.t
 
   (** The closures of partial applications hold what the function captures and
-      the arguments given so far. *)
+      the arguments given so far. Their sites, as [Typed.Expr.Made.partials]. *)
   val partial_applications
     :  Ctx.t
     -> closure:Mode.Var.t
     -> arg_modes:Mode.Var.t list
     -> partial_modes:Mode.Var.t list
     -> loc:Loc.t
-    -> unit
+    -> Typed.Allocation.Id.t list
 
   (** A parameter in the body, passed at [arg_mode]: the body is a region of its
       own. *)
@@ -204,6 +266,15 @@ module Function : sig
     -> (Expected.t -> Typed.Expr.t)
     -> Typed.Expr.t
 end
+
+(** [region_ e]: [e] is in a region of its own, which it may not return what is
+    local to (but may with [exclave_]), as a function's body. *)
+val region
+  :  Ctx.t
+  -> Expected.t
+  -> loc:Loc.t
+  -> (Expected.t -> Typed.Expr.t)
+  -> Typed.Expr.t
 
 (** [exclave_ e]: [None] if not in tail position. In a quote, it is checked
     where the code is spliced. *)
@@ -270,7 +341,6 @@ val use
   -> toplevel:bool
   -> name:string
   -> loc:Loc.t
-  -> mutable_captured_in_exclave:(unit -> unit)
   -> unit
 
 (** A free variable of the enclosing quote, provided where the code is spliced:
@@ -354,3 +424,9 @@ val default_mode_arg
   -> Mode_arg_position.t option
   -> name:string
   -> unit
+
+(** Where a site is made, as locally as its mode's upper bound allows: in the
+    current region if [local]; in the caller's if [regional] and returned, or
+    [local] under [exclave_] (whose modes are the caller's) or made by the
+    caller; else on the heap. *)
+val placement : Site.t -> Typed.Allocation.Placement.t

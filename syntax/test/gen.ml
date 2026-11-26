@@ -347,6 +347,7 @@ and expr t : Expr.t =
          ; (fun t -> Struct_quote (list t ~min:0 ~max:3 toplevel))
          ; (fun t -> Stack (expr t))
          ; (fun t -> Exclave (expr t))
+         ; (fun t -> Region (expr t))
          ; (fun t -> Nontail (loc (Expr.App (expr t, expr t))))
          ; (fun t ->
              Annotated

@@ -272,6 +272,50 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
   so a function can return a local value (allocate in the caller's region).
+- `region_ e` evaluates `e` in a region of its own, freed when it ends: what
+  `e` allocates locally is gone after it, so its value must not be local to
+  it (as a function's result: at most `regional` inside, local outside),
+  what is local outside it outlives it (`regional` inside), and what is
+  assigned to a `let mut` outside it must not be local to it. A call at its
+  end is not a tail call (the region ends after the call returns), but
+  `exclave_` may end it early, giving a value in the region around it.
+  Allocations it gives are made in the region around it.
+- Allocation is polymorphic in locality: an allocation whose block is
+  returned (the function's value or part of it, by-value records, tuples and
+  constructors included, and what a returned `Box.make` boxes, so both
+  cells of a returned `[1; 2]` are) has the function's result locality, so a
+  scheme `int -> box[int] @ 'm` is used at `global` (allocated on the heap)
+  or at `local` (allocated in the caller's region, as by `exclave_`) as its
+  caller chooses, the same function serving "GC or arena". Only returned
+  allocations are: one bound and then returned (`let b = Box.make x in b`)
+  is made before the function knows its caller's choice, so on the heap
+  unless `local` (then the function can't return it). A recursive function
+  builds a structure in its caller's region only under `exclave_` (the
+  recursive call's value is otherwise in the current call's region, which
+  ends as it returns). A `region_` at a function's end makes what it gives
+  global, so its allocations are on the heap in every instance: the
+  function is no longer polymorphic in where they are made (use `exclave_`
+  inside it to give a local value). A call under `exclave_` inside a
+  `region_` is not a tail call either: the `region_`'s own region is only
+  freed after it.
+- Where each allocation is made is recorded (`Typed.Program.allocations`)
+  for its owner, the toplevel or generalised `let`-bound function it is
+  made in, relative to the innermost region around it: the heap, that
+  region (the function's own, or a `region_`'s), or the one around that
+  (the caller's, under `exclave_` or when returned, or for a `region_`, the
+  enclosing one). An allocation is recorded as made where the owner's
+  least instance, with every side of its type's arrows as low (as global)
+  as its constraints allow, puts it, and, where making one side `local`
+  moves it, as following that side (`res`, `arg.res`, …), with where it is
+  made when that side is local. Sites are closures (including the
+  intermediate closures of a curried function), partial applications (made
+  by the caller, in its own region, when the closure it gets is local),
+  `Box.make` and `Ptr.make` blocks, code values, and the cells of `let mut`s
+  that closures capture. A captured cell outlives each closure capturing
+  it: it is made on the heap unless every capturing closure stays in the
+  cell's own region. `Box.make` used as a value (`apply Box.make x`) is an
+  instance of the primitive, allocating where its instance's result says,
+  like a call of any polymorphic function; it is not a site of its own.
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
 - `local` values cannot escape their region: not returned (except via
   `exclave_`), not stored into `global` blocks (including GC objects), not
@@ -329,7 +373,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   mode is checked again where the code it is substituted into is finally
   spliced.
 - The interpreter has no regions: `stack_` allocates on its heap and
-  `exclave_ e` is `e`. The rules are checked all the same.
+  `exclave_ e` and `region_ e` are `e`. The rules are checked all the same.
 
 A local value of fixed size that reaches neither an `exclave_` nor a caller
 (it dies with its own region) may be put on the machine stack instead (an
@@ -409,10 +453,84 @@ which is always sound since the body was checked for every mode within its
 bounds. A function is compiled once per distinct assignment of its relevant
 variables, so instances differing only in irrelevant modes share code.
 
+Allocation locality is the main code-relevant mode. Each allocation site
+(`Typed.Allocation`) belongs to an owner: a toplevel, or a generalised
+`let` (a function's body, or every site of a value, which the
+monomorphiser copies per instance, so its sites are too). It is either
+placed the same in every instance of its owner or follows one side of the
+type of its owner or of an owner around it (`f.g`'s site may follow `f`'s
+`arg.arg`), the side's owner being named (its result, a curried
+closure's result `res.res`, a higher-order parameter's argument `arg.arg`,
+…): made as `placement` when that side is global, and as `if_local` when
+it is local. A higher-order parameter annotated with an arrow type
+without mode variables (`(k : int -> box[int])`) has that arrow's modes
+fixed, so nothing follows its `arg.arg`: only one whose modes are inferred
+has sides to follow. Each site,
+and each generalised `let` owning some, is named by an id
+(`Typed.Allocation.Id`) its expression carries (`Typed.Expr.Made`), so each
+copy of code spliced in twice is placed, and owns its sites, on its own. An owner is compiled once per assignment of locality to the
+sides its sites follow; one none of whose sites follow a side (none
+returned, or all forced by `stack_`, a `region_` or a captured local) is
+compiled once. A `regional` side instantiates the `global` copy.
+
+The monomorphiser picks each call's copy from the instance it is
+compiling: the call's instantiated scheme relates the callee's sides to
+the caller's mode variables, which, with the caller's own sides fixed by
+its instance and its internal variables at their greatest solution (the
+one the placements are read under), fix each callee side the callee's
+sites follow. A caller that is itself polymorphic in its result passes its
+own choice on, so the choice is made transitively from the outermost
+instance. A primitive, `Box.make` or `Ptr.make` used as a value
+(`Box.make` passed to `apply`, `let g = Int.add n`) is a site where it is
+named, on the heap: where it is applied isn't known. A prim applied to too
+few arguments where it is named (`Int.add 1`) is a site where it is
+applied, placed like any other allocation. A function given all its
+arguments at once (`three 1 2 3`) makes no closure in between.
+
+A toplevel's initializer (`let x = …`, not a function) runs in a region of
+its own, ended when it finishes: a site of it placed `region` is made there,
+and `caller's region` is the heap.
+
 A scheme only copies the mode variables it keeps, not the internal ones of
-the body (such as an allocation site's locality). So the monomorphiser keeps
-each definition's body mode constraints and re-solves them per instance,
-rather than relying on scheme instantiation.
+the body (such as an allocation site's locality). So the monomorphiser
+keeps each definition's body mode constraints and re-solves them per
+instance, rather than relying on scheme instantiation; the recorded
+placements are what that solving gives for the owner's least instance and
+for each followed side raised to `local`.
+
+Placements are read once a toplevel's whole component is checked, before
+it is generalised: earlier, at a `let`, the code after it could still
+constrain what the site's locality is bounded by. Every site's upward
+closure in the constraint graph (the variables its locality is bounded by)
+is then classified as generalising the component would: the sides and
+other mode variables its owners' schemes keep, which instances choose;
+variables left to code outside the component, which may yet constrain
+them, or of other schemes; and variables generalising summarises away,
+all of whose constraints are present. All but those summarised away are
+pinned at their least, so the placement read is the least any instance
+gives: a site is only placed in a region when no instance, and no code yet
+to be checked, can make it less local, and otherwise on the heap. A side
+followed is then unpinned and raised to `local`, the others staying
+pinned, and the site follows it if that gives another placement. Sides are
+found through every type an owner's type reaches: tuples, records and
+variants (nominal and structural), code, boxes and type parameters.
+
+`Region_check` (in the tests) is an oracle for all this: an interpreter
+making each allocation where the record says, in each instance as local as
+its uses allow given the instances it is used from. It fails on any use of
+an allocation after its region ends (a call, read, match or store, a call
+in tail position once its caller's region has ended, a closure's read of
+what it captures), on an allocation that ended being stored, captured, or
+returned from a call or a `region_`, and, at each store and whenever a
+region ends, on anything reachable from a toplevel that isn't on the heap.
+An allocation on the heap that the typechecker has as local may point into
+a region: nothing reaches it after the region ends but the GC, which
+ignores addresses outside the heap. Random programs it runs, using
+allocations through closures, curried and partially applied functions,
+higher-order parameters, calls between and recursion of toplevels,
+generalised `let`s, containers and cells of closures, `region_`, `exclave_`
+and tail calls, at `global` and at `local`, never do; with placements that
+ignore their instance, many do.
 
 ## Pipeline
 

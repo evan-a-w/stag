@@ -63,7 +63,8 @@ let%expect_test "Lift.indirect_arity matches the prelude's declarations" =
      (Stag.Expr.Poly_field 2) (Stag.Expr.Poly_extend 2)
      (Stag.Expr.Poly_restrict 2) (Stag.Expr.Poly_update 2)
      (Stag.Expr.Poly_variant 2) (Stag.Expr.Stack 1) (Stag.Expr.Exclave 1)
-     (Stag.Expr.Nontail 1) (Stag.Expr.Annotated 2) (Stag.Expr.Forget 2))
+     (Stag.Expr.Region 1) (Stag.Expr.Nontail 1) (Stag.Expr.Annotated 2)
+     (Stag.Expr.Forget 2))
     (equal true)
     |}]
 ;;

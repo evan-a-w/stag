@@ -16,6 +16,14 @@ val id : t -> int
 val lower : t -> Const.t
 val upper : t -> Const.t
 val is_generic : t -> bool
+
+(** What [read] gives once the constraints [f] adds hold, which are then undone:
+    [None] if they can't hold. *)
+val assuming
+  :  (unit -> (unit, Mode_error.t) Result.t)
+  -> read:(unit -> 'a)
+  -> 'a option
+
 val lower_rank : t -> rank:int -> unit
 
 (** The lower bound [t] would have on [axis] if the variables [raised] (by [id])
@@ -44,6 +52,21 @@ module Node : sig
       given is raised to its point: what the constraints imply of them then.
       [None] if one can't be. *)
   val raised : (t * int) list -> (t * int) list option
+
+  module Fate = Graph.Fate
+
+  (** What generalizing at [rank], keeping the nodes [kept] holds, does with
+      [t]. *)
+  val fate : t -> rank:int -> kept:(t -> bool) -> Fate.t
+
+  (** [t] and the nodes it is constrained to be below, transitively: those whose
+      upper bounds bound [t]'s. *)
+  val above : t -> t list
+
+  (** Only under [assuming]. *)
+  val at_most : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
+
+  val at_least : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
 end
 
 val node : t -> _ Axis.t -> Node.t

@@ -116,6 +116,8 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
   expr "A [@nontail]";
   expr "`A [@nontail]";
   expr "g (Some (f x)) [@nontail]";
+  expr "region_ let x = stack_ (Some 1) in f x";
+  expr "(region_ (f x), region_ exclave_ g x)";
   [%expect
     {|
     (Stack (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
@@ -137,6 +139,13 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
     t.stag:1:2-12: `[@nontail]` is only written after an application, as in `f x [@nontail]`
     t.stag:1:3-13: `[@nontail]` is only written after an application, as in `f x [@nontail]`
     (Nontail (App (Var g ()) (Construct Some ((App (Var f ()) (Var x ()))))))
+    (Region
+     (Let x () () (Stack (Construct Some ((Lit (Int 1)))))
+      (App (Var f ()) (Var x ()))))
+    (Region
+     (Tuple
+      ((App (Var f ()) (Var x ()))
+       (Region (Exclave (App (Var g ()) (Var x ())))))))
     |}]
 ;;
 

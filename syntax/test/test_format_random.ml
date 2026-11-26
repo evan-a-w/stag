@@ -181,7 +181,7 @@ let%expect_test "random programs with comments format" =
     ~density:3
     ~gen:(fun random i -> { Gen.random; size = i % 40; deep = false })
     ();
-  [%expect {| ((!comments 34976) (!failures 0)) |}]
+  [%expect {| ((!comments 33604) (!failures 0)) |}]
 ;;
 
 let%expect_test "deep random programs with a comment in every gap format" =
@@ -192,7 +192,7 @@ let%expect_test "deep random programs with a comment in every gap format" =
     ~density:1
     ~gen:(fun random i -> { Gen.random; size = 10 + i; deep = true })
     ();
-  [%expect {| ((!comments 28474) (!failures 0)) |}]
+  [%expect {| ((!comments 25414) (!failures 0)) |}]
 ;;
 
 let%expect_test "messy random programs with comments format" =
@@ -203,7 +203,7 @@ let%expect_test "messy random programs with comments format" =
     ~density:3
     ~gen:(fun random i -> { Gen.random; size = i % 40; deep = false })
     ();
-  [%expect {| ((!comments 34525) (!failures 0)) |}]
+  [%expect {| ((!comments 33155) (!failures 0)) |}]
 ;;
 
 let%expect_test "messy random programs with a comment in most gaps format" =
@@ -214,5 +214,5 @@ let%expect_test "messy random programs with a comment in most gaps format" =
     ~density:2
     ~gen:(fun random i -> { Gen.random; size = 5 + (i / 4); deep = true })
     ();
-  [%expect {| ((!comments 17046) (!failures 0)) |}]
+  [%expect {| ((!comments 16441) (!failures 0)) |}]
 ;;

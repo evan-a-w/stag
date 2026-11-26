@@ -19,6 +19,104 @@ let signature source =
   Result.map (checked source) ~f:(Signature.to_string_hum ~modes:true)
 ;;
 
+let placement_lines (checked : Typecheck.Checked.t) =
+  let placement = function
+    | Typed.Allocation.Placement.Heap -> "heap"
+    | Region -> "region"
+    | Caller_region -> "caller's region"
+  in
+  (* Owners of the same name, as those of code spliced in twice, numbered in the
+     order they are first seen. *)
+  let owner_name =
+    let seen = String.Table.create () in
+    List.iter checked.program.allocations ~f:(fun allocation ->
+      let name = Typed.Allocation.Owner.to_string allocation.owner in
+      let owners = Hashtbl.find seen name |> Option.value ~default:[] in
+      if not
+           (List.mem
+              owners
+              allocation.owner
+              ~equal:Typed.Allocation.Owner.equal)
+      then Hashtbl.set seen ~key:name ~data:(owners @ [ allocation.owner ]));
+    fun owner ->
+      let name = Typed.Allocation.Owner.to_string owner in
+      match Hashtbl.find seen name with
+      | Some (_ :: _ :: _ as owners) ->
+        let index, _ =
+          List.findi_exn owners ~f:(fun _ -> Typed.Allocation.Owner.equal owner)
+        in
+        sprintf "%s#%d" name (index + 1)
+      | Some _ | None -> name
+  in
+  let line (allocation : Typed.Allocation.t) =
+    let where =
+      match allocation.follows with
+      | None -> placement allocation.placement
+      | Some { owner; side; if_local } ->
+        sprintf
+          "%s, %s if %s%s is local"
+          (placement allocation.placement)
+          (placement if_local)
+          (if Typed.Allocation.Owner.equal owner allocation.owner
+           then ""
+           else owner_name owner ^ "'s ")
+          (Typed.Allocation.Side.to_string side)
+    in
+    let owner = owner_name allocation.owner in
+    ( allocation.loc
+    , sprintf
+        !"%{Sexp} in %s: %s"
+        (Typed.Allocation.Kind.sexp_of_t allocation.kind)
+        owner
+        where )
+  in
+  List.filter_map checked.program.allocations ~f:(fun allocation ->
+    Option.some_if
+      (String.equal (Loc.file_name allocation.loc) file)
+      (line allocation))
+;;
+
+let typecheck_source source =
+  let stamps = Stamp_counter.create () in
+  let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
+  Interpreter.set_limits interpreter limits;
+  let typecheck = Typecheck.create ~stamps ~interpreter () in
+  Typecheck.typecheck typecheck ~program:(program source)
+;;
+
+let placements source =
+  let prelude = program ~prelude:true "" in
+  match typecheck_source source with
+  | Error { errors; partial = _ } ->
+    Error (List.map errors ~f:Typecheck_error.message)
+  | Ok checked ->
+    Ok
+      ( List.drop checked.signature (List.length prelude)
+      , placement_lines checked )
+;;
+
+let allocations_despite_errors source =
+  let print_lines checked =
+    List.iter (placement_lines checked) ~f:(fun (loc, line) ->
+      printf "%s %s\n" (Loc.to_string loc) line)
+  in
+  match typecheck_source source with
+  | Ok checked -> print_lines checked
+  | Error { errors; partial } ->
+    List.iter errors ~f:(fun error ->
+      print_endline (Typecheck_error.message error));
+    print_lines partial
+;;
+
+let allocations source =
+  match placements source with
+  | Error errors -> List.iter errors ~f:print_endline
+  | Ok (signature, lines) ->
+    print_string (Signature.to_string_hum ~modes:true signature);
+    List.iter lines ~f:(fun (loc, line) ->
+      printf "%s %s\n" (Loc.to_string loc) line)
+;;
+
 (* The modes of a type's arrows' sides (not their [curry]s, which aren't
    printed) and mode arguments, in order. *)
 module Positions = struct

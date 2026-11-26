@@ -249,6 +249,7 @@ let rec expr (v : _ Visitor_type.t) ctx (e : Expr.t) : Expr.t =
     | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:sub)
     | Stack e -> Stack (sub e)
     | Exclave e -> Exclave (sub e)
+    | Region e -> Region (sub e)
     | Nontail e -> Nontail (sub e)
     | Annotated (e, a) ->
       let e = sub e in
