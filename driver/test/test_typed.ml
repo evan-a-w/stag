@@ -970,3 +970,55 @@ let c = .< f >.
           (expansion (Var (Bound (Local x/14)) : int)) : int))))))
     |}]
 ;;
+
+let%expect_test "the code of a local generalized with awaiting uses has the \
+                 refined types"
+  =
+  print
+    {|
+let ident (x : int) : int = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let h (u : unit) = let f = fun v -> c v in f .< 1 >.
+|};
+  [%expect
+    {|
+    ((members
+      (((ident c/5) (kind (Function (y/20)))
+        (scheme "<int>{..'a} -> <int>{..'b}")
+        (body
+         (Quote
+          (App (Var (Persistent (Toplevel ident/4)) : "int -> int")
+           (Splice (code (Var (Bound (Local y/20)) : <int>{..'a}))
+            (subs (Implicit ())) : int)
+           : int)
+          : <int>{..'b}))
+        (where "..'a <= {..'b}")))))
+    ((members
+      (((ident h/6) (kind (Function (u/17))) (scheme "unit -> <int>{..'a}")
+        (body
+         (Let (ident f/18) (args ()) (generalized true)
+          (body
+           (Fun (args (v/19))
+            (body
+             (App (Var (Bound (Toplevel c/5)) : "<int>{..'b} -> <int>{..'c}")
+              (Var (Bound (Local v/19)) : <int>{..'b}) : <int>{..'c}))
+            : "<int>{..'b} -> <int>{..'c}"))
+          (in_
+           (App (Var (Bound (Local f/18)) : "<int>{..'_d} -> <int>{..'a}")
+            (Quote (Lit (Int 1) : int) : <int>{..'_d}) : <int>{..'a}))
+          : <int>{..'a}))
+        (where "..'b <= {..'c}, ..'_d <= {..'a}")))))
+    ((members
+      (((ident ident/4) (kind (Function (x/15))) (scheme "int -> int")
+        (body
+         (Toplevel_splice
+          (code
+           (Let (ident _/16) (args ()) (generalized false)
+            (body
+             (App (Var (Bound (Toplevel h/6)) : "unit -> <int>{..'_a}")
+              (Lit Unit : unit) : <int>{..'_a}))
+            (in_ (Quote (Var (Free x) : int) : "<int>{x : immut int}")) :
+            "<int>{x : immut int}"))
+          (expansion (Var (Bound (Local x/15)) : int)) : int))))))
+    |}]
+;;

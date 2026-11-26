@@ -472,9 +472,13 @@ reported at the use:
   use is wrong (its refinement fails), the error is reported there, once, and
   not again at each instance.
 
-  A local bound to an instance (`let f = c in ...`) is not generalized in the
-  variables the instance's uses involve: `(f .<1>., f .<"s">.)` is an error
-  where `(c .<1>., c .<"s">.)` isn't. Use the toplevel directly.
+  A local generalized does the same with the uses its definition makes (by
+  instances, or in quotes) of toplevels being checked: each instance of the
+  local has instances of them, of its own, so
+  `let f = c in (f .<1>., f .<"s">.)` is as `(c .<1>., c .<"s">.)`. Once the
+  code the local is in is checked, its uses are those of the code, refined in
+  place like an awaiting scheme's, and an error of one is reported there,
+  once, not again at the local's instances.
 - A component that is not generalized (see the value restriction) doesn't
   generalize the use either: it is unified with an instance of the
   toplevel's scheme once it is finished.

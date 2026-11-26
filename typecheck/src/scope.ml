@@ -23,6 +23,7 @@ type t =
   ; params : Param.t list
   ; allocations : Allocation_sites.t option
   ; owner : Allocation_sites.Frame.t option
+  ; uses : Local_uses.t
   }
 
 and quote =

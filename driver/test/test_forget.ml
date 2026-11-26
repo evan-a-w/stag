@@ -595,29 +595,187 @@ let b z = let _ = a z in .< ident >.
     |}]
 ;;
 
-let%expect_test "a local bound to an awaiting instance isn't generalized in \
-                 its uses"
+let%expect_test "a local bound to an awaiting instance is generalized with its \
+                 uses"
+  =
+  let program h =
+    sprintf
+      {|
+let ident x = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let first p = match p with (a, _) -> a
+let h (u : unit) = %s
+|}
+      h
+  in
+  List.iter
+    ~f:(fun h ->
+      print_endline h;
+      match Mode_helpers.signature (program h) with
+      | Ok signature ->
+        String.split_lines signature
+        |> List.filter ~f:(String.is_prefix ~prefix:"val h")
+        |> List.iter ~f:print_endline
+      | Error errors -> List.iter errors ~f:print_endline)
+    [ {|(c .< 1 >., c .< "s" >.)|}
+    ; {|let f = c in (f .< 1 >., f .< "s" >.)|}
+    ; {|let f = c in let g = f in (g .< 1 >., g .< "s" >.)|}
+    ; {|let f y = c y in (f .< 1 >., f .< "s" >.)|}
+    ; {|let p = (c, 0) in (first p .< 1 >., first p .< "s" >.)|}
+    ; {|let f = c in let g (z : unit) = (f .< 1 >., f .< "s" >.) in g ()|}
+    ; {|let g (z : unit) = let f = c in (f .< 1 >., f .< "s" >.) in g ()|}
+    ; {|.< let f = c in (f .< 1 >., f .< "s" >.) >.|}
+    ];
+  [%expect
+    {|
+    (c .< 1 >., c .< "s" >.)
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    let f = c in (f .< 1 >., f .< "s" >.)
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    let f = c in let g = f in (g .< 1 >., g .< "s" >.)
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    let f y = c y in (f .< 1 >., f .< "s" >.)
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    let p = (c, 0) in (first p .< 1 >., first p .< "s" >.)
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    let f = c in let g (z : unit) = (f .< 1 >., f .< "s" >.) in g ()
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    let g (z : unit) = let f = c in (f .< 1 >., f .< "s" >.) in g ()
+    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    .< let f = c in (f .< 1 >., f .< "s" >.) >.
+    val h : unit @ _ -> <<int>{..'a} * <string>{..'b}>{..'c} @ _
+    |}]
+;;
+
+let%expect_test "a local bound to an awaiting instance is as its toplevel, in \
+                 any order of the toplevels"
+  =
+  let ident = {|let ident x = .~(let _ = h () in .< x >.)|} in
+  let c = {|let c y = .< ident .~y >.|} in
+  let h body = sprintf {|let h (u : unit) = %s|} body in
+  let direct = h {|(c .< 1 >., c .< "s" >.)|} in
+  let local = h {|let f = c in (f .< 1 >., f .< "s" >.)|} in
+  let show_order order =
+    let program h =
+      String.concat
+        ~sep:"\n"
+        (""
+         :: List.map order ~f:(function
+           | `Ident -> ident
+           | `C -> c
+           | `H -> h))
+    in
+    let result h =
+      match Mode_helpers.signature (program h) with
+      | Ok signature -> String.split_lines signature
+      | Error errors -> errors
+    in
+    let names =
+      List.map order ~f:(function
+        | `Ident -> "ident"
+        | `C -> "c"
+        | `H -> "h")
+    in
+    let direct = result direct in
+    let local = result local in
+    printf
+      "%s: %s\n"
+      (String.concat ~sep:", " names)
+      (if [%equal: string list] direct local then "as directly" else "differs");
+    List.iter local ~f:(printf "  %s\n")
+  in
+  List.iter
+    ~f:show_order
+    [ [ `Ident; `C; `H ]
+    ; [ `Ident; `H; `C ]
+    ; [ `C; `Ident; `H ]
+    ; [ `C; `H; `Ident ]
+    ; [ `H; `Ident; `C ]
+    ; [ `H; `C; `Ident ]
+    ];
+  [%expect
+    {|
+    ident, c, h: as directly
+      val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+      val c : <'a>{..'b} @ 'm0 -> <'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+      val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    ident, h, c: as directly
+      val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+      val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+      val c : <'a>{..'b} @ 'm0 -> <'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    c, ident, h: as directly
+      The toplevel h is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+      This expression has type string but an expression was expected of type int
+    c, h, ident: as directly
+      This expression has type string but an expression was expected of type int
+      The toplevel h is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+    h, ident, c: as directly
+      The toplevel h is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+    h, c, ident: as directly
+      The toplevel h is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+    |}]
+;;
+
+let%expect_test "a wrong use in a local's instance is reported at the \
+                 instance, once"
+  =
+  let program h =
+    sprintf
+      {|
+let ident (x : int) = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let h (u : unit) = %s
+|}
+      h
+  in
+  List.iter
+    ~f:(fun h ->
+      print_endline h;
+      match Mode_helpers.located_errors (program h) with
+      | Ok () -> print_endline "  ok"
+      | Error errors ->
+        List.iter errors ~f:(fun (loc, message) ->
+          printf "  %s: %s\n" (Sexp.to_string [%sexp (loc : Loc.t)]) message))
+    [ {|let f = c in (f .< 1 >., f .< "s" >.)|}
+    ; {|let f = c in let g = f in (g .< "s" >., g .< "s" >.)|}
+      (* The local's own use is wrong: reported there, not again at its
+         instances, and even if it has none. *)
+    ; {|let f = fun (v : unit) -> c .< "s" >. in (f (), f ())|}
+    ; {|let f = fun (v : unit) -> c .< "s" >. in 0|}
+    ];
+  [%expect
+    {|
+    let f = c in (f .< 1 >., f .< "s" >.)
+      t.stag:4:44-45: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    let f = c in let g = f in (g .< "s" >., g .< "s" >.)
+      t.stag:4:46-47: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+      t.stag:4:59-60: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    let f = fun (v : unit) -> c .< "s" >. in (f (), f ())
+      t.stag:4:45-46: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    let f = fun (v : unit) -> c .< "s" >. in 0
+      t.stag:4:45-46: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    |}]
+;;
+
+let%expect_test "a local bound to an awaiting instance in the splice of the \
+                 toplevel awaited"
   =
   show
     {|
-let ident x = .~(let _ = h () in .< x >.)
-let c y = .< ident .~y >.
-let h (u : unit) = (c .< 1 >., c .< "s" >.)
+let ident x = .~(let f = c in let _ = (f .< 1 >., f .< "s" >.) in .< x >.)
+let c (y : <'a>{..'r}) = .< ident .~y >.
+|};
+  show
+    {|
+let ident (x : int) = .~(let f = c in let _ = (f .< 1 >., f .< "s" >.) in .< x >.)
+let c (y : <'a>{..'r}) = .< ident .~y >.
 |};
   [%expect
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val c : <'a>{..'b} @ 'm0 -> <'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
-    val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
-    |}];
-  show
-    {|
-let ident x = .~(let _ = h () in .< x >.)
-let c y = .< ident .~y >.
-let h (u : unit) = let f = c in (f .< 1 >., f .< "s" >.)
-|};
-  [%expect
-    {| This expression has type string but an expression was expected of type int |}]
+    In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    |}]
 ;;
 
 let%expect_test "an awaiting scheme's joins are refined in place, in either \

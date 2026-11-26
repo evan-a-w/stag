@@ -45,12 +45,14 @@ let has_failed (toplevel : Toplevel_binding.t) =
 (* Relates [ty], the type of the toplevel [use] is of, to [use]'s type by
    variance, as a use of a finished toplevel is, reporting if they differ. In an
    instance of a scheme that failed, eg. as its own use of the toplevel differs,
-   the error was reported there. *)
+   or of a local's whose use failed, the error was reported there. *)
 let relate_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
   match Unify.sub_ty t ~lower:ty ~upper:use.ty with
   | Ok () -> true
   | Error error ->
-    if List.exists use.via ~f:(fun via ->
+    Quoted_use.fail use;
+    if Quoted_use.template_failed use
+       || List.exists use.via ~f:(fun via ->
          has_failed (Program_env.toplevel program via.toplevel))
     then Component.fail use.reporter.component
     else Program_env.report_use program use error;

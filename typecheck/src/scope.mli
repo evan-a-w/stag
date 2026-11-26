@@ -28,6 +28,9 @@ type t =
       is checked. *)
   ; owner : Allocation_sites.Frame.t option
   (** The innermost [let] whose function (or value) is being checked. *)
+  ; uses : Local_uses.t
+  (** The uses of toplevels being checked made by the code, by the innermost
+      [let] whose definition is being checked. *)
   }
 
 and quote =
