@@ -78,7 +78,7 @@ module Decl = struct
   let ty name = none (Type_decl.Param.Ty name)
 
   let type_ ?(params = []) name' kind =
-    toplevel (Type { Type_decl.name = name name'; params; kind })
+    toplevel (Type { Type_decl.name = name name'; params; kind; nonrec_ = false })
   ;;
 
   let variant ?params name constructors =

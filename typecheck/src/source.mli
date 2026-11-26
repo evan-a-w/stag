@@ -107,6 +107,7 @@ module Expr : sig
       | App of t * t
       | Let of
           { binder : Binder.t
+          ; nonrec_ : bool (** [binder] is not bound in [body]. *)
           ; args : (Binder.t * Syntax.Annot.t) list
           ; annot : Syntax.Type_expr.t option
           ; mode : Syntax.Mode_expr.t option

@@ -1238,7 +1238,7 @@ let%expect_test "names" =
       , of_toplevel (fun name ->
           at
             (Syntax.Toplevel.Type
-               { name = at name; params = []; kind = Abstract })) )
+               { name = at name; params = []; kind = Abstract; nonrec_ = false })) )
     ; "label", of_expr (fun name -> expr (Poly_variant (at name, None)))
     ; "tyvar", of_type (fun name -> ty (Var name))
     ; ( "context"
@@ -1420,7 +1420,7 @@ let%expect_test "shapes" =
     |}];
   expr (at (Syntax.Expr.Record []));
   pattern (at (Syntax.Pattern.Record []));
-  type_decl { name = at "t"; params = []; kind = Record [] };
+  type_decl { name = at "t"; params = []; kind = Record []; nonrec_ = false };
   [%expect
     {|
     Malformed syntax: expected at least one field, got Nil, within Stag.Expr.Record
@@ -1471,7 +1471,7 @@ let%expect_test "modes and modalities only where the parser puts them" =
     ]
   in
   let type_decl (kind : Syntax.Type_decl.Kind.t) : Syntax.Program.t =
-    [ at (Syntax.Toplevel.Type { name = at "t"; params = []; kind }) ]
+    [ at (Syntax.Toplevel.Type { name = at "t"; params = []; kind; nonrec_ = false }) ]
   in
   type_expr (arrow (moded int) (moded int));
   type_expr (arrow (arrow (moded int) int) (moded (arrow int int)));

@@ -1076,6 +1076,24 @@ let params t =
   loop []
 ;;
 
+let mut_nonrec = "a mutable variable is never recursive; remove `nonrec`"
+
+(* Whether [nonrec] follows, skipping it. *)
+let nonrec_ t =
+  is t Nonrec
+  &&
+  (advance t;
+   true)
+;;
+
+(* [nonrec_] after [let]. *)
+let let_nonrec t =
+  let nonrec_loc = loc t in
+  let nonrec_ = nonrec_ t in
+  if nonrec_ && is t Mut then fail nonrec_loc mut_nonrec;
+  nonrec_
+;;
+
 (* With [~seq:false], as in a [{...}] entry, [e1; e2] is not parsed (also in the
    bodies of [let] and [match]), leaving the [;] as the separator. *)
 let rec expr ?(seq = true) t : Expr.t =
@@ -1096,6 +1114,7 @@ let rec expr ?(seq = true) t : Expr.t =
 
 and binding_name t =
   if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
+  if is t Nonrec then fail (loc t) "`nonrec` goes directly after `let`";
   match peek t with
   | Underscore ->
     let loc = loc t in
@@ -1114,6 +1133,7 @@ and binding t =
 (** [name : t = e], after [let mut]. *)
 and mut_binding t =
   expect t Mut;
+  if is t Nonrec then fail (loc t) mut_nonrec;
   let name = binding_name t in
   if not (List.is_empty (params t))
   then fail name.loc "a mutable variable has no parameters";
@@ -1124,6 +1144,7 @@ and mut_binding t =
 and let_ t ~seq : Expr.t =
   let start = loc t in
   expect t Let;
+  let nonrec_ = let_nonrec t in
   match peek t with
   | Mut ->
     let name, annot, equal = mut_binding t in
@@ -1138,7 +1159,9 @@ and let_ t ~seq : Expr.t =
     let body = expr t ~seq in
     expr_at
       ~loc:(Loc.merge start body.loc)
-      (Expr.Let (name, params, annot, equal, body))
+      (if nonrec_
+       then Expr.Let_nonrec (name, params, annot, equal, body)
+       else Expr.Let (name, params, annot, equal, body))
 
 (** [x <- e], right associative, looser than [,]. *)
 and assignment t ~seq : Expr.t =
@@ -1681,9 +1704,10 @@ let type_kind t ~(parsed : Type_decl.Kind.t -> unit) : Type_decl.Kind.t =
 
 (* [salvage] is told what parsed of it so far, as it is parsed. *)
 let type_decl t ~salvage : Type_decl.t =
+  let nonrec_ = nonrec_ t in
   let name = lident t ~what:"a type name" in
   let salvage params kind =
-    salvage { Type_decl.name; params; kind = Malformed kind }
+    salvage { Type_decl.name; params; kind = Malformed kind; nonrec_ }
   in
   salvage [] Abstract;
   let params =
@@ -1706,7 +1730,7 @@ let type_decl t ~salvage : Type_decl.t =
     else Abstract
   in
   salvage params kind;
-  { name; params; kind }
+  { name; params; kind; nonrec_ }
 ;;
 
 (* What follows a skipped lexeme in a toplevel parsed as if it were not there,
@@ -1807,21 +1831,27 @@ let rec toplevel t : Toplevel.t =
     since t start (Toplevel.Let_mut (name, annot, equal))
   | Let ->
     advance t;
+    let nonrec_ = let_nonrec t in
+    let let_ name params annot body : Toplevel.desc =
+      if nonrec_
+      then Let_nonrec (name, params, annot, body)
+      else Let (name, params, annot, body)
+    in
     let name = binding_name t in
-    salvage t (fun error -> Let (name, [], Annot.none, error));
+    salvage t (fun error -> let_ name [] Annot.none error);
     let params = params t in
-    salvage t (fun error -> Let (name, params, Annot.none, error));
+    salvage t (fun error -> let_ name params Annot.none error);
     let annot = annot t in
-    salvage t (fun error -> Let (name, params, annot, error));
+    salvage t (fun error -> let_ name params annot error);
     expect t Equal;
     let equal = expr t in
     if is t In
     then (
-      salvage t (fun _ -> Let (name, params, annot, equal));
+      salvage t (fun _ -> let_ name params annot equal);
       fail
         (loc t)
         "unexpected `in`: a toplevel `let` is a declaration, without `in`");
-    since t start (Toplevel.Let (name, params, annot, equal))
+    since t start (let_ name params annot equal)
   | Type ->
     advance t;
     let decl =

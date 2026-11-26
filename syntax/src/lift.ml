@@ -24,6 +24,7 @@ let indirect_constructors =
     ; "Pattern.Exception", 1
     ; "Expr.App", 2
     ; "Expr.Let", 5
+    ; "Expr.Let_nonrec", 5
     ; "Expr.Seq", 2
     ; "Expr.Let_mut", 4
     ; "Expr.Assign", 2
@@ -216,7 +217,7 @@ module Make (B : Builder) = struct
       | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
       | Mode m -> con "Stag.Type_expr.Arg.Mode" [ mode_expr m ]
 
-    and type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
+    and type_decl ({ name = decl_name; params; kind; nonrec_ = _ } : Type_decl.t) =
       B.record
         [ "name", name decl_name
         ; "params", list type_param params
@@ -253,6 +254,10 @@ module Make (B : Builder) = struct
       | Let (var, bindings, a, equal, body) ->
         con
           "Let"
+          [ name var; list binding bindings; annot a; expr equal; expr body ]
+      | Let_nonrec (var, bindings, a, equal, body) ->
+        con
+          "Let_nonrec"
           [ name var; list binding bindings; annot a; expr equal; expr body ]
       | Seq (first, second) -> con "Seq" [ expr first; expr second ]
       | Let_mut (var, a, equal, body) ->
@@ -309,8 +314,11 @@ module Make (B : Builder) = struct
       match txt with
       | Let (var, bindings, a, body) ->
         con "Let" [ name var; list binding bindings; annot a; expr body ]
+      | Let_nonrec (var, bindings, a, body) ->
+        con "Let_nonrec" [ name var; list binding bindings; annot a; expr body ]
       | Let_mut (var, a, body) -> con "Let_mut" [ name var; annot a; expr body ]
-      | Type decl -> con "Type" [ type_decl decl ]
+      | Type decl ->
+        con (if decl.nonrec_ then "Type_nonrec" else "Type") [ type_decl decl ]
       | Exception (exn_name, args) | Malformed_exception (exn_name, args) ->
         con "Exception" [ name exn_name; list type_expr args ]
       | External { name = ext_name; ty; symbol } ->
