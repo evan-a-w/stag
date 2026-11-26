@@ -95,6 +95,9 @@ module Kind = struct
     | Empty_record
     | Misplaced_exception_pattern
     | Match_without_value_cases
+    | Non_exhaustive_match of string
+    | Unused_arm
+    | Unused_exception_arm
     | Duplicate_pattern_variable of string
     | Or_pattern_variable_missing of string
     | Or_pattern_variable_type of
@@ -580,6 +583,16 @@ let rec kind_message (kind : Kind.t) ~show_type =
      [match e with | exception E -> ...]"
   | Match_without_value_cases ->
     "A match must have a case for the value, not only exception cases"
+  | Non_exhaustive_match missing ->
+    sprintf
+      "This match is not exhaustive [non-exhaustive]: it does not cover `%s`"
+      missing
+  | Unused_arm ->
+    "This case is unused [unused-arm]: the cases before it match every value \
+     it does"
+  | Unused_exception_arm ->
+    "This exception case is unused [unused-arm]: the exception cases before \
+     it match every exception it does"
   | Duplicate_pattern_variable name ->
     sprintf "The variable %s is bound several times in this matching" name
   | Or_pattern_variable_missing name ->

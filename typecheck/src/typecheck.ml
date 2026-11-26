@@ -1897,6 +1897,59 @@ and record_update_type
        in
        if unified then update else node (Error [ update ]) Type.error)
 
+(* Matches in generated code were checked where they were written, in quotes. *)
+and report_coverage (scope : Scope.t) ~loc ~scrutinee ~cases ~exception_cases =
+  let variant_constructors type_name =
+    match Type_env.variant_constructors scope.program.type_env type_name with
+    | Ok constructors ->
+      Option.map
+        constructors
+        ~f:
+          (List.map ~f:(fun (constructor : Type_env.Constructor.t) ->
+             ( { Typed.Constructor_ref.type_name
+               ; name = constructor.name
+               ; index = constructor.index
+               }
+             , List.length constructor.args )))
+    | Error (_ : Typecheck_error.t) -> None
+  in
+  (* Relative to the innermost enclosing module that has it. *)
+  let name canonical =
+    match Prelude_path.relative canonical with
+    | Some _ -> Prelude_path.to_string_hum canonical
+    | None ->
+      let path = Module_scope.path scope.module_ in
+      List.init (List.length path) ~f:(fun n ->
+        String.concat (List.take path (List.length path - n)) ~sep:"." ^ ".")
+      |> List.find_map ~f:(fun prefix ->
+        String.chop_prefix canonical ~prefix)
+      |> Option.value ~default:canonical
+  in
+  let { Exhaustiveness.Result.missing; unused } =
+    Exhaustiveness.check_match ~variant_constructors ~name ~scrutinee cases
+  in
+  Option.iter missing ~f:(fun missing ->
+    Scope.warning
+      scope
+      Non_exhaustive
+      (Typecheck_error.create
+         ~loc
+         (Non_exhaustive_match
+            (Exhaustiveness.Counterexample.to_string missing))));
+  let unused_cases kind cases unused =
+    List.iter unused ~f:(fun index ->
+      let (pattern : Typed.Pattern.t) = List.nth_exn cases index in
+      Scope.warning
+        scope
+        Unused_arm
+        (Typecheck_error.create ~loc:pattern.loc kind))
+  in
+  unused_cases Unused_arm cases unused;
+  unused_cases
+    Unused_exception_arm
+    exception_cases
+    (Exhaustiveness.check_exception_arms ~variant_constructors exception_cases)
+
 and match_type
   ?expected
   ~hint
@@ -2035,6 +2088,15 @@ and match_type
      |> Result.iter_error ~f:(fun error ->
        patterns_failed := true;
        Scope.report scope error));
+  (match expr with
+   | Syntax _ when not (!patterns_failed || Type.is_error scrutinee.ty) ->
+     report_coverage
+       scope
+       ~loc
+       ~scrutinee:scrutinee.ty
+       ~cases:(List.map cases ~f:fst)
+       ~exception_cases:(List.map exception_cases ~f:fst)
+   | Syntax _ | Generated _ -> ());
   let match_ = node (Match { scrutinee; cases; exception_cases }) result in
   if !patterns_failed then node (Error [ match_ ]) result else match_
 

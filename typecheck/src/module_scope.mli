@@ -101,6 +101,9 @@ val warnings : t -> Warning.Settings.t
 (** The full path of member [name] of [t]'s module, joined with [.]. *)
 val canonical_name : t -> string -> string
 
+(** The full path of [t]'s module. *)
+val path : t -> string list
+
 (** The end of the member module [name] of [t]'s module, which must exist. *)
 val enter : t -> string -> t
 

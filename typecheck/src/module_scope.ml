@@ -134,6 +134,7 @@ end
 let join path = String.concat path ~sep:"."
 let sexp_of_t t = Sexp.Atom (join t.module_.path)
 let canonical_name t name = join (t.module_.path @ [ name ])
+let path t = t.module_.path
 
 let at_end module_ = { module_; position = End; warnings = module_.warnings }
 let enter t name = at_end (Hashtbl.find_exn t.module_.modules name)

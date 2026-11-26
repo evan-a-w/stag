@@ -110,7 +110,11 @@ let poly_record ?(rest = Typed.Pattern.Rest.Open) fields =
 let check ?(scrutinee = Type.error) patterns =
   print_s
     [%sexp
-      (Exhaustiveness.check_match ~variant_constructors ~scrutinee patterns
+      (Exhaustiveness.check_match
+         ~variant_constructors
+         ~name:Prelude_path.short_name
+         ~scrutinee
+         patterns
        : Exhaustiveness.Result.t)]
 ;;
 
@@ -396,6 +400,7 @@ let%expect_test "many constructors" =
     [%sexp
       (Exhaustiveness.check_match
          ~variant_constructors
+         ~name:Prelude_path.short_name
          ~scrutinee:Type.error
          patterns
        : Exhaustiveness.Result.t)];

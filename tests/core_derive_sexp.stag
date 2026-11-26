@@ -1221,9 +1221,15 @@ include%inline .~(Core.Sexp.derive (type errors))
 end%inline
 
 let%expect_test "Core's error types" =
-  let parse_error = match Core.Sexp.of_string "(a" with Error e -> e in
+  let parse_error =
+    match Core.Sexp.of_string "(a" with
+    | Error e -> e
+    | Ok _ -> raise (Failure "parsed")
+  in
   let of_sexp_error =
-    match Core.Sexp.int_of_sexp (Core.Sexp.Atom "x") with Error e -> e
+    match Core.Sexp.int_of_sexp (Core.Sexp.Atom "x") with
+    | Error e -> e
+    | Ok _ -> raise (Failure "converted")
   in
   round_trip
     sexp_of_errors

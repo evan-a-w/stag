@@ -22,6 +22,7 @@ type t =
   ; declaration_splices : Typed.Expr.t Queue.t
   ; unfinished : Type.ty Stack.t
   ; mutable reports : Report.t list
+  ; mutable warnings : Report.t list
   ; mutable reported : int
   ; mutable syntax_errors : bool
   ; splice_starts : int Stack.t
@@ -77,9 +78,20 @@ let report_use t (use : Quoted_use.t) error =
   Component.fail use.reporter.component
 ;;
 
-let errors t =
+let warn t (reporter : Reporter.t) ?once warning =
+  t.warnings
+  <- { Report.error = Reporter.wrap_error reporter warning
+     ; component = Some reporter.component
+     ; once
+     ; fallback = false
+     ; seq = 0
+     }
+     :: t.warnings
+;;
+
+let shown reports =
   let reports =
-    List.rev t.reports
+    List.rev reports
     |> List.filter ~f:(fun { Report.component; _ } ->
       not (Option.exists component ~f:Component.is_abandoned))
   in
@@ -100,6 +112,9 @@ let errors t =
       Hash_set.strict_add shown key |> Hash_set.Ok_or_duplicate.is_ok))
   |> List.rev_map ~f:(fun { Report.error; _ } -> error)
 ;;
+
+let errors t = shown t.reports
+let warnings t = shown t.warnings
 
 let fresh_ident t name = Typed.Ident.fresh t.stamps name
 let find_toplevel t name = Hashtbl.find t.toplevels name |> Option.map ~f:force
@@ -190,6 +205,7 @@ let create
       ; allocation_ids = 0
       ; unfinished = Stack.create ()
       ; reports = []
+      ; warnings = []
       ; reported = 0
       ; syntax_errors = false
       ; splice_starts = Stack.create ()

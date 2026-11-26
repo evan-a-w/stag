@@ -24,9 +24,11 @@ end
 
 (** [variant_constructors name] is the constructors of the nominal variant type
     of canonical name [name], in order, with their arities, or [None] if it is
-    not a variant. *)
+    not a variant. Counterexamples name constructors and fields [name] of their
+    canonical names. *)
 val check_match
   :  variant_constructors:(string -> (Typed.Constructor_ref.t * int) list option)
+  -> name:(string -> string)
   -> scrutinee:Type.ty
   -> Typed.Pattern.t list
   -> Result.t

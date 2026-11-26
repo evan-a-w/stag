@@ -105,8 +105,8 @@ module Head = struct
     | Poly_record labels -> List.length labels
   ;;
 
-  let counterexample t (args : Counterexample.t list) : Counterexample.t =
-    let short = Prelude_path.short_name in
+  let counterexample t (args : Counterexample.t list) ~name : Counterexample.t =
+    let short = name in
     let relevant fields =
       List.filter fields ~f:(fun (_, arg) -> not (Counterexample.is_any arg))
     in
@@ -278,7 +278,7 @@ module Signature = struct
 
   (* [None] if [heads], those of a column, has every constructor of its type,
      else a value of the type none of them match. *)
-  let missing ~variant_constructors (heads : Head.t list)
+  let missing ~variant_constructors ~name (heads : Head.t list)
     : Counterexample.t option
     =
     let mem head = List.mem heads head ~equal:Head.equal in
@@ -306,7 +306,7 @@ module Signature = struct
             then None
             else
               Some
-                (Head.counterexample
+                (Head.counterexample ~name
                    head
                    (List.init arity ~f:(fun _ -> Counterexample.any)))))
     | Poly_variant { ty; _ } :: _ ->
@@ -317,7 +317,7 @@ module Signature = struct
        with
        | Some (tag, _) ->
          Some
-           (Head.counterexample
+           (Head.counterexample ~name
               (Poly_variant { tag; ty })
               [ Counterexample.any ])
        | None -> Option.some_if row.open_ Counterexample.any)
@@ -328,6 +328,7 @@ module Context = struct
   type t =
     { variant_constructors :
         string -> (Typed.Constructor_ref.t * int) list option
+    ; name : string -> string
     }
 
   let column (rows : Matrix.t) = List.filter_map rows ~f:List.hd
@@ -350,7 +351,7 @@ module Context = struct
     | Wild :: rest ->
       let heads = Matrix.heads (column rows) in
       (match
-         Signature.missing ~variant_constructors:t.variant_constructors heads
+         Signature.missing ~variant_constructors:t.variant_constructors ~name:t.name heads
        with
        | None ->
          List.exists heads ~f:(fun head ->
@@ -370,7 +371,7 @@ module Context = struct
     else (
       let heads = Matrix.heads (column rows) in
       match
-        Signature.missing ~variant_constructors:t.variant_constructors heads
+        Signature.missing ~variant_constructors:t.variant_constructors ~name:t.name heads
       with
       | None ->
         List.find_map heads ~f:(fun head ->
@@ -378,7 +379,7 @@ module Context = struct
           counterexample t (Matrix.specialize head rows) (arity + n - 1)
           |> Option.map ~f:(fun patterns ->
             let #(args, rest) = List.split_n patterns arity in
-            Head.counterexample head args :: rest))
+            Head.counterexample head args ~name:t.name :: rest))
       | Some missing ->
         counterexample t (Matrix.default rows) (n - 1)
         |> Option.map ~f:(fun rest -> missing :: rest))
@@ -402,8 +403,8 @@ let is_empty_variant ~variant_constructors scrutinee =
   | _ -> false
 ;;
 
-let check_match ~variant_constructors ~scrutinee patterns =
-  let t = { Context.variant_constructors } in
+let check_match ~variant_constructors ~name ~scrutinee patterns =
+  let t = { Context.variant_constructors; name } in
   let missing =
     if List.is_empty patterns
        && is_empty_variant ~variant_constructors scrutinee
@@ -419,5 +420,5 @@ let check_match ~variant_constructors ~scrutinee patterns =
 ;;
 
 let check_exception_arms ~variant_constructors patterns =
-  Context.unused { variant_constructors } patterns
+  Context.unused { variant_constructors; name = Fn.id } patterns
 ;;

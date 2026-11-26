@@ -22,6 +22,8 @@ type t = private
       the variables not generalized are lowered to rank 0, so that later
       components don't generalize them. *)
   ; mutable reports : Report.t list (** Latest first. *)
+  ; mutable warnings : Report.t list
+  (** Latest first. Not counted by [reported]. *)
   ; mutable reported : int
   (** How many errors were reported, [Already_reported] and forgotten ones
       included. *)
@@ -85,6 +87,12 @@ val report_by
 val report_use : t -> Quoted_use.t -> Unification_error.t -> unit
 
 val errors : t -> Typecheck_error.t list
+
+(** Reports a warning, shown by [warnings] as [report_by]'s errors are by
+    [errors]. *)
+val warn : t -> Reporter.t -> ?once:string -> Typecheck_error.t -> unit
+
+val warnings : t -> Typecheck_error.t list
 val fresh_ident : t -> string -> Typed.Ident.t
 val find_toplevel : t -> string -> Toplevel_binding.t option
 val toplevel : t -> string -> Toplevel_binding.t

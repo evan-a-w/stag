@@ -56,6 +56,7 @@ module Parse_error = struct
         line = int_of_sexp_exn line;
         col = int_of_sexp_exn col;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let t_of_sexp sexp = Deriving.catch t_of_sexp_exn sexp
 end
@@ -95,6 +96,7 @@ module Of_sexp_error = struct
     let name = "Core.Sexp.Of_sexp_error.t_of_sexp" in
     match Deriving.record_fields name ["message"; "sexp"] sexp with
     | [message; sexp] -> {message = string_of_sexp_exn message; sexp = sexp}
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let t_of_sexp sexp = Deriving.catch t_of_sexp_exn sexp
 end

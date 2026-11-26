@@ -101,6 +101,10 @@ val splices : t -> bool
 val reporter : t -> Reporter.t
 val report : ?once:string -> t -> Typecheck_error.t -> unit
 
+(** Reports [warning], of the warning [name], as [t.warnings] say: not at all,
+    as a warning, or as an error. *)
+val warning : t -> Warning.Name.t -> Typecheck_error.t -> unit
+
 (** Whether the mode constraint held: if not, it is reported. Each limit is
     shown once, at what first exceeded it. *)
 val mode_holds : t -> loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool

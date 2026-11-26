@@ -109,6 +109,10 @@ module Kind : sig
     | Empty_record
     | Misplaced_exception_pattern
     | Match_without_value_cases
+    | Non_exhaustive_match of string
+    (** A value of the scrutinee no case matches, as a pattern. *)
+    | Unused_arm
+    | Unused_exception_arm
     | Duplicate_pattern_variable of string
     | Or_pattern_variable_missing of string
     | Or_pattern_variable_type of
