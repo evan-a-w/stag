@@ -111,6 +111,17 @@ tuples and variants are values, not allocations: what is local in a local
 | value computed at compile time, used in generated code (lifted) | const static global: a constant of the code |
 | `let x = e1 in e2`         | join of `e1` and `e2`                       |
 | quote `<e>`                | join of the values it captures from outer levels (its free variables are resolved at the splice, so don't count) |
+| by-value tuple, record, constructor | the join of its components, each of which keeps its own mode (see below) |
+
+A by-value block (a tuple, record or constructor argument, not boxed) has a
+mode per component as well as its whole mode, the join of them. They follow
+it through `let` bindings, patterns, field projections (`r.a`, `` r.`a ``),
+re-binding and match arms (joined component-wise; arms of different shapes
+fall back to the whole), so `let p = (k, ext "v") in match p with (k, _) ->
+k` keeps `k` at `gc`. Anywhere it is used as a whole (an argument, a result,
+stored, boxed, embedded, annotated, a `let mut`, a lock such as a closure's
+or an `exclave_`'s), only the whole counts. A field's modality still applies
+to its component.
 
 A value used at a later stage than it is bound in (a local of a splice used in
 the quote it returns, or what a toplevel splice's code embedded) must be
@@ -639,10 +650,16 @@ Each step is a branch stacked on the previous one.
   function's caller's): `let apply f x = f x` returns what `f` does, local
   or not, and a search recursing by tail calls (`Map.find`) returns a local
   part of a local argument.
+- **K. Per-component modes**: a by-value block's components each keep a mode
+  (`Mode_shape`) through bindings, patterns, projections and match arms (see
+  [Expression modes](#expression-modes)); used as a whole, they are joined.
 
 ## Later
 
 - `<t @ m>{ctx}` code modes.
+- Per-component modes in types, `(a @ m1) * (b @ m2)`, so a function's
+  parameter or result keeps them too (today it is the whole); and through
+  locks, `let mut`, annotations and record update, which use the whole.
 - `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
   only C-compatible data (pointer-free values and `cptr`s), for `external`
   signatures.

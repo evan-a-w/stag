@@ -47,7 +47,8 @@ module Node : sig
 
   val axis : t -> Axis.Any.t
 
-  (** Bounds, as points of the axis by index. *)
+  (** Bounds, as points of the axis by index: a generic node's, those its
+      instances get. *)
   val lower : t -> int
 
   val upper : t -> int

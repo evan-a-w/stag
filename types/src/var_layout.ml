@@ -41,7 +41,7 @@ let create ~layout_of =
 let layout_of t ty = t.layout_of ty
 
 let has_pointers ty =
-  Mode.Reason.create
+  Mode.Reason.layout
     (sprintf
        "its type turned out to be %s, which has pointers"
        (Type.Printer.ty (Type.Printer.create ()) ty))
@@ -58,7 +58,7 @@ let decide t layout ty =
       Mode.Layout.add_below ~lower layout)
 ;;
 
-let present = Mode.Reason.create "a field of the row turned out to be present"
+let present = Mode.Reason.layout "a field of the row turned out to be present"
 
 let generalize layout =
   match Mode.Layout.bound layout with

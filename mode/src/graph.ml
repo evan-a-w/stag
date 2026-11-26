@@ -1061,14 +1061,41 @@ let above t =
   Queue.to_list found
 ;;
 
+(* What a generic node's scheme adds to every instance, as a layout guarding it
+   has pointers. *)
+let holding t =
+  match t.state with
+  | Rank _ -> []
+  | Generic { guarded; _ } ->
+    List.filter_map guarded ~f:(fun dormant ->
+      Option.some_if
+        (List.exists (Layout.roots dormant.guards) ~f:Layout.has_pointers)
+        dormant.kind)
+;;
+
 (* A generic node's constraints are those its scheme keeps, which imply the
    rest. *)
+let scheme_lower t =
+  List.fold (holding t) ~init:t.lower ~f:(fun lower -> function
+    | Lower (_, point) -> Int.max lower point
+    | Edge _ | Upper _ -> lower)
+;;
+
+let scheme_upper t =
+  List.fold (holding t) ~init:t.upper ~f:(fun upper -> function
+    | Upper (_, point) -> Int.min upper point
+    | Edge _ | Lower _ -> upper)
+;;
+
 let forward t =
   match t.state with
   | Rank _ -> List.map t.succ ~f:(fun edge -> edge.morphism, edge.hi)
   | Generic { above; _ } ->
     List.map above ~f:(fun { other; implied_morphism; _ } ->
       implied_morphism, other)
+    @ List.filter_map (holding t) ~f:(function
+      | Edge (lo, morphism, hi) when phys_equal lo t -> Some (morphism, hi)
+      | Edge _ | Upper _ | Lower _ -> None)
 ;;
 
 let raised seeds =
@@ -1081,7 +1108,7 @@ let raised seeds =
   let raise_to node point =
     if point <= estimate node
     then Ok ()
-    else if point > node.upper
+    else if point > scheme_upper node
     then Error ()
     else (
       Hashtbl.set estimates ~key:node.id ~data:point;

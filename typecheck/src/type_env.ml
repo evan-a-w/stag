@@ -27,6 +27,16 @@ module Field = struct
   let name t = t.record_type.fields.(t.index)
 end
 
+module Pending_layouts = struct
+  (** Of a type a splice is computing: whether it has pointers whatever its
+      arguments, and for each argument of a type or row, whether one with
+      pointers gives it pointers. *)
+  type t =
+    { whole : Mode.Layout.t
+    ; args : Mode.Layout.t option list
+    }
+end
+
 module Decl = struct
   type t =
     { mutable decl : Type_decl.t (* Its definition once computed, if spliced. *)
@@ -35,6 +45,8 @@ module Decl = struct
     ; params : Type.arg list Lazy.t
     ; mutable wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable used_while_defined : bool
+    ; mutable pending_layouts : Pending_layouts.t option
+    (** Asked for while its splice computes its definition, until it is known. *)
     ; mutable prepared :
         (Signature.Type_decl.Kind.t * Reflected_decl.Kind.t option) option
     ; mutable value_parameters : Int.Set.t option
@@ -1188,6 +1200,7 @@ let declare
       ; params
       ; wrap_error
       ; used_while_defined = false
+      ; pending_layouts = None
       ; prepared = None
       ; value_parameters = None
       ; variances = None
@@ -1441,29 +1454,37 @@ let value_parameters t (root : Decl.t) =
 
 (* A recursive group is solved by iterating from [Bivariant] until nothing
    changes. Only the outermost declaration's result is cached, as the others'
-   depend on assumptions about it. *)
+   depend on assumptions about it. A definition its splice is still computing
+   isn't known: what depends on it takes it to be invariant, and isn't cached. *)
 let variances t =
   let assumed = String.Table.create () in
+  let complete = ref true in
   let rec lookup name =
     match name with
     | name when String.equal name Type.ptr_name ->
       Some [ Variance.Invariant; Invariant ]
     | name when String.equal name Type.box_name -> Some [ Variance.Covariant ]
-    | _ -> Option.map (Hashtbl.find t.types name) ~f:of_decl
+    | _ -> Option.bind (Hashtbl.find t.types name) ~f:of_decl
   and of_decl (decl : Decl.t) =
     match decl.variances with
-    | Some variances -> variances
+    | Some variances -> Some variances
     | None ->
-      let invariant () =
-        List.map (Decl.params decl) ~f:(fun _ -> Variance.Invariant)
-      in
       (match Hashtbl.find assumed decl.name with
-       | Some variances -> variances
+       | Some variances -> Some variances
        | None ->
-         (match prepare t decl with
-          | Error _ -> invariant ()
+         (match
+            match decl.decl.kind with
+            | Splice _ -> Error `Splice
+            | _ -> Result.map_error (prepare t decl) ~f:(fun _ -> `Failed)
+          with
+          | Error `Splice ->
+            complete := false;
+            None
+          | Error `Failed ->
+            Some (List.map (Decl.params decl) ~f:(fun _ -> Variance.Invariant))
           | Ok (kind, _) ->
             let outermost = Hashtbl.is_empty assumed in
+            if outermost then complete := true;
             let rec solve assumption =
               Hashtbl.set assumed ~key:decl.name ~data:assumption;
               let variances =
@@ -1481,8 +1502,8 @@ let variances t =
                 (List.map (Decl.params decl) ~f:(fun _ -> Variance.Bivariant))
             in
             Hashtbl.remove assumed decl.name;
-            if outermost then decl.variances <- Some variances;
-            variances))
+            if outermost && !complete then decl.variances <- Some variances;
+            Some variances))
   in
   lookup
 ;;
@@ -1540,7 +1561,239 @@ let define t (decl : Decl.t) =
   checked
 ;;
 
-let check t name =
+let layouts t = Set_once.get_exn t.layouts
+
+(* Whether [root] is pointer-free, taking the layouts not known yet, which it
+   collects, to be: [`Nominal] is a declared type of arguments known to be
+   pointer-free or not. *)
+let pointer_free' t ~check root =
+  let collected = ref [] in
+  let unknown layout =
+    collected := layout :: !collected;
+    true
+  in
+  (* What [f] collects, set apart. *)
+  let collecting f =
+    let outer = !collected in
+    collected := [];
+    let result = f () in
+    let mine =
+      List.dedup_and_sort !collected ~compare:(fun a b ->
+        Int.compare (Mode.Layout.id a) (Mode.Layout.id b))
+    in
+    collected := outer;
+    result, mine
+  in
+  let visiting = String.Hash_set.create () in
+  let visiting_ids = Int.Hash_set.create () in
+  (* Shared aliases and nodes are visited once: a DAG of them is linear. *)
+  let nominals = Hashtbl.Poly.create () in
+  let nodes = Int.Table.create () in
+  let links = Int.Table.create () in
+  let visit id ~f =
+    (not (Hash_set.mem visiting_ids id))
+    &&
+    (Hash_set.add visiting_ids id;
+     let result = f () in
+     Hash_set.remove visiting_ids id;
+     result)
+  in
+  let node ?(table = nodes) params id ~f =
+    if not (Map.is_empty params)
+    then visit id ~f
+    else (
+      match Hashtbl.find table id with
+      | Some (result, mine) ->
+        collected := mine @ !collected;
+        result
+      | None ->
+        let ((result, mine) as data) = collecting (fun () -> visit id ~f) in
+        Hashtbl.set table ~key:id ~data;
+        collected := mine @ !collected;
+        result)
+  in
+  let rec ty_ params (ty : Type.ty) =
+    match ty with
+    | TVar { id; state = Generic; _ } when Map.mem params id ->
+      Map.find_exn params id
+    | TVar { id; state = Link target; _ } ->
+      node ~table:links params id ~f:(fun () -> ty_ params target)
+    | _ ->
+      (match Type.canonical_ty ty with
+       | TVar ({ state = Unbound _; _ } as var) ->
+         unknown (Var_layout.of_ty (layouts t) var)
+       | TVar _ | TArrow _ | TCode _ -> false
+       | TCon (("int" | "bool" | "char" | "unit"), []) -> true
+       | TCon (name, _) when Type.is_pointer_name name -> false
+       | TCon (name, args) ->
+         (match Hashtbl.find t.types name with
+          | Some ({ decl = { kind = Splice _; _ }; checked = None; _ } as decl)
+            -> pending params decl args
+          | _ -> nominal name (List.map args ~f:(arg params)))
+       | TTuple tys -> List.for_all tys ~f:(ty_ params)
+       | TRecord { id; row } | TVariant { id; row } ->
+         node params id ~f:(fun () -> row_ params row))
+  and row_ params (row : Type.row) =
+    match row with
+    | RVar { id; state = Generic; _ } when Map.mem params id ->
+      Map.find_exn params id
+    | RVar { id; state = Link target; _ } ->
+      node ~table:links params id ~f:(fun () -> row_ params target)
+    | _ ->
+      (match Type.canonical_row row with
+       | REmpty -> true
+       | RVar ({ state = Unbound _; _ } as var) ->
+         unknown (Var_layout.of_row (layouts t) var)
+       | RVar _ -> false
+       | RExtend (_, presence, _, entry, rest) ->
+         (match Type.canonical_presence presence with
+          | Absent -> true
+          | Present -> ty_ params entry
+          | PVar var ->
+            let presence () = Var_layout.of_presence (layouts t) var in
+            (match collecting (fun () -> ty_ params entry) with
+             | false, _ -> unknown (presence ())
+             | true, [] -> true
+             | true, entry ->
+               (* Has pointers once present with an entry that has. *)
+               unknown (Var_layout.both (layouts t) (presence ()) entry)))
+         && row_ params rest)
+  and arg params : Type.arg -> bool = function
+    | ATy entry -> ty_ params entry
+    | ARow entry -> row_ params entry
+    | AMode _ -> true
+  (* Its definition may reach one a splice is computing. *)
+  and nominal name args =
+    match Hashtbl.find nominals (name, args) with
+    | Some (result, mine) ->
+      collected := mine @ !collected;
+      result
+    | None ->
+      let ((result, mine) as data) =
+        collecting (fun () -> nominal' name args)
+      in
+      if not (Hash_set.mem visiting name)
+      then Hashtbl.set nominals ~key:(name, args) ~data;
+      collected := mine @ !collected;
+      result
+  (* Has pointers once its definition does, or an argument that has pointers
+     where the definition gives it pointers. *)
+  and pending params (decl : Decl.t) args =
+    let own =
+      match decl.pending_layouts with
+      | Some layouts -> layouts
+      | None ->
+        let fresh () = Var_layout.above (layouts t) [] in
+        let layouts =
+          { Pending_layouts.whole = fresh ()
+          ; args =
+              List.map (Decl.params decl) ~f:(function
+                | ATy _ | ARow _ -> Some (fresh ())
+                | AMode _ -> None)
+          }
+        in
+        decl.pending_layouts <- Some layouts;
+        layouts
+    in
+    unknown own.whole
+    && List.for_alli args ~f:(fun index arg' ->
+      match arg' with
+      | Type.AMode _ -> true
+      | ATy _ | ARow _ ->
+        let layout = Option.value_exn (List.nth_exn own.args index) in
+        (match collecting (fun () -> arg params arg') with
+         | false, _ -> unknown layout
+         | true, [] -> true
+         | true, lowers -> unknown (Var_layout.both (layouts t) layout lowers)))
+  and nominal' name args =
+    (not (Hash_set.mem visiting name))
+    &&
+    match
+      (* A type computed by a splice isn't forced: that may need what is being
+         checked. *)
+      match Hashtbl.find t.types name with
+      | None -> Error ()
+      | Some { checked = Some checked; _ } -> Ok checked
+      | Some { decl = { kind = Splice _; _ }; _ } -> Error ()
+      | Some _ -> Result.map_error (check name) ~f:ignore
+    with
+    | Error () -> false
+    | Ok decl ->
+      Hash_set.add visiting name;
+      let params =
+        List.zip_exn decl.params args
+        |> List.filter_map ~f:(fun (param, pointer_free) ->
+          match param with
+          | ATy (TVar v) -> Some (v.id, pointer_free)
+          | ARow (RVar v) -> Some (v.id, pointer_free)
+          | _ -> None)
+        |> Int.Map.of_alist_exn
+      in
+      let result =
+        match decl.kind with
+        | Abstract -> false
+        | Alias body -> ty_ params body
+        | Record fields ->
+          List.for_all fields ~f:(fun (field : Signature.Field.t) ->
+            ty_ params field.ty)
+        | Variant constructors ->
+          List.for_all constructors ~f:(fun (ctor : Signature.Constructor.t) ->
+            List.for_all ctor.args ~f:(ty_ params))
+      in
+      Hash_set.remove visiting name;
+      result
+  in
+  collecting (fun () ->
+    match root with
+    | `Ty ty -> ty_ Int.Map.empty ty
+    | `Nominal (name, args) -> nominal name args)
+;;
+
+let layout_of' t ~check root : Var_layout.Layout_of.t =
+  match pointer_free' t ~check root with
+  | false, _ -> Has_pointers
+  | true, unknown ->
+    (match Mode.Layout.roots unknown with
+     | [] -> Pointer_free
+     | layouts -> Depends layouts)
+;;
+
+(* Once its splice has computed its definition, what was taken of it while it
+   was being computed. *)
+let decide_pending t (decl : Decl.t) ~check =
+  Option.iter decl.pending_layouts ~f:(fun { whole; args } ->
+    decl.pending_layouts <- None;
+    let reason why =
+      Mode.Reason.layout
+        ~loc:decl.decl.name.loc
+        (sprintf "its type turned out to be %s, %s" decl.decl.name.txt why)
+    in
+    let decide ~why layout pointer_free =
+      match layout_of' t ~check (`Nominal (decl.name, pointer_free)) with
+      | Pointer_free ->
+        Mode.Layout.pointer_free layout;
+        Ok ()
+      | Has_pointers -> Mode.Layout.raise layout ~because:[ reason why ]
+      | Depends lowers ->
+        List.fold_result lowers ~init:() ~f:(fun () lower ->
+          Mode.Layout.add_below ~lower layout)
+    in
+    let all = List.map args ~f:(fun _ -> true) in
+    decide ~why:"whose definition has pointers" whole all
+    :: List.filter_mapi args ~f:(fun index layout ->
+      Option.map layout ~f:(fun layout ->
+        decide
+          ~why:"which has pointers when an argument that has them is"
+          layout
+          (List.mapi all ~f:(fun index' _ -> index <> index'))))
+    |> List.iter ~f:(function
+      | Ok () -> ()
+      | Error error ->
+        t.report
+          (Typecheck_error.create ~loc:decl.decl.name.loc (Mode_error error))))
+;;
+
+let rec check t name =
   let decl = Hashtbl.find_exn t.types name in
   match decl.checked with
   | Some checked -> Ok checked
@@ -1557,6 +1810,9 @@ let check t name =
     |> Result.bind ~f:(fun () ->
       if decl.failed then Error Typecheck_error.already_reported else Ok ())
     |> Result.bind ~f:(fun () -> define t decl)
+    |> Result.map ~f:(fun checked ->
+      decide_pending t decl ~check:(check t);
+      checked)
     |> Result.map_error ~f:(fun error ->
       decl.failed <- true;
       (* Reported here, as the code that first used the declaration may be
@@ -1710,163 +1966,8 @@ let field_modality t name ~record =
   modality (Hashtbl.find_exn t.fields name).modality ~of_:record
 ;;
 
-let layouts t = Set_once.get_exn t.layouts
-
-(* Whether [ty] is pointer-free, taking the layouts not known yet, which it
-   collects when [~layouts], to be pointer-free. *)
-let pointer_free' t ty ~layouts:collect =
-  let collected = ref [] in
-  let unknown layout =
-    collect
-    &&
-    (collected := layout () :: !collected;
-     true)
-  in
-  (* What [f] collects, set apart. *)
-  let collecting f =
-    let outer = !collected in
-    collected := [];
-    let result = f () in
-    let mine =
-      List.dedup_and_sort !collected ~compare:(fun a b ->
-        Int.compare (Mode.Layout.id a) (Mode.Layout.id b))
-    in
-    collected := outer;
-    result, mine
-  in
-  let visiting = String.Hash_set.create () in
-  let visiting_ids = Int.Hash_set.create () in
-  (* Shared aliases and nodes are visited once: a DAG of them is linear. *)
-  let nominals = Hashtbl.Poly.create () in
-  let nodes = Int.Table.create () in
-  let links = Int.Table.create () in
-  let visit id ~f =
-    (not (Hash_set.mem visiting_ids id))
-    &&
-    (Hash_set.add visiting_ids id;
-     let result = f () in
-     Hash_set.remove visiting_ids id;
-     result)
-  in
-  let node ?(table = nodes) params id ~f =
-    if not (Map.is_empty params)
-    then visit id ~f
-    else (
-      match Hashtbl.find table id with
-      | Some (result, mine) ->
-        collected := mine @ !collected;
-        result
-      | None ->
-        let ((result, mine) as data) = collecting (fun () -> visit id ~f) in
-        Hashtbl.set table ~key:id ~data;
-        collected := mine @ !collected;
-        result)
-  in
-  let rec ty_ params (ty : Type.ty) =
-    match ty with
-    | TVar { id; state = Generic; _ } when Map.mem params id ->
-      Map.find_exn params id
-    | TVar { id; state = Link target; _ } ->
-      node ~table:links params id ~f:(fun () -> ty_ params target)
-    | _ ->
-      (match Type.canonical_ty ty with
-       | TVar ({ state = Unbound _; _ } as var) ->
-         unknown (fun () -> Var_layout.of_ty (layouts t) var)
-       | TVar _ | TArrow _ | TCode _ -> false
-       | TCon (("int" | "bool" | "char" | "unit"), []) -> true
-       | TCon (name, _) when Type.is_pointer_name name -> false
-       | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
-       | TTuple tys -> List.for_all tys ~f:(ty_ params)
-       | TRecord { id; row } | TVariant { id; row } ->
-         node params id ~f:(fun () -> row_ params row))
-  and row_ params (row : Type.row) =
-    match row with
-    | RVar { id; state = Generic; _ } when Map.mem params id ->
-      Map.find_exn params id
-    | RVar { id; state = Link target; _ } ->
-      node ~table:links params id ~f:(fun () -> row_ params target)
-    | _ ->
-      (match Type.canonical_row row with
-       | REmpty -> true
-       | RVar ({ state = Unbound _; _ } as var) ->
-         unknown (fun () -> Var_layout.of_row (layouts t) var)
-       | RVar _ -> false
-       | RExtend (_, presence, _, entry, rest) ->
-         (match Type.canonical_presence presence with
-          | Absent -> true
-          | Present -> ty_ params entry
-          | PVar var ->
-            let presence () = Var_layout.of_presence (layouts t) var in
-            (match collecting (fun () -> ty_ params entry) with
-             | false, _ -> unknown presence
-             | true, [] -> true
-             | true, entry ->
-               (* Has pointers once present with an entry that has. *)
-               unknown (fun () ->
-                 Var_layout.both (layouts t) (presence ()) entry)))
-         && row_ params rest)
-  and arg params : Type.arg -> bool = function
-    | ATy entry -> ty_ params entry
-    | ARow entry -> row_ params entry
-    | AMode _ -> true
-  and nominal name args =
-    match Hashtbl.find nominals (name, args) with
-    | Some result -> result
-    | None ->
-      let result = nominal' name args in
-      if not (Hash_set.mem visiting name)
-      then Hashtbl.set nominals ~key:(name, args) ~data:result;
-      result
-  and nominal' name args =
-    (not (Hash_set.mem visiting name))
-    &&
-    match
-      (* A type computed by a splice isn't forced: that may need what is being
-         checked. *)
-      match Hashtbl.find t.types name with
-      | None -> Error ()
-      | Some { checked = Some checked; _ } -> Ok checked
-      | Some { decl = { kind = Splice _; _ }; _ } -> Error ()
-      | Some _ -> Result.map_error (check t name) ~f:ignore
-    with
-    | Error () -> false
-    | Ok decl ->
-      Hash_set.add visiting name;
-      let params =
-        List.zip_exn decl.params args
-        |> List.filter_map ~f:(fun (param, pointer_free) ->
-          match param with
-          | ATy (TVar v) -> Some (v.id, pointer_free)
-          | ARow (RVar v) -> Some (v.id, pointer_free)
-          | _ -> None)
-        |> Int.Map.of_alist_exn
-      in
-      let result =
-        match decl.kind with
-        | Abstract -> false
-        | Alias body -> ty_ params body
-        | Record fields ->
-          List.for_all fields ~f:(fun (field : Signature.Field.t) ->
-            ty_ params field.ty)
-        | Variant constructors ->
-          List.for_all constructors ~f:(fun (ctor : Signature.Constructor.t) ->
-            List.for_all ctor.args ~f:(ty_ params))
-      in
-      Hash_set.remove visiting name;
-      result
-  in
-  collecting (fun () -> ty_ Int.Map.empty ty)
-;;
-
-let pointer_free t ty = fst (pointer_free' t ty ~layouts:false)
-
 let layout_of t ty : Var_layout.Layout_of.t =
-  match pointer_free' t ty ~layouts:true with
-  | false, _ -> Has_pointers
-  | true, unknown ->
-    (match Mode.Layout.roots unknown with
-     | [] -> Pointer_free
-     | layouts -> Depends layouts)
+  layout_of' t ~check:(check t) (`Ty ty)
 ;;
 
 let create ?(record_references = false) fresh ~report =

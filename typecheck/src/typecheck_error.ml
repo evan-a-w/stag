@@ -288,15 +288,16 @@ let level_name level =
 (* Why a type has pointers is given once in a message: [said] are the reasons
    given already. *)
 let mode_reasons ?(said = String.Hash_set.create ()) because =
-  List.filter_map because ~f:(fun ({ loc; what } : Mode.Reason.t) ->
-    if Loc.is_none loc && String.is_substring what ~substring:"turned out to be"
-    then
-      Option.some_if
-        (Hash_set.strict_add said what |> Hash_set.Ok_or_duplicate.is_ok)
-        what
-    else if Loc.is_none loc
-    then Some what
-    else Some (sprintf "%s (at %s)" what (Loc.to_string loc)))
+  List.filter_map because ~f:(fun ({ loc; what; layout } : Mode.Reason.t) ->
+    let text =
+      if Loc.is_none loc
+      then what
+      else sprintf "%s (at %s)" what (Loc.to_string loc)
+    in
+    Option.some_if
+      ((not layout)
+       || Hash_set.strict_add said text |> Hash_set.Ok_or_duplicate.is_ok)
+      text)
   |> List.remove_consecutive_duplicates ~equal:String.equal
   |> String.concat ~sep:", then "
 ;;
@@ -369,6 +370,14 @@ let unification_message (error : Unification_error.t) ~show_type =
           "\nTheir modes differ, in ways types don't print: "
           ^ mode_message error
         | Modes error -> "\nTheir modes differ: " ^ mode_message error
+        | Unknown_variances (name, error) ->
+          sprintf
+            "\n\
+             The definition of %s is not known yet, as its splice is still \
+             being run, so its arguments must be equal, but their modes \
+             differ: %s"
+            name
+            (mode_message error)
       in
       sprintf
         "This expression has type %s but an expression was expected of type \

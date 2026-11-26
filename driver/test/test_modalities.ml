@@ -54,7 +54,7 @@ let make u = { p = (fun x -> x); n = (let n = Int.to_string 3 in fun x -> String
 let n u = let f @ portable = (make ()).n in f
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then a function is used at a type with other modes, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
+    {| This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then it is held (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then a function is used at a type with other modes, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
   check
     {|
 type r = { p : string -> string @@ portable }
@@ -88,7 +88,7 @@ let borrowed u = let s @ gc = (make ()).borrowed in s
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-46), then the function returns it (at t.stag:5:13-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:30-39), then its field is read (at t.stag:6:30-48), then it is bound by an annotated let (at t.stag:6:25-27), but must be at most gc, because it is annotated gc (at t.stag:6:25-27) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-46), then it is held (at t.stag:5:39-46), then the function returns it (at t.stag:5:13-48), then a function is used at a type with other modes, then the function returns it (at t.stag:6:30-39), then its field is read (at t.stag:6:30-48), then it is bound by an annotated let (at t.stag:6:25-27), but must be at most gc, because it is annotated gc (at t.stag:6:25-27) |}];
   check
     (ext
      ^ {|

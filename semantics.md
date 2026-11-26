@@ -198,6 +198,13 @@ Provenance follows reachability, not evaluation:
 - A block (a record, tuple or constructor, by value), a pointer and a closure
   are at least what they hold or capture; a part read from them is at most
   their provenance. A field with a modality still counts: it is reachable.
+- A by-value block's components (of a tuple, record or constructor argument)
+  also keep their own modes, on every axis, through bindings, patterns,
+  projections and match arms: a component read from it has the mode it was
+  built with, at most the whole's. So a `gc` key paired with an `external`
+  value stays `gc`, and a global pointer paired with a `stack_` one may be
+  returned. Used as a whole (passed, returned, stored, boxed, captured,
+  embedded), it has the join of them.
 - What is only evaluated (a `let`'s bound expression, a sequence's first
   part, a scrutinee) doesn't count towards the result's provenance.
 - Literals and toplevel constants are `static`; declared functions and

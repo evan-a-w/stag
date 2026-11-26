@@ -119,6 +119,7 @@ and type_mismatch_reason =
   | Mismatch_arg_kind of arg * arg
   | Structural_mismatch
   | Modes of Mode.Error.t
+  | Unknown_variances of string * Mode.Error.t
 
 and row_mismatch_reason =
   | Missing_label of string

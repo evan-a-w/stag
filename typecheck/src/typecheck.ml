@@ -633,6 +633,7 @@ module Scope = struct
   let entry
     ?(defining = false)
     ?(held : Binding.t option)
+    ?shape
     t
     ~ident
     ~scheme
@@ -643,6 +644,7 @@ module Scope = struct
     ; quote_id = quote_id t
     ; mode
     ; held
+    ; shape
     ; locks = t.locks
     ; binder = Local ident
     ; defining
@@ -697,15 +699,8 @@ module Scope = struct
   ;;
 
   (* Plain data may be used at any locality and provenance, and at a stage up to
-     [portable]: a copy of it is as good. *)
-  let crossing t ty =
-    if Type_env.pointer_free t.program.type_env ty
-    then Mode.Crossing.immediate
-    else Mode.Crossing.none
-  ;;
-
-  (* As [crossing], but for a type not yet known, until it is found to have
-     pointers. *)
+     [portable]: a copy of it is as good. Of a type not yet known, until it is
+     found to have pointers. *)
   let mode_crossing t ty =
     match Type_env.layout_of t.program.type_env ty with
     | Pointer_free -> Mode.Crossing.immediate
@@ -1474,13 +1469,11 @@ module Pattern_var = struct
     { ident : Typed.Ident.t
     ; ty : Type.ty
     ; loc : Loc.t
-    ; modality : Modality.t (** Of the part of the scrutinee it is bound to. *)
+    ; path : Mode_shape.Path.t
+    (** To the part of the scrutinee it is bound to. *)
     }
 
-  let under modality =
-    List.map ~f:(fun t ->
-      { t with modality = Modality.compose modality t.modality })
-  ;;
+  let under step = List.map ~f:(fun t -> { t with path = step :: t.path })
 end
 
 (* The components of [expected], if it is known to be a tuple of [n]. *)
@@ -1526,12 +1519,12 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     , { Pattern_var.ident
       ; ty
       ; loc = Source.Binder.loc binder ~enclosing:loc
-      ; modality = Modality.id
+      ; path = []
       } )
   in
   (* Each pattern of type [ty], known to be of [expected] (by default [ty]), of
-     a part of the block through [modalities]. *)
-  let sub_patterns ?expected patterns ~modalities =
+     the part of the block at [steps]. *)
+  let sub_patterns ?expected patterns ~steps =
     let expected =
       Option.value
         expected
@@ -1541,13 +1534,13 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
       List.map3_exn
         patterns
         expected
-        modalities
-        ~f:(fun (pattern, ty) expected modality ->
+        steps
+        ~f:(fun (pattern, ty) expected step ->
           let pattern, bindings = pattern_type t scope ~pattern ?expected in
           ( (if Scope.unifies t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc
              then pattern
              else Typed.Pattern.error [ pattern ] ~loc:pattern.loc)
-          , Pattern_var.under modality bindings ))
+          , Pattern_var.under step bindings ))
     in
     List.map typed ~f:fst, List.concat_map typed ~f:snd
   in
@@ -1558,7 +1551,9 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     let patterns, bindings =
       sub_patterns
         (List.map patterns ~f:(fun pattern -> pattern, Scope.fresh_ty t scope))
-        ~modalities:(List.map patterns ~f:(fun _ -> Modality.id))
+        ~steps:
+          (List.map patterns ~f:(fun _ ->
+             Mode_shape.Path.Step.Through Modality.id))
     in
     Typed.Pattern.error patterns ~loc, bindings
   in
@@ -1575,7 +1570,8 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
        let inner, bindings =
          pattern_type t scope ~pattern:inner ~expected:contents
        in
-       node (Deref inner) (Type.box inner.ty), bindings
+       ( node (Deref inner) (Type.box inner.ty)
+       , Pattern_var.under (Through Modality.id) bindings )
      | None ->
        let held, expected =
          match Option.bind expected ~f:Type.of_ptr with
@@ -1584,14 +1580,16 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
        in
        let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
        ( node (Deref inner) (Type.ptr ~held inner.ty)
-       , Pattern_var.under (Modality.of_cell held) bindings ))
+       , Pattern_var.under (Through (Modality.of_cell held)) bindings ))
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
       sub_patterns
         (List.zip_exn patterns types)
         ~expected:(tuple_components expected (List.length patterns))
-        ~modalities:(List.map patterns ~f:(fun _ -> Modality.id))
+        ~steps:
+          (List.mapi patterns ~f:(fun index _ ->
+             Mode_shape.Path.Step.Part (Index index, Modality.id)))
     in
     node (Tuple patterns) (Type.TTuple types), bindings
   | Construct (constructor, args) ->
@@ -1610,23 +1608,24 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
        let args, bindings =
          sub_patterns
            (List.map args ~f:(fun (arg, ty, _) -> arg, ty))
-           ~modalities:(List.map args ~f:(fun (_, _, modality) -> modality))
+           ~steps:
+             (List.mapi args ~f:(fun index (_, _, modality) ->
+                Mode_shape.Path.Step.Part
+                  (Arg (constructor.name, index), modality)))
        in
        node (Construct (constructor, args)) result, bindings)
   | Record fields ->
     (match record_fields t scope fields ~all_required:false ~expected ~loc with
      | Error error -> fail error (List.map fields ~f:snd)
      | Ok (record, fields, (_ : bool)) ->
-       let modalities =
+       let steps =
          List.map fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
-           Type_env.field_modality
-             scope.program.type_env
-             (Typed.Field_ref.name field)
-             ~record)
+           let name = Typed.Field_ref.name field in
+           Mode_shape.Path.Step.Part
+             ( Field name
+             , Type_env.field_modality scope.program.type_env name ~record ))
        in
-       let patterns, bindings =
-         sub_patterns (List.map fields ~f:snd) ~modalities
-       in
+       let patterns, bindings = sub_patterns (List.map fields ~f:snd) ~steps in
        ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
        , bindings ))
   | Poly_variant (tag, arg) ->
@@ -1641,7 +1640,7 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
             ~pattern
             ?expected:(row_entry expected `Variant ~label:tag)
         in
-        Some pattern, bindings
+        Some pattern, Pattern_var.under (Part (Tag tag, Modality.id)) bindings
     in
     let arg_ty =
       Option.value_map arg ~default:Type.unit ~f:(fun pattern -> pattern.ty)
@@ -1660,7 +1659,8 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
             ?expected:(row_entry expected `Record ~label:label.txt) ))
     in
     let bindings =
-      List.concat_map fields ~f:(fun (_, (_, bindings)) -> bindings)
+      List.concat_map fields ~f:(fun (label, (_, bindings)) ->
+        Pattern_var.under (Part (Label label, Modality.id)) bindings)
     in
     let fields =
       List.map fields ~f:(fun (label, (pattern, _)) -> label, pattern)
@@ -1723,7 +1723,7 @@ module Variant_match = struct
           ; ty = rest
           ; loc =
               Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
-          ; modality = Modality.id
+          ; path = []
           }
         ] )
     | _ -> pattern_type t scope ~pattern ~expected:scrutinee
@@ -2805,6 +2805,7 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
                   ~name:ident.name
                   ~loc
             ; held = None
+            ; shape = None
             ; locks = []
             ; binder
             ; defining = false
@@ -3407,8 +3408,8 @@ and expr_type
       (Type_env.layouts scope.program.type_env)
       ~first_id:(Fresh.next_id t)
     @@ fun layouts ->
-    let (fn, ident, body, closure, made), mode =
-      Mode_rules.evaluate
+    let (fn, ident, body, closure, made), shape =
+      Mode_rules.evaluate_shaped
         modes
         at
         ~inner:(Scope.modes inner)
@@ -3480,6 +3481,7 @@ and expr_type
              , Some closure
              , { Typed.Expr.Made.none with made; partials } ))
     in
+    let mode = shape.whole in
     let { Function_type.args = arg_types; annots; result_annot; ty; _ } = fn in
     let args = List.map arg_types ~f:fst in
     let generalized = generalizes scope mode ~is_function ~loc in
@@ -3487,6 +3489,10 @@ and expr_type
       List.iter errors ~f:(fun error ->
         ignore (Scope.mode_holds scope ~loc (Error error) : bool))
     in
+    (* A value's binding has the modes of [shape], which are of this rank, so a
+       closure capturing it and generalized keeps their constraints with it. A
+       function's is its closure's. *)
+    if Option.is_none closure then Mode_shape.lower_rank shape ~rank:scope.rank;
     if generalized
     then (
       Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
@@ -3507,6 +3513,10 @@ and expr_type
               scope
               ~ident
               ~scheme:ty
+              ?shape:
+                (match closure, mode_annot with
+                 | None, None -> Some shape
+                 | Some _, _ | _, Some _ -> None)
               ~mode:
                 (match closure with
                  | Some closure -> closure
@@ -3938,7 +3948,7 @@ and expr_type
             ~hint:Hint
         in
         match Type.of_box pointer.ty with
-        | Some contents -> (contents, pointer, None), Modality.id
+        | Some contents -> (contents, pointer, None), Modality.id, None
         | None ->
           let held =
             Option.value_map (Type.of_ptr pointer.ty) ~default:fresh_held ~f:snd
@@ -3948,7 +3958,7 @@ and expr_type
             | Some expected when Expectation.is_required hint -> expected
             | Some _ | None -> Scope.fresh_ty t scope
           in
-          (pointee, pointer, Some held), Modality.of_cell held)
+          (pointee, pointer, Some held), Modality.of_cell held, None)
     in
     (match held with
      | None -> node (Deref pointer) pointee
@@ -4011,14 +4021,14 @@ and expr_type
       in
       node (Store (target, value)) Type.unit)
   | Tuple exprs ->
+    let parts = Mode_rules.Parts.create modes at in
     let exprs =
-      List.map2_exn
-        exprs
-        (tuple_components expected (List.length exprs))
-        ~f:(fun expr expected ->
-          part Modality.id (fun at ->
-            expr_type t scope ~at ~expr ?expected ~hint))
+      List.zip_exn exprs (tuple_components expected (List.length exprs))
+      |> List.mapi ~f:(fun index (expr, expected) ->
+        Mode_rules.Parts.part parts (Index index) Modality.id (fun at ->
+          expr_type t scope ~at ~expr ?expected ~hint))
     in
+    Mode_rules.Parts.finish parts;
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
     (match
@@ -4033,20 +4043,33 @@ and expr_type
      with
      | Error error -> fail error ~children:(infer args)
      | Ok (constructor, args, result) ->
+       let parts = Mode_rules.Parts.create modes at in
        let args =
-         List.map args ~f:(fun (expr, ty, modality) ->
-           part modality ~ty (fun at -> check_expr t scope ~at ~expr ~ty))
+         List.mapi args ~f:(fun index (expr, ty, modality) ->
+           Mode_rules.Parts.part
+             parts
+             (Arg (constructor.name, index))
+             modality
+             ~ty
+             (fun at -> check_expr t scope ~at ~expr ~ty))
        in
+       Mode_rules.Parts.finish parts;
        node (Construct (constructor, args)) result)
   | Record fields ->
     (match record_fields t scope fields ~all_required:true ~expected ~loc with
      | Error error -> fail error ~children:(infer (List.map fields ~f:snd))
      | Ok (record, fields, complete) ->
+       let parts = Mode_rules.Parts.create modes at in
        let exprs =
          List.map fields ~f:(fun ((field : Typed.Field_ref.t), (expr, ty)) ->
-           part (field_modality scope field ~record) ~ty (fun at ->
-             check_expr t scope ~at ~expr ~ty))
+           Mode_rules.Parts.part
+             parts
+             (Field (Typed.Field_ref.name field))
+             (field_modality scope field ~record)
+             ~ty
+             (fun at -> check_expr t scope ~at ~expr ~ty))
        in
+       if complete then Mode_rules.Parts.finish parts;
        if complete
        then node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
        else node (Error exprs) record)
@@ -4055,9 +4078,11 @@ and expr_type
       Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
         let expr = expr_type t scope ~at ~expr in
         match field_type t scope field ~record:(Some expr.ty) ~loc with
-        | Error error -> (expr, Error error), Modality.id
+        | Error error -> (expr, Error error), Modality.id, None
         | Ok ((field, record, _) as typed) ->
-          (expr, Ok typed), field_modality scope field ~record)
+          ( (expr, Ok typed)
+          , field_modality scope field ~record
+          , Some (Mode_shape.Step.Field (Typed.Field_ref.name field)) ))
     in
     (match field with
      | Error error -> fail error ~children:[ expr ]
@@ -4073,7 +4098,8 @@ and expr_type
        let expr =
          Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
            ( check_expr t scope ~at ~expr ~ty:record
-           , field_modality scope field ~record ))
+           , field_modality scope field ~record
+           , Some (Mode_shape.Step.Field (Typed.Field_ref.name field)) ))
        in
        node (Field (expr, field)) field_ty)
   | Record_update (expr, fields) ->
@@ -4183,9 +4209,13 @@ and expr_type
           in
           if unified then update else node (Error [ update ]) Type.error))
   | Match { scrutinee = expr; cases; exception_cases } ->
-    let scrutinee, scrutinee_mode =
-      Mode_rules.evaluate modes at ~loc ~why:"it is matched on" (fun at ->
-        expr_type t scope ~at ~expr)
+    let scrutinee, scrutinee_shape =
+      Mode_rules.evaluate_shaped
+        modes
+        at
+        ~loc
+        ~why:"it is matched on"
+        (fun at -> expr_type t scope ~at ~expr)
     in
     let result = Scope.join_ty t scope in
     (* Closing the scrutinee to patterns in error would only add errors. *)
@@ -4198,7 +4228,8 @@ and expr_type
     in
     (* A case of [pattern], typed with its [bindings], of type [ty], and whether
        the pattern is of [ty]. *)
-    let case ~ty ~mode ((pattern : Typed.Pattern.t), bindings) body =
+    let arms = Mode_rules.Arms.create modes at in
+    let case ~ty ~shape ((pattern : Typed.Pattern.t), bindings) body =
       let pattern, unified =
         counting_errors (fun () ->
           let before = scope.program.reported in
@@ -4219,15 +4250,11 @@ and expr_type
         Env.with_bindings
           scope.locals
           (List.map bindings ~f:(fun (var : Pattern_var.t) ->
-             let mode =
-               Mode_rules.Binding.project
-                 modes
-                 ~block:mode
-                 var.modality
-                 ~loc:var.loc
+             let mode, shape =
+               Mode_rules.Binding.component modes shape var.path ~loc:var.loc
              in
              ( var.ident.name
-             , Scope.entry scope ~ident:var.ident ~scheme:var.ty ~mode )))
+             , Scope.entry scope ~ident:var.ident ~scheme:var.ty ?shape ~mode )))
           ~f:(fun () ->
             (* Typed on its own, as the expected type would make it the
                result's, then used at the result: the join of the cases. *)
@@ -4235,7 +4262,7 @@ and expr_type
               check_expr
                 t
                 scope
-                ~at:(Mode_rules.Expected.whole at)
+                ~at:(Mode_rules.Arms.arm arms)
                 ~expr:body
                 ~ty:(Scope.fresh_ty t scope)
                 ?expected:(either_known result expected)
@@ -4280,7 +4307,7 @@ and expr_type
               Variant_match.pattern_type t scope handled ~pattern ~scrutinee:ty)
           in
           let ((pattern, _) as typed_case), unified =
-            case ~ty ~mode:scrutinee_mode typed_pattern body
+            case ~ty ~shape:scrutinee_shape typed_pattern body
           in
           (* So that later cases don't report the same mismatch. *)
           let ty = if unified then ty else Scope.fresh_ty t scope in
@@ -4292,10 +4319,11 @@ and expr_type
         fst
           (case
              ~ty:Type.exn
-             ~mode:(Mode_rules.raised modes ~loc)
+             ~shape:(Mode_shape.opaque (Mode_rules.raised modes ~loc))
              (pattern_type t scope ~pattern ~expected:Type.exn)
              body))
     in
+    Mode_rules.Arms.finish arms ~loc;
     (match expr, cases with
      | _ when !patterns_failed -> ()
      | Generated _, [] ->
@@ -4315,7 +4343,9 @@ and expr_type
     let match_ = node (Match { scrutinee; cases; exception_cases }) result in
     if !patterns_failed then node (Error [ match_ ]) result else match_
   | Poly_record fields ->
-    let fields = labelled_types t scope ~at fields ~expected ~hint in
+    let parts = Mode_rules.Parts.create modes at in
+    let fields = labelled_types t scope ~parts fields ~expected ~hint in
+    Mode_rules.Parts.finish parts;
     node
       (Poly_record fields)
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:REmpty))
@@ -4324,11 +4354,21 @@ and expr_type
     let row, (_ : Type.row) = Poly_row.open_ t scope [ label, ty ] in
     let expr =
       Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
-        check_expr t scope ~at ~expr ~ty:(Fresh.record t row), Modality.id)
+        ( check_expr t scope ~at ~expr ~ty:(Fresh.record t row)
+        , Modality.id
+        , Some (Mode_shape.Step.Label label) ))
     in
     node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
-    let fields = labelled_types t scope ~at fields ~expected ~hint in
+    let fields =
+      labelled_types
+        t
+        scope
+        ~parts:(Mode_rules.Parts.create modes at)
+        fields
+        ~expected
+        ~hint
+    in
     let rest = Scope.fresh_row t scope in
     let expr =
       part Modality.id (fun at ->
@@ -4345,7 +4385,15 @@ and expr_type
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
-    let fields = labelled_types t scope ~at fields ~expected ~hint in
+    let fields =
+      labelled_types
+        t
+        scope
+        ~parts:(Mode_rules.Parts.create modes at)
+        fields
+        ~expected
+        ~hint
+    in
     let row, rest =
       Poly_row.open_
         t
@@ -4360,9 +4408,10 @@ and expr_type
       (Poly_update (expr, fields))
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:rest))
   | Poly_variant (tag, arg) ->
+    let parts = Mode_rules.Parts.create modes at in
     let arg =
       Option.map arg ~f:(fun expr ->
-        part Modality.id (fun at ->
+        Mode_rules.Parts.part parts (Tag tag) Modality.id (fun at ->
           expr_type
             t
             scope
@@ -4371,6 +4420,7 @@ and expr_type
             ?expected:(row_entry expected `Variant ~label:tag)
             ~hint))
     in
+    Mode_rules.Parts.finish parts;
     let arg_ty =
       Option.value_map arg ~default:Type.unit ~f:(fun (expr : Typed.Expr.t) ->
         expr.ty)
@@ -4573,11 +4623,11 @@ and expand
     ; made = Typed.Expr.Made.none
     })
 
-and labelled_types t scope ~at fields ~expected ~hint =
+and labelled_types t scope ~parts fields ~expected ~hint =
   Poly_row.report_duplicate_labels scope fields;
   List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
     ( label.txt
-    , Mode_rules.part (Scope.modes scope) at Modality.id (fun at ->
+    , Mode_rules.Parts.part parts (Label label.txt) Modality.id (fun at ->
         expr_type
           t
           scope
