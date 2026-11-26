@@ -26,11 +26,12 @@ let either_known ty fallback =
 ;;
 
 (* The right alternative of an or-pattern binds the variables its [left] does,
-   to the same idents: those it has bound are [matched]. *)
+   to the same idents: each it binds is [matched], at the type and location it
+   binds it at there. *)
 module Alternative = struct
   type t =
     { left : Pattern_var.t String.Map.t
-    ; matched : String.Hash_set.t
+    ; matched : (Type.ty * Loc.t) String.Table.t
     }
 
   let create left =
@@ -38,11 +39,11 @@ module Alternative = struct
         String.Map.of_alist_reduce
           (List.map left ~f:(fun (var : Pattern_var.t) -> var.ident.name, var))
           ~f:(fun first _ -> first)
-    ; matched = String.Hash_set.create ()
+    ; matched = String.Table.create ()
     }
   ;;
 
-  let bind t (scope : Scope.t) fresh_ty name ~ty ~loc ~fresh =
+  let bind t (scope : Scope.t) name ~ty ~loc ~fresh =
     match Map.find t.left name with
     | None ->
       Scope.report
@@ -50,27 +51,29 @@ module Alternative = struct
         (Typecheck_error.create ~loc (Or_pattern_variable_missing name));
       fresh ()
     | Some (left : Pattern_var.t) ->
-      Hash_set.add t.matched name;
-      Unify.unify_ty fresh_ty ~ty1:left.ty ~ty2:ty
-      |> Result.iter_error ~f:(fun error ->
-        Scope.report
-          scope
-          (Typecheck_error.create
-             ~loc
-             (Or_pattern_variable_type { name; error })));
+      Hashtbl.set t.matched ~key:name ~data:(ty, loc);
       left.ident
   ;;
 
-  (* Of the variables [left] binds that the right alternative didn't. *)
-  let report_unmatched t (scope : Scope.t) =
-    Map.iter t.left ~f:(fun (var : Pattern_var.t) ->
-      if not (Hash_set.mem t.matched var.ident.name)
-      then
+  (* Once the right alternative is checked: each variable is of the same type on
+     both sides, and bound by both. *)
+  let finish t fresh_ty (scope : Scope.t) =
+    Map.iteri t.left ~f:(fun ~key:name ~data:(left : Pattern_var.t) ->
+      match Hashtbl.find t.matched name with
+      | None ->
         Scope.report
           scope
           (Typecheck_error.create
-             ~loc:var.loc
-             (Or_pattern_variable_missing var.ident.name)))
+             ~loc:left.loc
+             (Or_pattern_variable_missing name))
+      | Some (ty, loc) ->
+        Unify.unify_ty fresh_ty ~ty1:left.ty ~ty2:ty
+        |> Result.iter_error ~f:(fun error ->
+          Scope.report
+            scope
+            (Typecheck_error.create
+               ~loc
+               (Or_pattern_variable_type { name; error }))))
   ;;
 end
 
@@ -97,7 +100,6 @@ let rec pattern_type'
         Alternative.bind
           alternative
           scope
-          t
           (Source.Binder.name binder)
           ~ty
           ~loc
@@ -280,7 +282,7 @@ let rec pattern_type'
         ~pattern:right
         ?expected
     in
-    Alternative.report_unmatched right_alternative scope;
+    Alternative.finish right_alternative t scope;
     let right =
       if Scope.unifies t scope ~ty1:left.ty ~ty2:right.ty ~loc:right.loc
       then right

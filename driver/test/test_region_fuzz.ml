@@ -124,7 +124,7 @@ module Gen = struct
     match
       if depth <= 0
       then Random.State.int t.random 2
-      else Random.State.int t.random 34
+      else Random.State.int t.random 35
     with
     | 0 -> sprintf "Box.make %s" (pick t ints)
     | 1 -> sprintf "stack_ (Box.make %s)" (pick t ints)
@@ -376,6 +376,27 @@ module Gen = struct
         (rarely t a ~else_:[ b; sprintf "Box.make (sum %s)" a ])
         g
         (int ())
+    | 33 ->
+      (* Alternatives binding the same names to parts that may differ. *)
+      let p = name t "p"
+      and a = name t "a"
+      and b = name t "b" in
+      sprintf
+        "(let %s = ((stack_ (Box.make %s)), %s) in match %s with (%s, %s) | %s \
+         -> %s)"
+        p
+        (int ())
+        (sub ~tail:false ())
+        p
+        a
+        b
+        (if Random.State.bool t.random
+         then sprintf "(%s, %s)" b a
+         else sprintf "(%s, %s)" a b)
+        (rarely
+           t
+           a
+           ~else_:[ b; sprintf "Box.make (Int.add (sum %s) (sum %s))" a b ])
     | _ ->
       let n = name t "n" in
       sprintf
@@ -514,9 +535,9 @@ let%expect_test "no allocation is used after its region ends" =
       [%message (seed : int) (outcomes : (string * int) list) (regions : int)]);
   [%expect
     {|
-    ((seed 7) (outcomes ((ran 751) (rejected 749))) (regions 4016))
-    ((seed 8) (outcomes ((ran 816) (rejected 684))) (regions 4636))
-    ((seed 9) (outcomes ((ran 824) (rejected 676))) (regions 4563))
+    ((seed 7) (outcomes ((ran 760) (rejected 740))) (regions 4152))
+    ((seed 8) (outcomes ((ran 764) (rejected 736))) (regions 4466))
+    ((seed 9) (outcomes ((ran 788) (rejected 712))) (regions 4483))
     |}]
 ;;
 
@@ -534,7 +555,7 @@ let%expect_test "with placements that ignore their instance, some are" =
   print_endline (Option.value_exn (Queue.peek failures));
   [%expect
     {|
-    (outcomes ((ran 421) (rejected 749) ("use after free" 330)))
+    (outcomes ((ran 424) (rejected 740) ("use after free" 336)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -551,10 +572,11 @@ let%expect_test "with placements that ignore their instance, some are" =
     let h (y : int) = Box.make y
     let k (j : int -> box[int]) = sum (j 1)
     let m (a : int) (b : int) = Box.make (Int.add a b)
-    let t1 (a : int) (b : int) = ((let p2 = ((stack_ (Box.make (sum ((let mut c9 = b in let k10 = fun (y11 : int) -> Box.make (Int.add y11 c9) in c9 <- 2; k10 b))))), ((keep.* <- ((let mut c6 = b in let k7 = fun (y8 : int) -> Box.make (Int.add y8 c6) in c6 <- 2; k7 a)); ((let n5 @ local = (Box.make b) in Box.make (sum n5)))))) in match p2 with (a3, b4) -> Box.make (Int.add (sum a3) (sum b4))))
-    let f h k m (x : int) = ((keepc.* <- (mk2 x); ((let p12 = m 1 in p12 1))))
+    let t6 (n : int) = match Int.equal n 0 with true -> ((let p7 = ((stack_ (Box.make (Int.add n n))), ((let mut c10 = (fun (y : int) -> Box.make y) in c10 <- h; c10 n))) in match p7 with (a8, b9) | (a8, b9) -> b9)) | false -> t6 (Int.sub n 1)
+    let t1 (a : int) = `C (fun (b : int) -> ((let p2 = ((stack_ (Box.make b)), ((let n5 @ local = (region_ ((Box.make b))) in Box.make (sum n5)))) in match p2 with (a3, b4) -> b4)))
+    let f h k m (x : int) = ((let go11 (n12 : int) = match Int.equal n12 0 with true -> ((let p13 = ((stack_ (Box.make 1)), ((let go16 (n17 : int) = match Int.equal n17 0 with true -> (t6 2) | false -> go16 (Int.sub n17 1) in go16 2))) in match p13 with (a14, b15) -> b15)) | false -> go11 (Int.sub n12 1) in go11 2))
     let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) (fun (a : int) -> fun (b : int) -> Box.make (Int.add a b)) 1 in sum r
-    a reference, from a toplevel, to the Partial_application at t.stag:5:30-52, made in the region of a call of toplevel f, which ends first
+    a reference, from the result of a call of toplevel t6, of the Box at t.stag:14:18-28, made in the region of a call of toplevel t6, after it ended
     |}]
 ;;
 
@@ -569,7 +591,7 @@ let%expect_test "with tail calls not ending their region" =
   Option.iter (Queue.peek failures) ~f:print_endline;
   [%expect
     {|
-    (outcomes ((ran 374) (rejected 749) ("use after free" 377)))
+    (outcomes ((ran 395) (rejected 740) ("use after free" 365)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -586,9 +608,9 @@ let%expect_test "with tail calls not ending their region" =
     let h (y : int) = Box.make y
     let k (j : int -> box[int]) = sum (j 1)
     let m (a : int) (b : int) = Box.make (Int.add a b)
-    let t1 (a : int) (b : int) = ((let p2 = ((stack_ (Box.make (sum ((let mut c9 = b in let k10 = fun (y11 : int) -> Box.make (Int.add y11 c9) in c9 <- 2; k10 b))))), ((keep.* <- ((let mut c6 = b in let k7 = fun (y8 : int) -> Box.make (Int.add y8 c6) in c6 <- 2; k7 a)); ((let n5 @ local = (Box.make b) in Box.make (sum n5)))))) in match p2 with (a3, b4) -> Box.make (Int.add (sum a3) (sum b4))))
-    let f h k m (x : int) = ((keepc.* <- (mk2 x); ((let p12 = m 1 in p12 1))))
-    let l (u : unit) = let r @ local = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) mk2 1 in sum r [@nontail]
-    a reference, from the result of a call of toplevel f, of the Box at t.stag:5:30-52, made in the region of a call of toplevel f, after it ended
+    let t1 (a : int) (b : int) = ((let p2 = (fun (a : int) (b : int) -> Box.make (Int.add a b)) 1 in p2 (sum ((let g3 = h in let v4 = sum (g3 b) in g3 a)))))
+    let f h k m (x : int) = (region_ (((let p5 = ((stack_ (Box.make 1)), (pick 2 ((let p8 = t1 x in p8 x)))) in match p5 with (a6, b7) -> Box.make (Int.add (sum a6) (sum b7))))))
+    let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) (fun (a : int) -> fun (b : int) -> Box.make (Int.add a b)) 1 in sum r
+    a reference, from the result of a call of Partial_application at t.stag:17:29-153, of the Box at t.stag:17:68-90, made in the region of a call of Partial_application at t.stag:17:29-153, after it ended
     |}]
 ;;

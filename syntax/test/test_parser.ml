@@ -1295,3 +1295,47 @@ let%expect_test "mutable variables" =
     t.stag:1:8-9: a mutable variable has no parameters
     |}]
 ;;
+
+let%expect_test "or-patterns have the lowest precedence, and associate left" =
+  let pat source =
+    pat source;
+    Parser.pattern ~file source
+    |> Result.iter ~f:(fun pattern -> print_endline (Printer.pattern pattern))
+  in
+  pat "A | B | C";
+  pat "A | (B | C)";
+  pat "A, x | B, x";
+  pat "(A, x) | (_, A x)";
+  pat "Some (A n | B n)";
+  pat "[A | B; c]";
+  pat "{x = A | B}";
+  pat "`A (x | y)";
+  pat "exception (E | F)";
+  pat "exception E | exception F";
+  [%expect {|
+    (Or (Or (Construct A ()) (Construct B ())) (Construct C ()))
+    A | B | C
+    (Or (Construct A ()) (Or (Construct B ()) (Construct C ())))
+    A | (B | C)
+    (Or (Tuple ((Construct A ()) (Var x))) (Tuple ((Construct B ()) (Var x))))
+    A, x | B, x
+    (Or (Tuple ((Construct A ()) (Var x))) (Tuple (Any (Construct A ((Var x))))))
+    A, x | _, A x
+    (Construct Some ((Or (Construct A ((Var n))) (Construct B ((Var n))))))
+    Some (A n | B n)
+    (Construct <Cons>
+     ((Deref
+       (Tuple
+        ((Or (Construct A ()) (Construct B ()))
+         (Construct <Cons> ((Deref (Tuple ((Var c) (Construct <Nil> ())))))))))))
+    [(A | B); c]
+    (Record ((x (Or (Construct A ()) (Construct B ())))))
+    {x = (A | B)}
+    (Poly_variant A ((Or (Var x) (Var y))))
+    `A (x | y)
+    (Exception (Or (Construct E ()) (Construct F ())))
+    exception (E | F)
+    (Or (Exception (Construct E ())) (Exception (Construct F ())))
+    exception E | exception F
+    |}]
+;;

@@ -337,7 +337,16 @@ C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
 exception p                         (* only at the top of a match arm *)
+p | q                               (* or-pattern: the first that matches *)
 ```
+
+`|` binds loosest, so `A, x | B, x` is `(A, x) | (B, x)`, and is left
+associative; a match arm may start with one more `|`, as `| A | B -> e`.
+Alternatives nest anywhere (`Some (A n | B n)`), and both must bind the same
+variables, at the same types. A variable's mode is the join of its modes in
+each alternative: if it is bound to a local part in one, it is local. In an
+exception arm, `exception E | exception F` is `exception (E | F)`; an
+alternative mixing value and exception patterns is an error.
 
 ## Exceptions
 
