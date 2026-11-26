@@ -342,8 +342,8 @@ let use (u : unit) = t1 1
 |};
   [%expect
     {|
-    (Runtime_error
-     "n is used before its value is defined (a value may not depend on itself), at t.stag:2:35-36")
+    (Rejected
+     ("n is used before its value is defined (a value may not depend on itself). Lets are recursive, so this n is the one being defined, not the n outside it: rename one of them"))
     |}]
 ;;
 
@@ -356,21 +356,23 @@ let go (u : unit) =
 let poly (u : unit) =
   let g = fun x -> match Int.equal 0 0 with true -> x | false -> g x in
   sum (g (Box.make 3))
-let boxed (u : unit) = let b = Box.make (sum b) in sum b
 let fn (u : unit) =
   let f (n : int) = match Int.equal n 0 with true -> 0 | false -> f (Int.sub n 1) in
   f 2
 |}
   in
-  List.iter [ "go"; "poly"; "boxed"; "fn" ] ~f:(fun entry ->
+  List.iter [ "go"; "poly"; "fn" ] ~f:(fun entry ->
     run (reviewed ^ source) ~entry);
+  run
+    (reviewed ^ "let boxed (u : unit) = let b = Box.make (sum b) in sum b")
+    ~entry:"boxed";
   [%expect
     {|
     (Returned (value 0) (on_heap 1) (in_regions 1))
     (Returned (value 3) (on_heap 1) (in_regions 1))
-    (Runtime_error
-     "b is used before its value is defined (a value may not depend on itself), at t.stag:11:45-46")
     (Returned (value 0) (on_heap 1) (in_regions 0))
+    (Rejected
+     ("b is used before its value is defined (a value may not depend on itself)"))
     |}]
 ;;
 

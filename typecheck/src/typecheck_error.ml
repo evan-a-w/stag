@@ -116,6 +116,10 @@ module Kind = struct
         ; used_at : Env.Level.t
         }
     | Toplevel_initialization_cycle of string list
+    | Used_before_defined of
+        { name : string
+        ; shadows : bool
+        }
     | Compile_time_use_of_toplevel_being_checked of string
     | Expect_outside_expect_test
     | Splice_evaluation_failed of
@@ -617,6 +621,19 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "Only a pointer can be stored to: [p.* <- v], or a field of it, as in \
      [p.*.x <- v]. Records are values, so a field is stored through a pointer \
      to the record"
+  | Used_before_defined { name; shadows } ->
+    sprintf
+      "%s is used before its value is defined (a value may not depend on \
+       itself)%s"
+      name
+      (if shadows
+       then
+         sprintf
+           ". Lets are recursive, so this %s is the one being defined, not the \
+            %s outside it: rename one of them"
+           name
+           name
+       else "")
   | Toplevel_initialization_cycle cycle ->
     sprintf
       "The value of %s may be needed to compute itself: %s"

@@ -53,6 +53,57 @@ let expr_fail (scope : Scope.t) ~loc ?(children = []) error =
   expr_node ~loc (Error children) Type.error
 ;;
 
+(* Whether [error] follows from typing a use, at one of [uses], of a value at
+   its own type: an error at the use, or a cyclic type around it (as
+   [let m = (1, m)]'s). *)
+let caused_by_self_use (error : Typecheck_error.t) ~uses =
+  let contains (outer : Loc.t) (inner : Loc.t) =
+    Loc.File.equal outer.file inner.file
+    && outer.start.#offset <= inner.start.#offset
+    && inner.stop.#offset <= outer.stop.#offset
+  in
+  let cyclic =
+    match error.kind with
+    | Unification_error (Occurs_check_failed _ | Row_mismatch (_, _, Cyclic_row))
+      -> true
+    | _ -> false
+  in
+  List.exists uses ~f:(fun use ->
+    Loc.equal error.loc use || (cyclic && contains error.loc use))
+;;
+
+(* Whether a local of [name] defined by [scope] would refer to a binding outside
+   it, of its stage, were lets not recursive. *)
+let shadows (scope : Scope.t) ~name =
+  match Env.lookup scope.locals name ~level:scope.level with
+  | Bound entry -> Env.Level.equal entry.level scope.level
+  | Forgotten -> false
+  | Unbound ->
+    (match
+       Module_scope.find_value
+         scope.module_
+         (Path (Syntax.Path.of_string name))
+         ~loc:Loc.none
+     with
+     | Ok (Toplevel _ | Prim _ | Intrinsic _) -> true
+     | Ok Unbound | Error _ -> false)
+;;
+
+(* A local value's [body] may not use the value, which isn't there yet. The
+   errors reported since [since] that typing such a use gives follow from it. *)
+let check_self_uses (scope : Scope.t) ~since ~body ~(ident : Typed.Ident.t) =
+  match Init_check.self_uses ~body ident with
+  | [] -> ()
+  | first :: _ as uses ->
+    Program_env.retract scope.program ~since ~f:(caused_by_self_use ~uses);
+    let shadows = shadows scope ~name:ident.name in
+    Scope.report
+      scope
+      (Typecheck_error.create
+         ~loc:first
+         (Used_before_defined { name = ident.name; shadows }))
+;;
+
 let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
   let resolve ~name entry =
     Uses.resolution_type
@@ -1219,12 +1270,14 @@ and let_type
             not known yet, as a [let rec]'s isn't. *)
          match fn.args with
          | [] ->
+           let since = scope.program.reported in
            let body =
              defining
                (Mode_rules.Binding.defining modes inner_at ~name ~loc)
                ~f:(fun () ->
                  check_expr t own ~at:inner_at ~expr:body ~ty:fn.res_ty)
            in
+           check_self_uses scope ~since ~body ~ident;
            fn, ident, body, None, Typed.Expr.Made.none
          | _ :: _ ->
            let (body, partials, closure), made =

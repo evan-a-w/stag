@@ -65,6 +65,10 @@ val report
   -> Typecheck_error.t
   -> unit
 
+(** Drops the errors [f] holds of among those reported since [t.reported] was
+    [since]: consequences of an error reported instead. *)
+val retract : t -> since:int -> f:(Typecheck_error.t -> bool) -> unit
+
 (** A [fallback] error is shown only if no other of the component is. *)
 val report_by
   :  ?fallback:bool
