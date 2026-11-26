@@ -850,6 +850,28 @@ let%expect_test "learn_stag.md" =
     Their modes differ: The modes external and gc must be equal, because the types are unified
     === learn_stag.md:820
     module Doc : sig
+      val args : list[string]
+      val missing : string
+      val echo_then_exit : int -> 'a
+      val copy : string -> string -> unit
+      val warn : string -> unit
+    end
+    Doc.args = Nil
+    Doc.missing = "/nonexistent/stag.txt: No such file or directory"
+    Doc.echo_then_exit = <fun>
+    Doc.copy = <fun>
+    Doc.warn = <fun>
+    === learn_stag.md:845
+    File "doc.stag", line 846, characters 8-44:
+    846 | let x = .~(write_file "out.txt" ""; .< 1 >.)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This toplevel splice failed at compile time: write_file can't be called at compile time
+    File "doc.stag", line 846, characters 11-34:
+    846 | let x = .~(write_file "out.txt" ""; .< 1 >.)
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The error was raised here
+    === learn_stag.md:859
+    module Doc : sig
       val labs : int -> int
       val a : int
       val strlen : string -> int
@@ -863,9 +885,9 @@ let%expect_test "learn_stag.md" =
     Doc.n = 5
     Doc.toupper = <fun>
     Doc.upper = 'A'
-    === learn_stag.md:831
-    File "doc.stag", line 832, characters 18-34:
-    832 | external getenv : string -> string = "getenv"
+    === learn_stag.md:870
+    File "doc.stag", line 871, characters 18-34:
+    871 | external getenv : string -> string = "getenv"
                             ^^^^^^^^^^^^^^^^
     Error: The external getenv has no C signature: string would be returned by C as a pointer, which is not supported yet
     |}]

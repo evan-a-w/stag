@@ -808,6 +808,45 @@ let as_external : Core.Lru.t[int, string, external] = cache
 (* Error: but an expression was expected of type Core.Lru.t[int, string, external] *)
 ```
 
+## Input and output
+
+Besides `print_*`, prims write to stderr, read stdin, read and write whole
+files, and give the program's arguments: `stag run main.stag -- a b` makes
+`argv ()` return `["a"; "b"]`. Failed system calls raise `Sys_error`, and
+`exit` ends the program with an exit code. Output is flushed before reading
+stdin, writing to stderr, calling C, and on exit (by `exit`, returning, or an
+uncaught exception), so it keeps its order.
+
+```stag
+let args = argv ()                  (* val args : list[string] = Nil *)
+let missing =
+  match read_file "/nonexistent/stag.txt" with
+  | contents -> contents
+  | exception Sys_error message -> message
+(* val missing : string = "/nonexistent/stag.txt: No such file or directory" *)
+
+(* Echoes stdin to stdout, line by line, then exits with [code]. *)
+let echo_then_exit code =
+  let loop _ =
+    match read_line () with
+    | Some line -> print_endline line; loop ()
+    | None -> flush (); exit code
+  in
+  loop ()
+(* val echo_then_exit : int -> 'a *)
+let copy src dst = write_file dst (read_file src)
+let warn message = prerr_endline (String.append "warning: " message)
+```
+
+At compile time, programs may print and read files (eg. to embed one in the
+program), but not write files, read stdin, see their arguments or exit, so
+checking a program never changes anything.
+
+```stag-error
+let x = .~(write_file "out.txt" ""; .< 1 >.)
+(* Error: write_file can't be called at compile time *)
+```
+
 ## C functions
 
 `external` binds a C function, called through libffi. Its type says the C

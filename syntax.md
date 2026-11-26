@@ -585,15 +585,24 @@ process (by `dlsym`, in the interpreter, which calls it through libffi), as
 the toplevel function `name : t`. `t` is an ordinary curried arrow, with no
 type variables: `a -> b -> r` is C's `r symbol(a, b)`, and `unit -> r` is
 `r symbol(void)`. Each argument and the result is `int` (C's `int64_t`),
-`bool` or `char`, and the result may be `unit` (`void`). An `int` is 63 bits, so
-a C result outside that range is a runtime error. Pointers (`string`,
+`bool`, `char` or one of C's integer types, the prelude's `C.int8 int16 int32
+int64 uint8 uint16 uint32 uint64 int uint long ulong size_t`; the result may be
+`unit` (`void`), and an argument `string`. The C integer types are abstract,
+meaningful only in an external's type: stag sees each as an `int`, so
+`external abs : C.int -> C.int = "abs"` is `val abs : int -> int`, and
+converting is checked: an argument out of the C type's range, or a result out
+of `int`'s 63 bits, is a runtime error. A `string` argument is passed as a
+`const char *` to a NUL-terminated copy, valid only during the call; a string
+holding a NUL is a runtime error. Other pointers (a `string` result,
 `ptr[...]`) are not supported yet, and other types are rejected. The symbol
 must be non-empty, with no NUL character. The C function must have exactly
 that signature: nothing checks it. For instance C's `isdigit` returns an
 `int`, so `external isdigit : char -> bool = "isdigit"` misreads its result
-(only the low byte is read as a `bool`): declare it `char -> int`. An external is
-a toplevel function like any other: it can be partially applied and passed
-around, and C is called once it has all its arguments.
+(only the low byte is read as a `bool`): declare it `char -> C.int`. An
+external is a toplevel function like any other: it can be partially applied
+and passed around, and C is called once it has all its arguments. The
+program's buffered output (stdout and stderr) is flushed before each call, so
+C writing to the same file descriptors, or calling `exit`, keeps its order.
 
 C is called at compile time only if the library declaring the external allows
 it: the prelude's always may, and a stag-build library, executable or test
@@ -643,7 +652,27 @@ String.equal : string -> string -> bool         String.compare : string -> strin
 Char.equal : char -> char -> bool  Char.code : char -> int
 Char.of_code : int -> char         Char.to_string : char -> string
 Bool.not : bool -> bool            Bool.equal : bool -> bool -> bool
+prerr_string : string -> unit      prerr_endline : string -> unit
+flush : unit -> unit               argv : unit -> list[string]
+read_line : unit -> option[string] read_all_stdin : unit -> string
+read_file : string -> string       write_file : string -> string -> unit
 ```
+
+`prerr_string` and `prerr_endline` write to stderr, flushing stdout first and
+stderr after, so a terminal shows the two in the order written. `flush`
+flushes both. `read_line` reads a line of stdin without its newline (`\n` or
+`\r\n`), `None` at its end; `read_all_stdin` reads the rest of stdin; both
+flush stdout first, so a prompt shows. `read_file path` and `write_file path
+contents` read and replace a whole file. `argv ()` is the program's arguments,
+without its name: those after `--` in `stag run FILE... -- ARG...`, and none
+otherwise. A failed system call raises the prelude's `Sys_error` with the
+system's message (`"f.txt: No such file or directory"`). Their results are
+`gc` strings.
+
+Checking must not act on the world, beyond printing: `write_file`,
+`read_line`, `read_all_stdin`, `argv` and `exit` (see Prelude) are runtime
+errors at compile time. Reading files is allowed, eg. to embed a file's
+contents in the program.
 
 They are outside the program's root module, so the program's own definitions
 shadow them: a toplevel `print_int` hides the prim, and a module `Int` hides
@@ -665,7 +694,10 @@ type result['a, 'e] = Ok of 'a | Error of 'e
 exception Division_by_zero
 exception Invalid_argument of string
 exception Failure of string
+exception Sys_error of string
 val raise : exn -> 'a
+val exit : int -> 'a              (* ends the program with that exit code *)
+module C = struct type int8 ... end   (* C's integer types, for externals *)
 module Stag = struct ... end      (* the syntax as data, see below *)
 module Core = struct ... end      (* the core library, see below *)
 ```

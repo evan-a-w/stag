@@ -995,11 +995,16 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
               (prim : Prim.t)
               (applied : Value.t list)]
       | This _ when Prim.run_time_only prim && Phase.is_compile_time t.phase ->
-        runtime_error ~loc (sprintf "%s can't be called at compile time" (Prim.name prim))
+        runtime_error
+          ~loc
+          (sprintf "%s can't be called at compile time" (Prim.name prim))
       | This args ->
-        (match Prim.apply prim ~io:{ output = t.output; argv = t.argv } args with
+        (match
+           Prim.apply prim ~io:{ output = t.output; argv = t.argv } args
+         with
          | Ok result ->
-           Eval_result.return (Value.of_prim result ~con:Syntax_value.prelude_constructor)
+           Eval_result.return
+             (Value.of_prim result ~con:Syntax_value.prelude_constructor)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
   | External { symbol; signature; at_compile_time; applied } ->
     let applied = arg :: applied in

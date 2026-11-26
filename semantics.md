@@ -138,13 +138,34 @@ Its modes are trusted as written, unwritten ones a declaration's defaults
 (`global nonportable gc`). The external itself is a code pointer, so its own
 mode is unconstrained: like any toplevel function, it is `static` and `const`.
 Only immediates cross the boundary for now (`int` as `int64_t`, `bool`,
-`char`, and `unit` as `void`): pointers are not supported yet, and signatures
-that can't be expressed are rejected. A stag function passed to C as a
+`char`, C's integer types `C.int`, `C.size_t` etc. as `int`, range checked,
+and `unit` as `void`), and `string` arguments, as a `const char *` to a
+NUL-terminated copy (on the data stack, once compiled) that C may not retain
+beyond the call: other pointers are not supported yet, and signatures that
+can't be expressed are rejected. Stag's buffered output is flushed before
+each call, so C's writes (and its `exit`) keep their order with stag's. A stag function passed to C as a
 callback must be `@ static`: a
 `static` closure carries a C ABI entry point, as it needs no environment.
 Callbacks are not implemented yet.
 
 Tail calls are guaranteed in tail position (LLVM `tailcc` + `musttail`).
+
+## Input and output
+
+Programs act on the world through prims (see
+[syntax.md](syntax.md#primitives)): printing to stdout and stderr, reading
+stdin, reading and writing whole files, and their arguments (`argv ()`).
+Output is buffered; it is flushed by `flush ()`, before writing to stderr,
+reading stdin or calling C, at `exit code`, and when the program ends, by
+returning or by an uncaught exception (before its error is reported). A
+failed system call raises `Sys_error`. `exit` ends the program from anywhere,
+with no `match` able to catch it.
+
+Compile time may print and read files, but nothing else: so checking a
+program is reproducible from its sources and the files it reads, and never
+changes the world. `write_file`, stdin, `argv` and `exit` at compile time are
+errors; C calls are allowed per library (see
+[syntax.md](syntax.md#external-functions)).
 
 ## Modes
 

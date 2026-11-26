@@ -22,8 +22,7 @@ exception
 
 exception Nul_in_string of string
 
-(* A C integer type as stag ints: [to_int] is [None] out of the range of
-   [int]. *)
+(* A C integer type as stag ints: [to_int] is [None] out of the range of [int]. *)
 type c_int =
   | C_int :
       { typ : 'a Ctypes.typ
@@ -97,7 +96,8 @@ let c_int : C_int.t -> c_int = function
 (* Whether [n] is in the range of a C integer type of [bits] bits. *)
 let in_range n ~bits ~signed =
   match signed with
-  | true -> bits >= Int.num_bits || (n >= -(1 lsl (bits - 1)) && n < 1 lsl (bits - 1))
+  | true ->
+    bits >= Int.num_bits || (n >= -(1 lsl (bits - 1)) && n < 1 lsl (bits - 1))
   | false -> n >= 0 && (bits >= Int.num_bits || n < 1 lsl bits)
 ;;
 
@@ -227,7 +227,6 @@ let call t ~symbol (signature : C_signature.t) args =
     | exception Nul_in_string s ->
       Error
         (sprintf
-           "the string argument %S has a NUL character, so can't be passed to \
-            C"
+           "the string argument %S has a NUL character, so can't be passed to C"
            s))
 ;;
