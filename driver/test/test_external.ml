@@ -487,7 +487,7 @@ external byte : C.uint8 -> C.uint8 = "abs"
     -- evaluated
     (abs <fun>)
     (byte <fun>)
-    ("The external abs could not be called: the argument 2147483648 is out of the range of C.int"
+    ("The external abs could not be called: argument 1 (2147483648) is out of the range of C.int"
      @ t.stag:4:14-28)
     val abs : int -> int
     val byte : int -> int
@@ -496,7 +496,7 @@ external byte : C.uint8 -> C.uint8 = "abs"
     -- evaluated
     (abs <fun>)
     (byte <fun>)
-    ("The external abs could not be called: the argument -2147483649 is out of the range of C.int"
+    ("The external abs could not be called: argument 1 (-2147483649) is out of the range of C.int"
      @ t.stag:4:16-54)
     val abs : int -> int
     val byte : int -> int
@@ -505,7 +505,7 @@ external byte : C.uint8 -> C.uint8 = "abs"
     -- evaluated
     (abs <fun>)
     (byte <fun>)
-    ("The external abs could not be called: the argument -1 is out of the range of C.uint8"
+    ("The external abs could not be called: argument 1 (-1) is out of the range of C.uint8"
      @ t.stag:4:24-42)
     val abs : int -> int
     val byte : int -> int
@@ -514,7 +514,7 @@ external byte : C.uint8 -> C.uint8 = "abs"
     -- evaluated
     (abs <fun>)
     (byte <fun>)
-    ("The external abs could not be called: the argument 256 is out of the range of C.uint8"
+    ("The external abs could not be called: argument 1 (256) is out of the range of C.uint8"
      @ t.stag:4:19-27)
     |}]
 ;;
@@ -604,9 +604,43 @@ let nul = strlen "a\000b"
     -- evaluated at compile time
     -- evaluated
     (strlen <fun>)
-    ("The external strlen could not be called: the string argument \"a\\000b\" has a NUL character, so can't be passed to C"
+    ("The external strlen could not be called: argument 1, the string \"a\\000b\", has a NUL character, so can't be passed to C"
      @ t.stag:3:10-25)
-    |}]
+    |}];
+  run
+    {|
+external strcmp : string -> string -> C.int = "strcmp"
+let long = strcmp "fine" "a string longer than is shown in an error, \000 with a NUL"
+|};
+  [%expect {|
+    val strcmp : string -> string -> int
+    val long : int
+    -- evaluated at compile time
+    -- evaluated
+    (strcmp <fun>)
+    ("The external strcmp could not be called: argument 2, the string \"a string longer than is shown in\"..., has a NUL character, so can't be passed to C"
+     @ t.stag:3:11-85)
+    |}];
+  run
+    {|
+external abs3 : C.int -> C.uint8 -> C.int8 -> C.int = "abs"
+let second = abs3 1 256 0
+|};
+  [%expect {|
+    val abs3 : int -> int -> int -> int
+    val second : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs3 <fun>)
+    ("The external abs could not be called: argument 2 (256) is out of the range of C.uint8"
+     @ t.stag:3:13-25)
+    |}];
+  run
+    {|
+external abs3 : C.int -> C.uint8 -> C.int8 -> C.int = "abs"
+let third = abs3 1 2 128
+|};
+  [%expect {| |}]
 ;;
 
 let%expect_test "an external's C integer types and strings, with modes" =

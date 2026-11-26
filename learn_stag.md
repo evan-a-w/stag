@@ -834,10 +834,12 @@ let as_external : Core.Lru.t[int, string, external] = cache
 
 Besides `print_*`, prims write to stderr, read stdin, read and write whole
 files, and give the program's arguments: `stag run main.stag -- a b` makes
-`argv ()` return `["a"; "b"]`. Failed system calls raise `Sys_error`, and
-`exit` ends the program with an exit code. Output is flushed before reading
-stdin, writing to stderr, calling C, and on exit (by `exit`, returning, or an
-uncaught exception), so it keeps its order.
+`argv ()` return `["a"; "b"]`. Failed system calls (including writes to stdout)
+raise `Sys_error`, and `exit` ends the program with an exit code in 0..255;
+others are errors. Output is flushed before reading stdin, writing to stderr,
+calling C, and on exit (by `exit`, returning, or an uncaught exception), so it
+keeps its order. `prerr_*` writes straight to stderr, so an expect test doesn't
+see it.
 
 ```stag
 let args = argv ()                  (* val args : list[string] = Nil *)
@@ -860,9 +862,9 @@ let copy src dst = write_file dst (read_file src)
 let warn message = prerr_endline (String.append "warning: " message)
 ```
 
-At compile time, programs may print and read files (eg. to embed one in the
-program), but not write files, read stdin, see their arguments or exit, so
-checking a program never changes anything.
+At compile time, programs may print, but not read or write files, read
+stdin, see their arguments or exit, so checking a program never changes
+anything, and depends only on its sources.
 
 ```stag-error
 let x = .~(write_file "out.txt" ""; .< 1 >.)
@@ -895,7 +897,9 @@ external getenv : string -> string = "getenv"
 ```
 
 Buffered output is flushed before every C call, so a C function writing to the
-same file descriptors, or calling `exit`, sees it in order.
+same file descriptors, or calling `exit`, sees it in order. C's stdio has its
+own buffers, though: C's `stdout` is flushed only by C, and C reading stdin
+doesn't see what stag has buffered of it, nor stag what C has.
 
 At compile time, C calls are only allowed in libraries whose stanza says
 `(compile_time_c_calls)` (see the project above).

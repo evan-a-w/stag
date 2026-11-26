@@ -675,20 +675,21 @@ read_file : string -> string       write_file : string -> string -> unit
 ```
 
 `prerr_string` and `prerr_endline` write to stderr, flushing stdout first and
-stderr after, so a terminal shows the two in the order written. `flush`
-flushes both. `read_line` reads a line of stdin without its newline (`\n` or
-`\r\n`), `None` at its end; `read_all_stdin` reads the rest of stdin; both
+stderr after, so a terminal shows the two in the order written (an expect
+test captures only stdout). `flush` flushes both. `read_line` reads a line of
+stdin without its newline (`\n` or `\r\n`; a lone `\r` is kept, even ending
+the input), `None` at its end; `read_all_stdin` reads the rest of stdin; both
 flush stdout first, so a prompt shows. `read_file path` and `write_file path
 contents` read and replace a whole file. `argv ()` is the program's arguments,
 without its name: those after `--` in `stag run FILE... -- ARG...`, and none
 otherwise. A failed system call raises the prelude's `Sys_error` with the
-system's message (`"f.txt: No such file or directory"`). Their results are
-`gc` strings.
+system's message (`"f.txt: No such file or directory"`), as do the prims
+that print when writing stdout fails. Their results are `gc` strings.
 
-Checking must not act on the world, beyond printing: `write_file`,
-`read_line`, `read_all_stdin`, `argv` and `exit` (see Prelude) are runtime
-errors at compile time. Reading files is allowed, eg. to embed a file's
-contents in the program.
+Checking must not act on the world, beyond printing: `read_file`,
+`write_file`, `read_line`, `read_all_stdin`, `argv` and `exit` (see Prelude)
+are runtime errors at compile time. Reading files is denied too, as the build
+wouldn't know to recheck the program when they change.
 
 They are outside the program's root module, so the program's own definitions
 shadow them: a toplevel `print_int` hides the prim, and a module `Int` hides
@@ -712,7 +713,7 @@ exception Invalid_argument of string
 exception Failure of string
 exception Sys_error of string
 val raise : exn -> 'a
-val exit : int -> 'a              (* ends the program with that exit code *)
+val exit : int -> 'a              (* ends the program with that code, in 0..255 *)
 module C = struct type int8 ... end   (* C's integer types, for externals *)
 module Stag = struct ... end      (* the syntax as data, see below *)
 module Core = struct ... end      (* the core library, see below *)

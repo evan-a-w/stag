@@ -114,12 +114,20 @@ let int_relation name f =
     | _ -> None)
 ;;
 
+let sys_error f =
+  Some
+    (match f () with
+     | value -> Ok value
+     | exception Sys_error message -> Error (Exception.Sys_error message))
+;;
+
 let print name (arg : Base_type.t) to_string =
   prim name [ arg ] Unit (fun ~io -> function
     | [ value ] ->
-      Option.map (to_string value) ~f:(fun string ->
-        io.output string;
-        Ok Value.Unit)
+      Option.bind (to_string value) ~f:(fun string ->
+        sys_error (fun () ->
+          io.output string;
+          Value.Unit))
     | _ -> None)
 ;;
 
@@ -137,21 +145,15 @@ let binary name args result f =
 
 let ok value = Some (Ok value)
 
-let sys_error f =
-  Some
-    (match f () with
-     | value -> Ok value
-     | exception Sys_error message -> Error (Exception.Sys_error message))
-;;
-
 (* Flushes stdout first, so a terminal shows the program's output in order. *)
 let prerr name to_string =
   prim name [ String ] Unit (fun ~io:_ -> function
     | [ String s ] ->
-      Out_channel.flush stdout;
-      Out_channel.output_string stderr (to_string s);
-      Out_channel.flush stderr;
-      ok Value.Unit
+      sys_error (fun () ->
+        Out_channel.flush stdout;
+        Out_channel.output_string stderr (to_string s);
+        Out_channel.flush stderr;
+        Value.Unit)
     | _ -> None)
 ;;
 
@@ -163,6 +165,24 @@ let read_stdin name result read =
         Out_channel.flush stdout;
         read In_channel.stdin)
     | _ -> None)
+;;
+
+(* Without its [\n] or [\r\n]: unlike [In_channel.input_line], keeps a [\r]
+   ending the input. *)
+let read_line stdin =
+  let buffer = Buffer.create 80 in
+  let rec loop () =
+    match In_channel.input_char stdin with
+    | None ->
+      if Buffer.length buffer = 0 then None else Some (Buffer.contents buffer)
+    | Some '\n' ->
+      let line = Buffer.contents buffer in
+      Some (String.chop_suffix line ~suffix:"\r" |> Option.value ~default:line)
+    | Some c ->
+      Buffer.add_char buffer c;
+      loop ()
+  in
+  loop ()
 ;;
 
 (* Base may return an argument itself (eg. [String.sub] of the whole string,
@@ -194,16 +214,22 @@ let all =
   ; prerr "prerr_endline" (fun s -> s ^ "\n")
   ; prim "flush" [ Unit ] Unit (fun ~io:_ -> function
       | [ Unit ] ->
-        Out_channel.flush stdout;
-        Out_channel.flush stderr;
-        ok Value.Unit
+        sys_error (fun () ->
+          Out_channel.flush stdout;
+          Out_channel.flush stderr;
+          Value.Unit)
       | _ -> None)
   ; read_stdin "read_line" String_option (fun stdin ->
-      Value.String_option (In_channel.input_line stdin))
+      Value.String_option (read_line stdin))
   ; read_stdin "read_all_stdin" String (fun stdin ->
       Value.String (In_channel.input_all stdin))
-  ; unary "read_file" String String (function
-      | String path ->
+  ; prim
+      ~run_time_only:true
+      "read_file"
+      [ String ]
+      String
+      (fun ~io:_ -> function
+      | [ String path ] ->
         sys_error (fun () -> Value.String (In_channel.read_all path))
       | _ -> None)
   ; prim

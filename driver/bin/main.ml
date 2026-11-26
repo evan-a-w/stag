@@ -35,8 +35,25 @@ let contents files path =
   | None -> Option.try_with (fun () -> In_channel.read_all path)
 ;;
 
+(* Before writing to stderr, so the two keep their order. A failure is left to
+   [exit_flushing]. *)
+let flush_before_stderr () =
+  try Out_channel.flush stdout with
+  | Sys_error _ -> ()
+;;
+
+(* Exits with [code], or fails if stdout can't be written. *)
+let exit_flushing code =
+  match Out_channel.flush stdout with
+  | () -> exit code
+  | exception Sys_error message ->
+    eprintf "Error: Writing to stdout failed: %s\n%!" message;
+    (* [exit] would flush stdout again, raising. *)
+    Core_unix.exit_immediately (Int.max code 1)
+;;
+
 let report ?warning files diagnostic =
-  Out_channel.flush stdout;
+  flush_before_stderr ();
   eprintf
     "%s%!"
     (Diagnostic.to_string_hum
@@ -46,7 +63,7 @@ let report ?warning files diagnostic =
 ;;
 
 let report_all files diagnostics =
-  Out_channel.flush stdout;
+  flush_before_stderr ();
   eprintf
     "%s%!"
     (Diagnostic.list_to_string_hum
@@ -64,13 +81,13 @@ let check_with_prelude ?output config files =
   match Pipeline.check ?output config (Pipeline.parse_files files) with
   | Error diagnostic ->
     report [] diagnostic;
-    exit 1
+    exit_flushing 1
   | Ok (prelude, checked) ->
     (match Pipeline.Checked.to_result checked with
      | Ok driver -> driver, prelude
      | Error diagnostics ->
        report_all files diagnostics;
-       exit 1)
+       exit_flushing 1)
 ;;
 
 let check ?output config files = fst (check_with_prelude ?output config files)
@@ -80,10 +97,10 @@ let eval ?argv ~limits files driver =
   | Ok () -> ()
   | Error error ->
     (match Stag_eval.Runtime_error.exit_code error with
-     | Some code -> exit code
+     | Some code -> exit_flushing code
      | None ->
        report files (Diagnostic.of_runtime_error error);
-       exit 1)
+       exit_flushing 1)
 ;;
 
 let files_param =
@@ -213,7 +230,8 @@ let run_command =
        let files = read_files paths in
        let driver = check (Pipeline_config.create ~limits paths) files in
        warn_stale files driver;
-       eval ?argv ~limits files driver)
+       eval ?argv ~limits files driver;
+       exit_flushing 0)
 ;;
 
 let test_command =

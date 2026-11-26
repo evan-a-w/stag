@@ -10,6 +10,7 @@
   stag_eval
   stag_build
   core
+  core_unix
   core_unix.command_unix
   core_unix.sys_unix
   core_unix.filename_unix)

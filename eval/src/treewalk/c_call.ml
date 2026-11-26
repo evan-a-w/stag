@@ -14,13 +14,19 @@ let bad_value value =
 (* Of a result: the C value, printed. *)
 exception Out_of_range of string
 
+(* Of the argument at [index], counting from 1. *)
 exception
   Argument_out_of_range of
-    { value : int
+    { index : int
+    ; value : int
     ; c_int : C_int.t
     }
 
-exception Nul_in_string of string
+exception
+  Nul_in_string of
+    { index : int
+    ; string : string
+    }
 
 (* A C integer type as stag ints: [to_int] is [None] out of the range of [int]. *)
 type c_int =
@@ -122,7 +128,7 @@ let result_ : C_signature.Result.t -> result_ = function
           | None -> raise (Out_of_range (to_string n)) )
 ;;
 
-let arg : C_signature.Arg.t -> arg = function
+let arg ~index : C_signature.Arg.t -> arg = function
   | Int ->
     Arg
       ( Ctypes.int64_t
@@ -145,7 +151,8 @@ let arg : C_signature.Arg.t -> arg = function
     Arg
       ( Ctypes.string
       , function
-        | String s when String.mem s '\000' -> raise (Nul_in_string s)
+        | String string when String.mem string '\000' ->
+          raise (Nul_in_string { index; string })
         | String s -> s
         | value -> bad_value value )
   | C_int kind ->
@@ -155,13 +162,14 @@ let arg : C_signature.Arg.t -> arg = function
       ( typ
       , function
         | Int n when in_range n ~bits ~signed -> of_int n
-        | Int value -> raise (Argument_out_of_range { value; c_int = kind })
+        | Int value ->
+          raise (Argument_out_of_range { index; value; c_int = kind })
         | value -> bad_value value )
 ;;
 
 let wrong_count () = raise_s [%message "C_call: the wrong number of arguments"]
 
-let rec fn (args : C_signature.Arg.t list) result : fn =
+let rec fn ~index (args : C_signature.Arg.t list) result : fn =
   match args with
   | [] ->
     let (Result_ (typ, of_c)) = result_ result in
@@ -171,7 +179,7 @@ let rec fn (args : C_signature.Arg.t list) result : fn =
           | [ Value.Unit ] -> of_c (f ())
           | _ -> wrong_count () )
   | [ only ] ->
-    let (Arg (arg_typ, to_c)) = arg only in
+    let (Arg (arg_typ, to_c)) = arg ~index only in
     let (Result_ (typ, of_c)) = result_ result in
     Fn
       ( Ctypes.(arg_typ @-> returning typ)
@@ -179,8 +187,8 @@ let rec fn (args : C_signature.Arg.t list) result : fn =
           | [ value ] -> of_c (f (to_c value))
           | _ -> wrong_count () )
   | first :: rest ->
-    let (Arg (arg_typ, to_c)) = arg first in
-    let (Fn (rest_typ, call)) = fn rest result in
+    let (Arg (arg_typ, to_c)) = arg ~index first in
+    let (Fn (rest_typ, call)) = fn ~index:(index + 1) rest result in
     Fn
       ( Ctypes.(arg_typ @-> rest_typ)
       , fun f -> function
@@ -201,32 +209,60 @@ type t = (Value.t list -> Value.t, string) Result.t Key.Table.t
 
 let create () = Key.Table.create ()
 
+module Call_error = struct
+  type t =
+    | Sys_error of string
+    | Failed of string
+end
+
+let max_shown = 32
+
+let abbreviate string =
+  if String.length string <= max_shown
+  then sprintf "%S" string
+  else sprintf "%S..." (String.prefix string max_shown)
+;;
+
 let call t ~symbol (signature : C_signature.t) args =
   let resolved =
     Hashtbl.find_or_add t (symbol, signature) ~default:(fun () ->
-      let (Fn (typ, call)) = fn signature.args signature.result in
+      let (Fn (typ, call)) = fn ~index:1 signature.args signature.result in
       match Foreign.foreign symbol typ with
       | f -> Ok (call f)
       | exception Dl.DL_error _ -> Error "there is no such C symbol")
   in
-  Result.bind resolved ~f:(fun call ->
-    (* C may write to the same file descriptors, or exit. *)
-    Out_channel.flush stdout;
-    Out_channel.flush stderr;
-    match call args with
-    | value -> Ok value
-    | exception Out_of_range n ->
-      Error
-        (sprintf "it returned %s, which is out of the range of int (63 bits)" n)
-    | exception Argument_out_of_range { value; c_int } ->
-      Error
-        (sprintf
-           "the argument %d is out of the range of C.%s"
-           value
-           (C_int.name c_int))
-    | exception Nul_in_string s ->
-      Error
-        (sprintf
-           "the string argument %S has a NUL character, so can't be passed to C"
-           s))
+  match resolved with
+  | Error message -> Error (Call_error.Failed message)
+  | Ok call ->
+    (match
+       (* C may write to the same file descriptors, or exit. *)
+       Out_channel.flush stdout;
+       Out_channel.flush stderr
+     with
+     | exception Sys_error message -> Error (Call_error.Sys_error message)
+     | () ->
+       (match call args with
+        | value -> Ok value
+        | exception Out_of_range n ->
+          Error
+            (Failed
+               (sprintf
+                  "it returned %s, which is out of the range of int (63 bits)"
+                  n))
+        | exception Argument_out_of_range { index; value; c_int } ->
+          Error
+            (Failed
+               (sprintf
+                  "argument %d (%d) is out of the range of C.%s"
+                  index
+                  value
+                  (C_int.name c_int)))
+        | exception Nul_in_string { index; string } ->
+          Error
+            (Failed
+               (sprintf
+                  "argument %d, the string %s, has a NUL character, so can't \
+                   be passed to C"
+                  index
+                  (abbreviate string)))))
 ;;

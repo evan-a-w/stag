@@ -37,20 +37,6 @@ type t =
   | Type of Syntax.Type_expr.t
   | Ref of Decl_ref.t
 
-let of_prim (value : Prim.Value.t) ~con : t =
-  match value with
-  | Int n -> Int n
-  | Bool b -> Bool b
-  | String s -> String s
-  | Char c -> Char c
-  | Unit -> Unit
-  | String_list strings ->
-    List.fold_right strings ~init:(con "Nil" []) ~f:(fun s rest ->
-      con "Cons" [ Box (Tuple [ String s; rest ]) ])
-  | String_option None -> con "None" []
-  | String_option (Some s) -> con "Some" [ String s ]
-;;
-
 (* A list is [Nil] or [Cons] of an element and a list: constructors without and
    with arguments. *)
 let string_list value =

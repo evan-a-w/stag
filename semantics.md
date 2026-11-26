@@ -158,14 +158,23 @@ stdin, reading and writing whole files, and their arguments (`argv ()`).
 Output is buffered; it is flushed by `flush ()`, before writing to stderr,
 reading stdin or calling C, at `exit code`, and when the program ends, by
 returning or by an uncaught exception (before its error is reported). A
-failed system call raises `Sys_error`. `exit` ends the program from anywhere,
-with no `match` able to catch it.
+failed system call raises `Sys_error`, including a failed write or flush of
+stdout. If the flush when the program ends fails, it is reported, and the
+program exits with code 1 (or its own, if non-zero). `exit` ends the program
+from anywhere, with no `match` able to catch it; its code must be in 0..255, as
+the system keeps only 8 bits (so `exit 256` would report success): others are
+runtime errors.
 
-Compile time may print and read files, but nothing else: so checking a
-program is reproducible from its sources and the files it reads, and never
-changes the world. `write_file`, stdin, `argv` and `exit` at compile time are
-errors; C calls are allowed per library (see
-[syntax.md](syntax.md#external-functions)).
+Stag's buffers are its own: C's stdio buffers separately, so C's `stdout` is
+flushed only by C, and stag and C reading stdin each see only the input the
+other hasn't buffered. `prerr_*` writes straight to stderr, so isn't part of an
+expect test's output.
+
+Compile time may print, but nothing else: so checking a program is
+reproducible from its sources, and never changes the world. `read_file`,
+`write_file`, stdin, `argv` and `exit` at compile time are errors (reading a
+file would make the program depend on it, unknown to the build); C calls are
+allowed per library (see [syntax.md](syntax.md#external-functions)).
 
 ## Modes
 

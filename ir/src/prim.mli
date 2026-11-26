@@ -52,9 +52,10 @@ val result : t -> Type.ty
 (** The number of arguments, at least one. *)
 val arity : t -> int
 
-(** Whether [t] acts on the world outside the compiler, beyond printing and
-    reading files (eg. writing files, reading stdin), so can't be called at
-    compile time. *)
+(** Whether [t] acts on the world outside the compiler, beyond printing (eg.
+    reading or writing files, reading stdin), so can't be called at compile
+    time. Reading files is denied too, as nothing would rebuild the program when
+    they change. *)
 val run_time_only : t -> bool
 
 (** Applies [t] to [arity t] arguments, of the types of [ty]. *)

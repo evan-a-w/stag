@@ -1006,9 +1006,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
         (match
            Prim.apply prim ~io:{ output = t.output; argv = t.argv } args
          with
-         | Ok result ->
-           Eval_result.return
-             (Value.of_prim result ~con:Syntax_value.prelude_constructor)
+         | Ok result -> Eval_result.return (Syntax_value.of_prim result)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
   | External { symbol; signature; at_compile_time; applied } ->
     let applied = arg :: applied in
@@ -1027,7 +1025,9 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
            C_call.call t.c_functions ~symbol signature (List.rev applied)
          with
          | Ok result -> Eval_result.return result
-         | Error message ->
+         | Error (Sys_error message) ->
+           raise_exn ~loc (prim_exception (Sys_error message))
+         | Error (Failed message) ->
            runtime_error
              ~loc
              (sprintf "The external %s could not be called: %s" symbol message)))
@@ -1044,6 +1044,11 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
      | Exit, Int code ->
        if Phase.is_compile_time t.phase
        then runtime_error ~loc "exit can't be called at compile time"
+       else if code < 0 || code > 255
+       then
+         runtime_error
+           ~loc
+           (sprintf "exit %d: the exit code must be in 0..255" code)
        else
          Eval_result.error
            (Runtime_error.to_error { Runtime_error.loc; kind = Exited code })

@@ -1,5 +1,6 @@
 open! Import
 include Syntax_value_intf.Syntax_value with type value := Value.t
 
-(** The prelude's constructor [name] (eg. ["Some"]) applied to [args]. *)
-val prelude_constructor : string -> Value.t list -> Value.t
+(** A prim's result: lists and options as the prelude's. The inverse of
+    [Value.to_prim]. *)
+val of_prim : Prim.Value.t -> Value.t

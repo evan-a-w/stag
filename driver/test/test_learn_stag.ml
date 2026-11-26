@@ -882,7 +882,7 @@ let%expect_test "learn_stag.md" =
                                                                 ^^^^^
     Error: This expression has type Core.Lru.t[int, string, gc] but an expression was expected of type Core.Lru.t[int, string, external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
-    === learn_stag.md:842
+    === learn_stag.md:844
     module Doc : sig
       val args : list[string]
       val missing : string
@@ -895,16 +895,16 @@ let%expect_test "learn_stag.md" =
     Doc.echo_then_exit = <fun>
     Doc.copy = <fun>
     Doc.warn = <fun>
-    === learn_stag.md:867
-    File "doc.stag", line 868, characters 8-44:
-    868 | let x = .~(write_file "out.txt" ""; .< 1 >.)
+    === learn_stag.md:869
+    File "doc.stag", line 870, characters 8-44:
+    870 | let x = .~(write_file "out.txt" ""; .< 1 >.)
                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This toplevel splice failed at compile time: write_file can't be called at compile time
-    File "doc.stag", line 868, characters 11-34:
-    868 | let x = .~(write_file "out.txt" ""; .< 1 >.)
+    File "doc.stag", line 870, characters 11-34:
+    870 | let x = .~(write_file "out.txt" ""; .< 1 >.)
                      ^^^^^^^^^^^^^^^^^^^^^^^
     Note: The error was raised here
-    === learn_stag.md:881
+    === learn_stag.md:883
     module Doc : sig
       val labs : int -> int
       val a : int
@@ -919,9 +919,9 @@ let%expect_test "learn_stag.md" =
     Doc.n = 5
     Doc.toupper = <fun>
     Doc.upper = 'A'
-    === learn_stag.md:892
-    File "doc.stag", line 893, characters 18-34:
-    893 | external getenv : string -> string = "getenv"
+    === learn_stag.md:894
+    File "doc.stag", line 895, characters 18-34:
+    895 | external getenv : string -> string = "getenv"
                             ^^^^^^^^^^^^^^^^
     Error: The external getenv has no C signature: string would be returned by C as a pointer, which is not supported yet
     |}]
