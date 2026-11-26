@@ -397,7 +397,7 @@ let use (u : unit) = Int.add (c ()) (f (Box.make 2))
     val keep : ptr[box[int]]
     val sum : box[int] @ _ -> int @ _
     val same : <'a>{..'b} @ 'm0 -> ('a @ 'm2 -> 'a @ 'm3) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and gc <= 'm1
-    val f : box[int] @ 'm0 -> int @ _ with 'm0 <= gc global
+    val f : box[int] @ 'm0 -> int @ _ with 'm0 <= global gc
     val c : unit @ _ -> int @ _
     val use : unit @ _ -> int @ _
     t.stag:2:27-48 Pointer in keep: heap
@@ -542,7 +542,7 @@ let use (u : unit) =
     {|
     val sum : box[int] @ _ -> int @ _
     val two : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val annotated : (int -> (int -> int) @ local) @ 'm0 -> (int @ _ -> (int -> int) @ 'm2) @ 'm1 with 'm0 <= 'm1 and nonportable gc local <= 'm2 and gc <= 'm1
+    val annotated : (int -> (int -> int) @ local) @ 'm0 -> (int @ _ -> (int -> int) @ 'm2) @ 'm1 with 'm0 <= 'm1 and local nonportable gc <= 'm2 and gc <= 'm1
     val inferred : (int @ 'm1 -> 'a @ 'm2) @ 'm0 -> (int @ _ -> 'a @ 'm4) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm4 and gc <= 'm3
     val partial : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
     val adder : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0

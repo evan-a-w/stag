@@ -58,8 +58,8 @@ let%expect_test "signatures" =
     module Lru : sig
       type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0] @@ 'm0]
       type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-      type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0] @@ 'm0], 'm0] @@ 'm0]; first : ptr[link['a, 'b, 'm0] @@ 'm0]; last : ptr[link['a, 'b, 'm0] @@ 'm0]; size : ptr[int] }
-      val create : int @ 'm0 -> (('a @ local 'm3 -> ('a @ local 'm3 -> int) @ external local) @ 'm2 -> t['a, 'b, 'm3] @ 'm4) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm4 and release(locality('m2)) <= locality('m4) and nonportable gc <= 'm4 and gc <= 'm1
+      type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ local external; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0] @@ 'm0], 'm0] @@ 'm0]; first : ptr[link['a, 'b, 'm0] @@ 'm0]; last : ptr[link['a, 'b, 'm0] @@ 'm0]; size : ptr[int] }
+      val create : int @ 'm0 -> (('a @ local 'm3 -> ('a @ local 'm3 -> int) @ local external) @ 'm2 -> t['a, 'b, 'm3] @ 'm4) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm4 and release(locality('m2)) <= locality('m4) and nonportable gc <= 'm4 and gc <= 'm1
       val length : t['a, 'b, _] @ _ -> int @ _
       module Internal : sig
         val unlink : t['a, 'b, 'm1] @ 'm0 -> (ptr[entry['a, 'b, 'm1] @@ 'm3] @ _ -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and gc <= 'm2

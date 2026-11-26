@@ -194,7 +194,7 @@ let projection positions =
     : [ `Point of int | `Var of Mode.Var.t ]
     =
     match Arrow_modes.Side.on_axis side axis with
-    | Point point ->
+    | Point (point, _) ->
       let module C = (val Mode.Axis.chain axis) in
       `Point (C.index point)
     | Var var -> `Var var

@@ -459,9 +459,9 @@ variable giving the stage and provenance (only on a type or binding: a `with`
 constraint relates whole variables or axes).
 
 A function type's side written without a mode, or the axes its mode doesn't
-name, are the default, `nonportable gc global`, in an annotation as in a
+name, are the default, `global nonportable gc`, in an annotation as in a
 declaration: `(f : int -> int)` takes and returns global values, and
-`int @ local -> int` is `int @ nonportable gc local -> int`. A mode variable
+`int @ local -> int` is `int @ local nonportable gc -> int`. A mode variable
 keeps a side polymorphic: `(f : int @ 'm -> int @ 'n)`.
 
 ```ocaml
@@ -603,7 +603,7 @@ compile time. This keeps opening or checking a file from running arbitrary C
 code.
 
 Modes written in `t` are trusted, as C code is not checked, and unwritten
-ones are a declaration's defaults, `nonportable gc global` (see
+ones are a declaration's defaults, `global nonportable gc` (see
 [modes.md](modes.md#arrow-modes)):
 `external f : int @ portable -> int @ portable = "f"` returns portable
 values, while a plain `int -> int` returns nonportable `gc` ones

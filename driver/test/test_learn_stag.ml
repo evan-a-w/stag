@@ -811,7 +811,7 @@ let%expect_test "learn_stag.md" =
       type r = { x : string @@ gc; y : string }
       val get_x : r @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1) and meet(provenance('m0), gc) <= provenance('m1) and release(locality('m0)) <= locality('m1)
       val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and release(locality('m0)) <= locality('m1) and 'm0 <= portable gc and gc <= 'm1
-      val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1
+      val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and local nonportable gc <= 'm1
       val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0)
       val static_if : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and provenance('m1) <= static_if_const(stage('m0))
     end

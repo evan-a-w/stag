@@ -7,6 +7,7 @@ module Side = struct
     | Var_at of
         { var : Mode.Var.t
         ; locality : Mode.Locality.t
+        ; why : Mode.Reason.t
         }
 
   let var = function
@@ -16,15 +17,15 @@ module Side = struct
 
   module On_axis = struct
     type 'a t =
-      | Point of 'a
+      | Point of 'a * Mode.Reason.t option
       | Var of Mode.Var.t
   end
 
   let on_axis (type a) t (axis : a Mode.Axis.t) : a On_axis.t =
     match t, axis with
-    | Fixed const, _ -> Point (Mode.Const.get const axis)
+    | Fixed const, _ -> Point (Mode.Const.get const axis, None)
     | Var var, _ -> Var var
-    | Var_at { locality; _ }, Locality -> Point locality
+    | Var_at { locality; why; _ }, Locality -> Point (locality, Some why)
     | Var_at { var; _ }, (Stage | Provenance) -> Var var
   ;;
 end
@@ -81,10 +82,11 @@ let equate_side (side1 : Side.t) (side2 : Side.t) ~reason =
   | (Fixed _ | Var_at _), _ | Var _, Var_at _ ->
     let on (type a) (axis : a Mode.Axis.t) =
       match Side.on_axis side1 axis, Side.on_axis side2 axis with
-      | Point p1, Point p2 -> Mode.Error.equal_on axis p1 p2 reason
-      | Var var, Point p | Point p, Var var ->
-        let%bind.Result () = Mode.Var.at_least var axis p fixed_reason in
-        Mode.Var.at_most var axis p fixed_reason
+      | Point (p1, _), Point (p2, _) -> Mode.Error.equal_on axis p1 p2 reason
+      | Var var, Point (p, why) | Point (p, why), Var var ->
+        let why = Option.value why ~default:fixed_reason in
+        let%bind.Result () = Mode.Var.at_least var axis p why in
+        Mode.Var.at_most var axis p why
       | Var var1, Var var2 ->
         let%bind.Result () = Mode.Var.submode_on var1 var2 axis reason in
         Mode.Var.submode_on var2 var1 axis reason
@@ -130,9 +132,9 @@ let map_side (side : Side.t) ~f : Side.t =
   | Var var ->
     let var' = f var in
     if phys_equal var var' then side else Var var'
-  | Var_at { var; locality } ->
-    let var' = f var in
-    if phys_equal var var' then side else Var_at { var = var'; locality }
+  | Var_at at ->
+    let var' = f at.var in
+    if phys_equal at.var var' then side else Var_at { at with var = var' }
 ;;
 
 let map t ~f =
@@ -175,10 +177,16 @@ let sub_side (lower : Side.t) (upper : Side.t) =
   | (Fixed _ | Var_at _), _ | Var _, Var_at _ ->
     let on (type a) (axis : a Mode.Axis.t) =
       match Side.on_axis lower axis, Side.on_axis upper axis with
-      | Point lower, Point upper ->
+      | Point (lower, _), Point (upper, _) ->
         Mode.Error.le_on axis ~lower ~upper sub_reason
-      | Var var, Point p -> Mode.Var.at_most var axis p sub_fixed_reason
-      | Point p, Var var -> Mode.Var.at_least var axis p sub_fixed_reason
+      | Var var, Point (p, why) ->
+        Mode.Var.at_most var axis p (Option.value why ~default:sub_fixed_reason)
+      | Point (p, why), Var var ->
+        Mode.Var.at_least
+          var
+          axis
+          p
+          (Option.value why ~default:sub_fixed_reason)
       | Var lower, Var upper -> Mode.Var.submode_on lower upper axis sub_reason
     in
     let%bind.Result () = on Stage in

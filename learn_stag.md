@@ -616,7 +616,7 @@ let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let ok = capped 1                   (* val ok : int = 1 *)
 ```
 
-An arrow written without modes has the default ones, `nonportable gc global`,
+An arrow written without modes has the default ones, `global nonportable gc`,
 as OCaml code would expect: annotating `(f : string -> string)` makes `f` take
 and return global values. Write mode variables to keep it polymorphic.
 
@@ -750,7 +750,7 @@ let embed (x @ portable) = .< x >.
 (* What is lifted into code is copied as static data, so must be in the GC heap: [gc]. *)
 
 let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
-(* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
+(* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and local nonportable gc <= 'm1 *)
 
 let same (x : string @ 'm) : string @ 'm = x
 (* val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0) *)

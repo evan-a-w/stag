@@ -303,25 +303,30 @@ let mode_expr t : Mode_expr.t =
     | _ -> (tyvar t).txt
   in
   (* A mode after the variable would be an axis it already gives. *)
-  let no_atom_after t ~var =
+  let no_atom_after ?locality t ~var =
+    let atom_after name =
+      match Mode_expr.Atom.of_string name with
+      | Some atom ->
+        fail
+          (loc t)
+          (match Mode_expr.Atom.axis atom, locality with
+           | Locality, Some _ -> "a mode has at most one locality"
+           | Locality, None ->
+             sprintf
+               "a locality comes before the mode variable, as in `%s %s`"
+               name
+               (Mode_expr.var_to_string var)
+           | (Stage | Provenance), _ ->
+             sprintf
+               "the mode variable `%s` already gives the %s"
+               (Mode_expr.var_to_string var)
+               (Mode_expr.Axis.to_string (Mode_expr.Atom.axis atom)))
+      | None -> ()
+    in
     match peek t with
-    | Lident name when not (String.equal name "and") ->
-      (match Mode_expr.Atom.of_string name with
-       | Some atom ->
-         fail
-           (loc t)
-           (match Mode_expr.Atom.axis atom with
-            | Locality ->
-              sprintf
-                "a locality comes before the mode variable, as in `%s %s`"
-                name
-                (Mode_expr.var_to_string var)
-            | Stage | Provenance ->
-              sprintf
-                "the mode variable `%s` already gives the %s"
-                (Mode_expr.var_to_string var)
-                (Mode_expr.Axis.to_string (Mode_expr.Atom.axis atom)))
-       | None -> ())
+    | Lident name when not (String.equal name "and") -> atom_after name
+    | External when not (starts_external t) ->
+      atom_after (Token.to_string External)
     | Tyvar _ | Weak_tyvar _ | Underscore ->
       fail (loc t) "a mode has at most one mode variable"
     | _ -> ()
@@ -380,7 +385,7 @@ let mode_expr t : Mode_expr.t =
         ->
         let var = var t in
         let mode = since t start (Mode_expr.Var_at (atom, var)) in
-        no_atom_after t ~var;
+        no_atom_after t ~locality:atom ~var;
         mode
       | _ ->
         fail

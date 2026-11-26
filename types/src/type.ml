@@ -1198,52 +1198,31 @@ module Printer = struct
     else [ Sexp.to_string (C.sexp_of_t point) |> String.lowercase ]
   ;;
 
-  (* The atoms of the axes other than [default]'s, or of every axis. *)
+  (* The atoms of the axes other than [default]'s, or of every axis, locality
+     first: [@ local portable gc]. *)
   let const_atoms (const : Mode.Const.t) ~(default : Mode.Const.t option) =
     axis_atom
-      Stage
-      const.stage
-      ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.stage))
+      Locality
+      const.locality
+      ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.locality))
+    @ axis_atom
+        Stage
+        const.stage
+        ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.stage))
     @ axis_atom
         Provenance
         const.provenance
         ~default:
           (Option.map default ~f:(fun (d : Mode.Const.t) -> d.provenance))
-    @ axis_atom
-        Locality
-        const.locality
-        ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.locality))
-  ;;
-
-  (* What a variable is known to be at least, where that restricts its uses: a
-     locality other than [global], or [external]. As [@ local external] would
-     read back. *)
-  let lower_atoms var =
-    let lower = Mode.Var.lower var in
-    let locality =
-      if Mode.Locality.equal lower.locality Global
-      then []
-      else
-        [ Sexp.to_string (Mode.Locality.sexp_of_t lower.locality)
-          |> String.lowercase
-        ]
-    in
-    let provenance =
-      if Mode.Provenance.equal lower.provenance External
-      then [ "external" ]
-      else []
-    in
-    match locality @ provenance with
-    | [] -> None
-    | atoms -> Some (String.concat ~sep:" " atoms)
   ;;
 
   let locality_atom locality =
     Sexp.to_string (Mode.Locality.sexp_of_t locality) |> String.lowercase
   ;;
 
-  (* A [Var_at] side's atoms, where modes aren't printed in full: its locality
-     unless [global], and [external] if it is known to be. *)
+  (* Where modes aren't printed in full, what restricts a side's uses: its
+     locality unless [global], and [external] if its variable is known to be. As
+     [@ local external] would read back. *)
   let var_at_atoms var locality =
     (if Mode.Locality.equal locality Global
      then []
@@ -1252,6 +1231,12 @@ module Printer = struct
     if Mode.Provenance.equal (Mode.Var.lower var).provenance External
     then [ "external" ]
     else []
+  ;;
+
+  let lower_atoms var =
+    match var_at_atoms var (Mode.Var.lower var).locality with
+    | [] -> None
+    | atoms -> Some (String.concat ~sep:" " atoms)
   ;;
 
   (* A side's variable printed as the constant it is fixed to, as [Fixed]. *)

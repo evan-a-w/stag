@@ -271,8 +271,8 @@ let%expect_test "the prelude's signature" =
       module Lru : sig
         type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
         type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
-        val create : int -> ('a @ local -> ('a @ local -> int) @ external local) -> t['a, 'b, 'm0]
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ local external; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        val create : int -> ('a @ local -> ('a @ local -> int) @ local external) -> t['a, 'b, 'm0]
         val length : t['a, 'b, 'm0] -> int
         module Internal : sig
           val unlink : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
@@ -1848,5 +1848,26 @@ end >.
         (x : int @ 'm with 'm <= portable) : int @ 'n
           with 'm <= 'n and 'n <= nonportable =
       x
+    |}]
+;;
+
+let%expect_test "unnamed mode variables round trip through values" =
+  let decls =
+    eval_values
+      {|
+let decls = .< struct
+  let f (g : int -> int @ _) = g
+  let h (g : int @ local _ -> int @ global _) = g
+end >.
+|}
+      "Gen.decls"
+  in
+  (match Syntax_value.Program.of_value decls ~loc:Loc.none with
+   | Ok program -> print_string (Printer.program program)
+   | Error error -> print_error error);
+  [%expect
+    {|
+    let f (g : int -> int @ _) = g
+    let h (g : int @ local _ -> int @ global _) = g
     |}]
 ;;

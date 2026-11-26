@@ -96,7 +96,7 @@ let bad (u : unit) = let b = stack_ (Box.make 1) in (fun (c : box[int] @ local) 
     val sum : box[int] @ _ -> int @ _
     val via : box[int] @ 'm0 -> box[int] @ 'm1 with local <= 'm0 and 'm0 <= 'm1
     val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
-    val last : list[box[int]] @ 'm0 -> option[box[int]] @ 'm1 with portable local <= 'm0 and 'm0 <= 'm1
+    val last : list[box[int]] @ 'm0 -> option[box[int]] @ 'm1 with local portable <= 'm0 and 'm0 <= 'm1
     val use : unit @ _ -> int @ _
     t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:4:33-66 Closure in via: heap
@@ -143,7 +143,7 @@ let prim (x : int) = Int.add x|}
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val two : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val annotated : (int -> (int -> int) @ local) @ 'm0 -> (int @ _ -> (int -> int) @ 'm2) @ 'm1 with 'm0 <= 'm1 and nonportable gc local <= 'm2 and gc <= 'm1
+    val annotated : (int -> (int -> int) @ local) @ 'm0 -> (int @ _ -> (int -> int) @ 'm2) @ 'm1 with 'm0 <= 'm1 and local nonportable gc <= 'm2 and gc <= 'm1
     val inferred : (int @ 'm1 -> 'a @ 'm2) @ 'm0 -> (int @ _ -> 'a @ 'm4) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm4 and gc <= 'm3
     val partial : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
     val prim : int @ _ -> (int @ _ -> int) @ 'm0 with gc <= 'm0
@@ -196,7 +196,7 @@ let captured (x : int) = let b = Box.make x in fun (y : int) -> Int.add (sum b) 
     val kept : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val local_only : int @ _ -> int @ _
     val forced : int @ _ -> int @ _
-    val always_caller : int @ _ -> box[int] @ 'm0 with gc local <= 'm0
+    val always_caller : int @ _ -> box[int] @ 'm0 with local gc <= 'm0
     val in_exclave : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val captured : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
     t.stag:2:19-29 Box in mk: heap, caller's region if res is local
@@ -505,7 +505,7 @@ let h (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in stack_ (Box.mak
     val sum : box[int] @ _ -> int @ _
     val f : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val g : int @ _ -> box[int] @ 'm0 with gc <= 'm0
-    val h : int @ _ -> box[int] @ 'm0 with gc local <= 'm0
+    val h : int @ _ -> box[int] @ 'm0 with local gc <= 'm0
     t.stag:3:49-61 Box in f: caller's region
     t.stag:3:65-75 Box in f: heap
     t.stag:4:40-52 Box in g: caller's region

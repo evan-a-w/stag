@@ -11,16 +11,18 @@ module Side : sig
     | Var_at of
         { var : Mode.Var.t
         ; locality : Mode.Locality.t
+        ; why : Mode.Reason.t
         }
-    (** The variable's stage and provenance, and a fixed locality: as written
-        [@ local 'm], or a declaration's mode parameter, [@ 'p], whose locality
-        is [global]. *)
+    (** The variable's stage and provenance, and a fixed locality, for [why]: as
+        written [@ local 'm], or a declaration's mode parameter, [@ 'p], whose
+        locality is [global]. *)
 
   val var : t -> Mode.Var.t option
 
   module On_axis : sig
     type 'a t =
-      | Point of 'a
+      | Point of 'a * Mode.Reason.t option
+      (** With why, if not only because the function type fixes it. *)
       | Var of Mode.Var.t
   end
 

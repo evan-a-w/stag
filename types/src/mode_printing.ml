@@ -535,12 +535,13 @@ let constraints t ~layout_name =
           | Upper _ | Plain _ | Relation _ -> false)
       in
       let atoms =
-        List.map
-          ((n, p)
-           :: List.filter_map same ~f:(function
-             | Lower (n, p) -> Some (n, p)
-             | Upper _ | Plain _ | Relation _ -> None))
-          ~f:(fun ((n : Mode_node.t), p) -> Mode_node.atom n.axis p)
+        Mode_node.atoms
+          (List.map
+             ((n, p)
+              :: List.filter_map same ~f:(function
+                | Lower (n, p) -> Some (n, p)
+                | Upper _ | Plain _ | Relation _ -> None))
+             ~f:(fun ((n : Mode_node.t), p) -> n.axis, p))
       in
       (String.concat ~sep:" " atoms ^ " <= " ^ name t n.var) :: group rest
     | Upper (n, p) :: rest ->
@@ -550,12 +551,13 @@ let constraints t ~layout_name =
           | Lower _ | Plain _ | Relation _ -> false)
       in
       let atoms =
-        List.map
-          ((n, p)
-           :: List.filter_map same ~f:(function
-             | Upper (n, p) -> Some (n, p)
-             | Lower _ | Plain _ | Relation _ -> None))
-          ~f:(fun ((n : Mode_node.t), p) -> Mode_node.atom n.axis p)
+        Mode_node.atoms
+          (List.map
+             ((n, p)
+              :: List.filter_map same ~f:(function
+                | Upper (n, p) -> Some (n, p)
+                | Lower _ | Plain _ | Relation _ -> None))
+             ~f:(fun ((n : Mode_node.t), p) -> n.axis, p))
       in
       (name t n.var ^ " <= " ^ String.concat ~sep:" " atoms) :: group rest
     | Plain (lo, hi) :: rest -> (name t lo ^ " <= " ^ name t hi) :: group rest

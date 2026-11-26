@@ -59,7 +59,7 @@ let t (u : unit) = exclave_ (stack_ (Ptr.make 1) @ local)
     {|
     val one : int
     val n : int
-    val t : unit @ _ -> ptr[int @@ _] @ 'm0 with nonportable gc local <= 'm0
+    val t : unit @ _ -> ptr[int @@ _] @ 'm0 with local nonportable gc <= 'm0
     |}];
   show {|
 let s u = (stack_ (Ptr.make 1) @ local)

@@ -471,6 +471,9 @@ let%expect_test "a locality with a mode variable" =
   ty "'a @ portable 'm -> 'a";
   ty "'a @ local gc 'm -> 'a";
   ty "'a @ local local 'm -> 'a";
+  ty "'a @ 'm external -> 'a";
+  ty "'a @ local 'm external -> 'a";
+  ty "'a @ local 'm global -> 'a";
   prog "let f (x : int @ 'm) : int @ 'n with local 'm <= 'n = x";
   prog
     "let f (x : int @ 'm) : int @ 'n with locality(local 'm) <= locality('n) = \
@@ -496,6 +499,9 @@ let%expect_test "a locality with a mode variable" =
     t.stag:1:14-16: only a locality may be written with a mode variable, as in `local 'm`: the variable gives the stage and provenance
     t.stag:1:14-16: only a locality may be written with a mode variable, as in `local 'm`: the variable gives the stage and provenance
     t.stag:1:11-16: `local` and `local` are both locality modes
+    t.stag:1:8-16: the mode variable `'m` already gives the provenance
+    t.stag:1:14-22: the mode variable `'m` already gives the provenance
+    t.stag:1:14-20: a mode has at most one locality
     t.stag:1:37-51: a constraint relates whole variables or axes, as in `'m <= 'n` or `locality('m) <= locality('n)`: a locality with a variable, as in `local 'm`, is only the mode of a type or binding
     t.stag:1:37-71: a constraint relates whole variables or axes, as in `'m <= 'n` or `locality('m) <= locality('n)`: a locality with a variable, as in `local 'm`, is only the mode of a type or binding
     |}]

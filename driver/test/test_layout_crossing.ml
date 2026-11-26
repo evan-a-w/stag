@@ -53,12 +53,12 @@ let%expect_test "instances at a pointer-free type cross everywhere" =
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val mk : 'a @ 'm0 -> ('b @ _ -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1
     val get : box['a] @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val put : 'a @ 'm0 -> (('a -> unit) @ _ -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm0 <= gc global and gc <= 'm1
+    val put : 'a @ 'm0 -> (('a -> unit) @ _ -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm0 <= global gc and gc <= 'm1
     val pair : 'a * 'a @ 'm0 -> 'a * 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val g_ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val g_mk : 'a @ 'm0 -> ('b @ _ -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1) and meet(locality('m0), regional) <= locality('m1) and gc <= 'm1
     val g_get : box['a] @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val g_put : 'a @ 'm0 -> (('a -> unit) @ _ -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm0 <= gc global and gc <= 'm1
+    val g_put : 'a @ 'm0 -> (('a -> unit) @ _ -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm0 <= global gc and gc <= 'm1
     val g_pair : 'a * 'a @ 'm0 -> 'a * 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val use_ident : int @ 'm0 -> int @ _ with local <= 'm0
     val use_mk : int @ 'm0 -> int @ _ with local <= 'm0
@@ -185,7 +185,7 @@ let keep : 'a @ 'm -> 'a @ global = fun x -> x
     val local_int : int @ 'm0 -> int @ _ with local <= 'm0
     let keep_copy : 'a @ _ -> 'a with 'a : pointer_free = keep
     This type has pointers, because its type turned out to be string, which has pointers (at t.stag:3:13-16), but must be pointer-free, because it is annotated 'a : pointer_free (at t.stag:2:11-56)
-    val keep : 'a @ 'm0 -> 'a with 'm0 <= gc global
+    val keep : 'a @ 'm0 -> 'a with 'm0 <= global gc
     |}]
 ;;
 
@@ -391,7 +391,7 @@ let s = p.* <- "s"
     {|
     val loop : 'a @ 'm0 -> 'b @ _ with portable <= 'm0
     val p : ptr[string]
-    val g : string @ 'm0 -> unit @ _ with 'm0 <= gc global
+    val g : string @ 'm0 -> unit @ _ with 'm0 <= global gc
     val s : unit
     |}];
   (* A scheme keeps its guarded constraints, its instances adding them once the

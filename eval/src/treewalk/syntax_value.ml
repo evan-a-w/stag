@@ -496,6 +496,11 @@ module Of_value = struct
         | "Const_if_static", 1 -> Const_if_static (arg 0 (mode_term ~loc))
         | _ -> raise Bad_arguments)
 
+  and mode_var value =
+    match string value with
+    | "_" -> "_"
+    | _ -> ident Tyvar value
+
   and mode_expr value ~loc : Mode_expr.t =
     Located.create
       ~loc
@@ -505,7 +510,7 @@ module Of_value = struct
          ~f:(fun constructor args : Mode_expr.desc ->
            let arg i read = Args.read args i read in
            match constructor, Args.count args with
-           | "Var", 1 -> Var (arg 0 (ident Tyvar))
+           | "Var", 1 -> Var (arg 0 mode_var)
            | "Atoms", 1 ->
              arg 0 (fun value : Mode_expr.desc ->
                let atoms = list mode_atom value in
@@ -526,7 +531,7 @@ module Of_value = struct
                  | Locality -> atom
                  | Stage | Provenance -> unexpected ~expected:"a locality" value)
              in
-             Var_at (locality, arg 1 (ident Tyvar))
+             Var_at (locality, arg 1 mode_var)
            | _ -> raise Bad_arguments))
 
   and row ~(labels : Ident_kind.t) value ~loc : Type_expr.row =

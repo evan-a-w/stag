@@ -467,28 +467,42 @@ module Vars = struct
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
     (* A mode parameter's locality is [global] unless written with it. *)
-    let var_side name ~(locality : Mode.Locality.t) ~written_locality
+    let var_side name (written : Mode.Locality.t option)
       : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
       =
+      let locality = Option.value written ~default:Global in
+      let why () =
+        Mode.Reason.create
+          ~loc
+          (match written with
+           | Some locality ->
+             sprintf
+               "its type is written %s"
+               (Mode.Locality.sexp_of_t locality
+                |> Sexp.to_string
+                |> String.lowercase)
+           | None ->
+             "it is a mode parameter on an arrow in a declaration, which is \
+              global")
+      in
       match t with
       | Annotation vars ->
         Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
-          if written_locality
-          then Arrow_modes.Side.Var_at { var; locality }
-          else Var var)
+          match written with
+          | Some _ -> Arrow_modes.Side.Var_at { var; locality; why = why () }
+          | None -> Var var)
       | Params params ->
         (match Map.find params name with
          | Some (AMode (Fixed { stage; provenance })) ->
            Ok (Arrow_modes.Side.Fixed { stage; provenance; locality })
-         | Some (AMode (Var var)) -> Ok (Var_at { var; locality })
+         | Some (AMode (Var var)) -> Ok (Var_at { var; locality; why = why () })
          | Some (ATy _ | ARow _) ->
            error ~loc (Type_variable_kind_mismatch name)
          | None -> error ~loc (Mode_variable_in_declaration name))
     in
     match txt with
-    | Var name -> var_side name ~locality:Global ~written_locality:false
-    | Var_at (atom, name) ->
-      var_side name ~locality:(Mode_atoms.locality atom) ~written_locality:true
+    | Var name -> var_side name None
+    | Var_at (atom, name) -> var_side name (Some (Mode_atoms.locality atom))
     | Atoms atoms ->
       let%map.Result const = Mode_atoms.declared atoms ~default ~loc in
       fixed

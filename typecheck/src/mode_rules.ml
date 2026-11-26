@@ -292,7 +292,7 @@ let stage_at_least ctx stage ~loc ~why =
   mode
 ;;
 
-(* A fresh mode of a constant of the code: [const static global]. *)
+(* A fresh mode of a constant of the code: [global const static]. *)
 let constant ctx ~loc ~why =
   let mode = Ctx.fresh ctx in
   Mode.Error.ok_exn
