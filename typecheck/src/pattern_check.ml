@@ -25,19 +25,89 @@ let either_known ty fallback =
   | _ -> Some ty
 ;;
 
-let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
+(* The right alternative of an or-pattern binds the variables its [left] does,
+   to the same idents: each it binds is [matched], at the type and location it
+   binds it at there. *)
+module Alternative = struct
+  type t =
+    { left : Pattern_var.t String.Map.t
+    ; matched : (Type.ty * Loc.t) String.Table.t
+    }
+
+  let create left =
+    { left =
+        String.Map.of_alist_reduce
+          (List.map left ~f:(fun (var : Pattern_var.t) -> var.ident.name, var))
+          ~f:(fun first _ -> first)
+    ; matched = String.Table.create ()
+    }
+  ;;
+
+  let bind t (scope : Scope.t) name ~ty ~loc ~fresh =
+    match Map.find t.left name with
+    | None ->
+      Scope.report
+        scope
+        (Typecheck_error.create ~loc (Or_pattern_variable_missing name));
+      fresh ()
+    | Some (left : Pattern_var.t) ->
+      Hashtbl.set t.matched ~key:name ~data:(ty, loc);
+      left.ident
+  ;;
+
+  (* Once the right alternative is checked: each variable is bound by both
+     sides, and, unless [types] is false (the sides' types already differ), of
+     the same type on both. *)
+  let finish t fresh_ty (scope : Scope.t) ~types =
+    Map.iteri t.left ~f:(fun ~key:name ~data:(left : Pattern_var.t) ->
+      match Hashtbl.find t.matched name with
+      | None ->
+        Scope.report
+          scope
+          (Typecheck_error.create
+             ~loc:left.loc
+             (Or_pattern_variable_missing name))
+      | Some _ when not types -> ()
+      | Some (ty, loc) ->
+        Unify.unify_ty fresh_ty ~ty1:left.ty ~ty2:ty
+        |> Result.iter_error ~f:(fun error ->
+          Scope.report
+            scope
+            (Typecheck_error.create
+               ~loc
+               (Or_pattern_variable_type { name; error }))))
+  ;;
+end
+
+let rec pattern_type'
+  ?expected
+  ~(alternative : Alternative.t option)
+  t
+  (scope : Scope.t)
+  ~(pattern : Source.Pattern.t)
   : Typed.Pattern.t * Pattern_var.t list
   =
+  let pattern_type = pattern_type' ~alternative in
   let loc = Source.Pattern.loc pattern in
   let node desc ty = { Typed.Pattern.desc; ty; loc } in
   let bind binder ty =
-    let ident = Program_env.bind scope.program binder ty ~level:scope.level in
-    ( ident
-    , { Pattern_var.ident
-      ; ty
-      ; loc = Source.Binder.loc binder ~enclosing:loc
-      ; path = []
-      } )
+    let loc = Source.Binder.loc binder ~enclosing:loc in
+    let fresh () =
+      Program_env.bind scope.program binder ty ~level:scope.level
+    in
+    let ident =
+      match alternative with
+      | None -> fresh ()
+      | Some alternative ->
+        Alternative.bind
+          alternative
+          scope
+          (Source.Binder.name binder)
+          ~ty
+          ~loc
+          ~fresh
+    in
+    ident, Pattern_var.bound ident ty ~loc
   in
   (* Each pattern of type [ty], known to be of [expected] (by default [ty]), of
      the part of the block at [steps]. *)
@@ -203,4 +273,30 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     , bindings @ rest_bindings )
   | Exception pattern ->
     fail (Typecheck_error.create ~loc Misplaced_exception_pattern) [ pattern ]
+  | Or (left, right) ->
+    let left, left_vars = pattern_type t scope ~pattern:left ?expected in
+    let right_alternative = Alternative.create left_vars in
+    let right, right_vars =
+      pattern_type'
+        ~alternative:(Some right_alternative)
+        t
+        scope
+        ~pattern:right
+        ?expected
+    in
+    (* The sides' types first, so that a variable's type is compared within
+       them: [{`x = n; ..r} | {`y = n; ..r}] is an error about [r]. *)
+    let same_type =
+      Scope.unifies t scope ~ty1:left.ty ~ty2:right.ty ~loc:right.loc
+    in
+    Alternative.finish right_alternative t scope ~types:same_type;
+    let right =
+      if same_type then right else Typed.Pattern.error [ right ] ~loc:right.loc
+    in
+    ( node (Or (left, right)) left.ty
+    , Pattern_var.alternatives left_vars right_vars )
+;;
+
+let pattern_type ?expected t scope ~pattern =
+  pattern_type' ?expected ~alternative:None t scope ~pattern
 ;;

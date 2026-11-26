@@ -930,3 +930,70 @@ let%expect_test "[let _ = a in b] is kept apart from [a; b]" =
       x
     |}]
 ;;
+
+let%expect_test "or-patterns" =
+  test
+    {|let f x = match x with A n | B n -> n | Cccccccccccccccc n | Dddddddddddddddddddddd n | Eeeeeeeeeeeeeee n -> Int.add n 1
+let g x = match x with
+  | 3
+    (* inside *)
+  | 4 -> 1
+  | _ -> 0
+let h x = match x with Some (A | B) | None -> 0 | Some (C, (D | E)) -> 1
+let k x = match x with A | (B | C) -> 0
+|};
+  [%expect
+    {|
+    let f x =
+      match x with
+      | A n | B n -> n
+      | Cccccccccccccccc n | Dddddddddddddddddddddd n | Eeeeeeeeeeeeeee n ->
+        Int.add n 1
+
+    let g x =
+      match x with
+      | 3
+      (* inside *)
+      | 4 ->
+        1
+      | _ -> 0
+
+    let h x =
+      match x with
+      | Some (A | B) | None -> 0
+      | Some (C, (D | E)) -> 1
+
+    let k x = match x with A | (B | C) -> 0
+    |}];
+  test
+    ~width:30
+    {|let h x = match x with Some (Aaaaaaaaaaaaa | Bbbbbbbbbbbbbbb | Ccccccccc) -> 0 | _ -> 1
+|};
+  [%expect
+    {|
+    let h x =
+      match x with
+      | Some (Aaaaaaaaaaaaa
+              | Bbbbbbbbbbbbbbb
+              | Ccccccccc) ->
+        0
+      | _ -> 1
+    |}]
+;;
+
+let%expect_test "a broken or-pattern's alternatives start at the arm's bar" =
+  test
+    ~width:30
+    {|let f x = match x with Aaaaaaaaaa n | Bbbbbbbbbbb n | Cccccccccc (n, _) -> Int.add n 1 | _ -> 0
+|};
+  [%expect
+    {|
+    let f x =
+      match x with
+      | Aaaaaaaaaa n
+      | Bbbbbbbbbbb n
+      | Cccccccccc (n, _) ->
+        Int.add n 1
+      | _ -> 0
+    |}]
+;;

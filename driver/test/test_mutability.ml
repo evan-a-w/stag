@@ -1073,3 +1073,57 @@ let fine = .<let mut x = 0 in let g u = .~incr in g (); x>.
     val fine : <int>{..'a}
     |}]
 ;;
+
+let%expect_test "a mutable variable's type is the join of what is stored in it" =
+  run
+    {|
+let local_first (u : unit) =
+  let mut f = fun (s @ local) -> String.length s in
+  f <- (fun (s : string) -> let g @ global = s in String.length g);
+  f "ab"
+let mut top = fun (s @ local) -> String.length s
+let set_top (u : unit) =
+  top <- (fun (s : string) -> let g @ global = s in String.length g)
+let global_first (u : unit) =
+  let mut f = fun (s : string) -> let g @ global = s in String.length g in
+  f <- (fun (s @ local) -> String.length s);
+  f "abc"
+let after = (local_first (), set_top (), global_first ())
+|};
+  check
+    {|
+let bad (u : unit) =
+  let mut f = fun (s @ local) -> String.length s in
+  f <- (fun (s : string) -> let g @ global = s in String.length g);
+  let t @ local = "x" in
+  f t [@nontail]
+|};
+  [%expect
+    {|
+    val local_first : unit -> int
+    val top : string -> int
+    val set_top : unit -> unit
+    val global_first : unit -> int
+    val after : int * unit * int
+    -- evaluated at compile time
+    -- evaluated
+    (local_first <fun>)
+    (top <fun>)
+    (set_top <fun>)
+    (global_first <fun>)
+    (after (Tuple 2 "()" 3))
+    ((Mode_error
+      ("Mode mismatch" (var m108) (axis locality) (lower Local) (upper Global)
+       (lower_because
+        (("it is annotated local" t.stag:5:10-15) ("t is used" t.stag:6:4-5)
+         ("it is passed to a function" t.stag:6:2-5)))
+       (upper_because
+        (("it is annotated global" t.stag:4:36-42)
+         ("it is bound by an annotated let" t.stag:4:36-42)
+         ("s is used" t.stag:4:45-46)
+         ("s is passed to the function" t.stag:4:7-66)
+         "a function is used at a type with other modes"
+         "a function is used at a type with other modes"))))
+     @ t.stag:6:2-5)
+    |}]
+;;

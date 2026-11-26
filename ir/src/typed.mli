@@ -114,6 +114,7 @@ module Pattern : sig
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Or of 'p * 'p (** Both bind the same idents. *)
       | Error of 'p list
       (** What failed to check, of its parts that did. Matching it is a
           [Reached_error] runtime error. *)

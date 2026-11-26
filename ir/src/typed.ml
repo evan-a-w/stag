@@ -163,6 +163,7 @@ module Pattern = struct
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Or of 'p * 'p
       | Error of 'p list
     [@@deriving sexp_of]
   end
@@ -188,6 +189,11 @@ module Pattern = struct
        | Bind ident -> [ ident ])
       @ List.concat_map fields ~f:(fun (_, p) -> idents p)
     | Deref p | Poly_variant (_, Some p) -> idents p
+    | Or (p, q) ->
+      let left = idents p in
+      left
+      @ List.filter (idents q) ~f:(fun ident ->
+        not (List.mem left ident ~equal:Ident.equal))
   ;;
 
   let error patterns ~loc = { desc = Error patterns; ty = Type.error; loc }
@@ -198,6 +204,7 @@ module Pattern = struct
     | Any | Var _ | Lit _ | Poly_variant (_, None) -> false
     | Tuple ps | Construct (_, ps) -> List.exists ps ~f:has_error
     | Deref p | Poly_variant (_, Some p) -> has_error p
+    | Or (p, q) -> has_error p || has_error q
     | Record fields -> List.exists fields ~f:(fun (_, p) -> has_error p)
     | Poly_record { fields; rest = _ } ->
       List.exists fields ~f:(fun (_, p) -> has_error p)
@@ -209,6 +216,7 @@ module Pattern = struct
     | Lit _ | Construct _ | Record _ | Poly_variant _ | Error _ -> false
     | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
     | Deref pattern -> is_irrefutable pattern
+    | Or (p, q) -> is_irrefutable p || is_irrefutable q
     | Poly_record { fields; rest = _ } ->
       List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)
   ;;

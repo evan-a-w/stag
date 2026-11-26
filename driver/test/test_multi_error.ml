@@ -473,7 +473,7 @@ let b = zzz
     File "a.stag", line 3, characters 51-57:
     3 | include .~ (let g = stack_ (fun u -> u) in let _ = keep g in let _ = c in Nil)
                                                            ^^^^^^
-    Error: This is local, because it is allocated by [stack_] (at a.stag:3:20-39), then it is part of the value (at a.stag:3:20-39), then g is used (at a.stag:3:56-57), then it is passed to a function (at a.stag:3:51-57), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes, then it is passed to a function (at a.stag:1:28-38), then f is used (at a.stag:1:37-38), then f is passed to the function (at a.stag:1:28-38), then a function is used at a type with other modes
+    Error: This is local, because it is allocated by [stack_] (at a.stag:3:20-39), then it is part of the value (at a.stag:3:20-39), then g is used (at a.stag:3:56-57), then it is passed to a function (at a.stag:3:51-57), but must be at most global, because Ptr.make holds it, then it is passed to a function (at a.stag:1:28-38), then f is used (at a.stag:1:37-38), then f is passed to the function (at a.stag:1:28-38)
     File "a.stag", line 4, characters 8-11:
     4 | let b = zzz
                 ^^^

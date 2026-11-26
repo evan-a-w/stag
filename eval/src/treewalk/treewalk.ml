@@ -268,12 +268,10 @@ let fresh_like t (ident : Typed.Ident.t) ~info =
    distinct, and the entries of its context resolved by [entry]. *)
 let instantiate t (code : Typed.Expr.t) ~entry =
   let renames = Typed.Ident.Table.create () in
+  (* An or-pattern binds each of its idents on both sides. *)
   let fresh ident =
-    let fresh =
-      fresh_like t ident ~info:(Hashtbl.find_exn t.ident_info ident)
-    in
-    Hashtbl.set renames ~key:ident ~data:fresh;
-    fresh
+    Hashtbl.find_or_add renames ident ~default:(fun () ->
+      fresh_like t ident ~info:(Hashtbl.find_exn t.ident_info ident))
   in
   (* A persistent local the code does not bind is one embedded in it, bound
      outside it to its value; any other is bound in the code. *)
@@ -300,6 +298,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | Tuple patterns -> Tuple (List.map patterns ~f:pattern)
       | Deref inner -> Deref (pattern inner)
       | Error patterns -> Error (List.map patterns ~f:pattern)
+      | Or (left, right) -> Or (pattern left, pattern right)
       | Construct (constructor, patterns) ->
         Construct (constructor, List.map patterns ~f:pattern)
       | Record fields ->
@@ -462,6 +461,11 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t)
   match pattern.desc, value with
   | Any, _ -> Eval_result.return true
   | Error _, _ -> reached_error ~loc:pattern.loc
+  | Or (left, right), _ ->
+    (match match_pattern env left value with
+     | Ok { global = true } -> Eval_result.return true
+     | Ok { global = false } -> match_pattern env right value
+     | Error { global = error } -> Error { global = error })
   | Var ident, _ ->
     Env.set env ~ident ~value;
     Eval_result.return true
