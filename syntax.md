@@ -43,7 +43,10 @@ node, for good errors.
   (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
   `external`: it is the `external` mode after `@`, unless it starts a
   declaration (`external name :`).
-  `rec` is reserved, as lets are always recursive.
+  `rec` is reserved, as lets are always recursive. So a value may not use
+  itself while it is computed, checked as toplevels are: `let n = Int.add n 1`
+  is an error, even where it shadows another `n`. A function it only builds
+  may refer to it (`let f = fun x -> f x`), one it calls may not.
 - `@` introduces a mode (see [Modes](#modes)); `@@` introduces a
   modality, of a record field, a constructor argument or `ptr`'s argument. `[@nontail]` is the one attribute.
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).

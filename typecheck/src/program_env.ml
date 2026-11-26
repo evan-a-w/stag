@@ -44,6 +44,12 @@ let report ?component ?once ?(fallback = false) t error =
   t.reports <- { Report.error; component; once; fallback } :: t.reports
 ;;
 
+let retract t ~since ~f =
+  let #(recent, older) = List.split_n t.reports (t.reported - since) in
+  t.reports
+  <- List.filter recent ~f:(fun { Report.error; _ } -> not (f error)) @ older
+;;
+
 let report_by ?fallback t (reporter : Reporter.t) ?once error =
   let component = reporter.component in
   if Typecheck_error.is_already_reported error

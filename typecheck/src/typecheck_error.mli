@@ -136,6 +136,10 @@ module Kind : sig
     (** A [let mut] local used in a quote or at compile time, outside the code
         that binds it. *)
     | Toplevel_initialization_cycle of string list
+    | Used_before_defined of
+        { name : string
+        ; shadows : bool (** It is also bound outside its definition. *)
+        } (** A local value used in computing itself. *)
     | Compile_time_use_of_toplevel_being_checked of string
     (** It can't be evaluated yet. *)
     | Expect_outside_expect_test

@@ -264,7 +264,7 @@ let local = let p = {`f = id} in (p.`f 1, p.`f true)
 let%expect_test "values through the new forms" =
   check
     {|
-let recursive = let p = {`a = id; `b = p.`a} in p
+let recursive = let p = {`a = id; `b = fun x -> p.`a x} in p
 let rest_binds = let y = match {`x = id} with {`x = _; ..y} -> (y, id) in y
 let tag_binds = let y = match `A id with `A y -> y in y
 let splice_value = .<{`f = .~.<id>.}>.

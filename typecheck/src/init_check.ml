@@ -1,23 +1,43 @@
 open! Import
 
-(* Calls [f] on each use of a toplevel that evaluating [expr] (at [depth] quotes
+(* Whether [code]'s context surely has [name]. *)
+let needs (code : Typed.Expr.t) ~name =
+  let rec present (row : Type.row) =
+    match Type.canonical_row row with
+    | RExtend (label, presence, _, _, rest) ->
+      if String.equal label name
+      then (
+        match Type.canonical_presence presence with
+        | Present -> true
+        | Absent | PVar _ -> false)
+      else present rest
+    | REmpty | RVar _ -> false
+  in
+  match Type.canonical_ty code.ty with
+  | TCode { context; _ } -> present context
+  | _ -> false
+;;
+
+(* Calls [f] on each use of a variable that evaluating [expr] (at [depth] quotes
    in) may need: not those in a function it only builds, nor in the code a quote
    builds (but those in the splices that run while it does). [built] is whether
    [expr]'s value is only built by what encloses it, rather than maybe called
-   (or otherwise looked into): [f ~called:false] uses only need the toplevel's
-   value. Returns the locals it may call (or look into). *)
+   (or otherwise looked into): [f ~called:false] uses only need the variable's
+   value. A splice's providers are used [~surely] only if the code is known to
+   need them. Returns the locals it may call (or look into). *)
 let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f : Typed.Ident.Set.t =
   let go = eager_uses ~f in
   let all ~built exprs =
     Typed.Ident.Set.union_list (List.map exprs ~f:(go ~depth ~built))
   in
-  let use ~built (binder : Typed.Binder.t) =
+  let use ?(surely = true) ~built (binder : Typed.Binder.t) =
     match binder with
     | _ when depth <> 0 -> Typed.Ident.Set.empty
-    | Toplevel ident ->
-      f ident ~called:(not built) expr.loc;
+    | Toplevel _ ->
+      f binder ~called:(not built) ~surely expr.loc;
       Typed.Ident.Set.empty
     | Local ident ->
+      f binder ~called:(not built) ~surely expr.loc;
       if built then Typed.Ident.Set.empty else Typed.Ident.Set.singleton ident
   in
   match expr.desc with
@@ -31,8 +51,9 @@ let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f : Typed.Ident.Set.t =
       (match subs with
        | Explicit subs -> all ~built:false (List.map subs ~f:snd)
        | Implicit providers ->
-         Map.data providers
-         |> List.map ~f:(use ~built:false)
+         Map.to_alist providers
+         |> List.map ~f:(fun (name, binder) ->
+           use ~surely:(needs code ~name) ~built:false binder)
          |> Typed.Ident.Set.union_list)
   | Toplevel_splice { expansion; code = _ } -> go expansion ~depth ~built
   | Fun _ when depth = 0 && built -> Typed.Ident.Set.empty
@@ -56,13 +77,29 @@ let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f : Typed.Ident.Set.t =
     Set.union
       (go scrutinee ~depth ~built:false)
       (all ~built (List.map (cases @ exception_cases) ~f:snd))
+  (* What failed to check is not known to call its parts: rather than blame them
+     on its failure, as [(fun x -> f) : 'a] referring to [f] in [f]'s cyclic
+     type. *)
+  | Error _
   | Annotated _
+  | Marked _
   | Tuple _
   | Construct _
   | Record _
   | Poly_record _
   | Poly_variant _ -> all ~built (Typed.Expr.sub_exprs expr)
   | _ -> all ~built:false (Typed.Expr.sub_exprs expr)
+;;
+
+let self_uses ~body ident =
+  let uses = Queue.create () in
+  eager_uses body ~depth:0 ~built:true ~f:(fun binder ~called:_ ~surely loc ->
+    match binder with
+    | Local used when surely && Typed.Ident.equal used ident ->
+      Queue.enqueue uses loc
+    | Local _ | Toplevel _ -> ())
+  |> (ignore : Typed.Ident.Set.t -> unit);
+  Queue.to_list uses
 ;;
 
 let rec run_toplevels (expr : Typed.Expr.t) ~depth ~f =
@@ -113,14 +150,17 @@ let check_initialization_cycles
            toplevel.body
            ~depth:0
            ~built:true
-           ~f:(fun ident ~called loc ->
-             match member ident with
-             | None -> ()
-             | Some used ->
-               if called
-               then add (Init_need.Call ident) loc
-               else if not (is_function used)
-               then add (Init_need.Value ident) loc)
+           ~f:(fun binder ~called ~surely:_ loc ->
+             match binder with
+             | Local _ -> ()
+             | Toplevel ident ->
+               (match member ident with
+                | None -> ()
+                | Some used ->
+                  if called
+                  then add (Init_need.Call ident) loc
+                  else if not (is_function used)
+                  then add (Init_need.Value ident) loc))
          |> (ignore : Typed.Ident.Set.t -> unit)
      | Call ident ->
        let toplevel = Option.value_exn (member ident) in

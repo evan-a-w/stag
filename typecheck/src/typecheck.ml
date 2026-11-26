@@ -53,6 +53,34 @@ let expr_fail (scope : Scope.t) ~loc ?(children = []) error =
   expr_node ~loc (Error children) Type.error
 ;;
 
+(* A local value's [body] may not use the value, which isn't there yet. The
+   errors reported since [since] at a use of it, as typing it at its own type is
+   wont to give (as [let m = (1, m)]'s cyclic type), follow from that. *)
+let check_self_uses (scope : Scope.t) ~since ~body ~(ident : Typed.Ident.t) =
+  match Init_check.self_uses ~body ident with
+  | [] -> ()
+  | first :: _ as uses ->
+    let contains (outer : Loc.t) (inner : Loc.t) =
+      Loc.File.equal outer.file inner.file
+      && outer.start.#offset <= inner.start.#offset
+      && inner.stop.#offset <= outer.stop.#offset
+    in
+    Program_env.retract scope.program ~since ~f:(fun error ->
+      List.exists uses ~f:(contains error.loc));
+    let shadows =
+      match Env.lookup scope.locals ident.name ~level:scope.level with
+      | Bound _ -> true
+      | Forgotten -> false
+      | Unbound ->
+        Option.is_some (Program_env.find_toplevel scope.program ident.name)
+    in
+    Scope.report
+      scope
+      (Typecheck_error.create
+         ~loc:first
+         (Used_before_defined { name = ident.name; shadows }))
+;;
+
 let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
   let resolve ~name entry =
     Uses.resolution_type
@@ -1219,12 +1247,14 @@ and let_type
             not known yet, as a [let rec]'s isn't. *)
          match fn.args with
          | [] ->
+           let since = scope.program.reported in
            let body =
              defining
                (Mode_rules.Binding.defining modes inner_at ~name ~loc)
                ~f:(fun () ->
                  check_expr t own ~at:inner_at ~expr:body ~ty:fn.res_ty)
            in
+           check_self_uses scope ~since ~body ~ident;
            fn, ident, body, None, Typed.Expr.Made.none
          | _ :: _ ->
            let (body, partials, closure), made =
