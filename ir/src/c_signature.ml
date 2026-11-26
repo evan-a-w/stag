@@ -5,6 +5,8 @@ module Arg = struct
     | Int
     | Bool
     | Char
+    | C_int of C_int.t
+    | String
   [@@deriving sexp_of, equal, compare, hash]
 end
 
@@ -14,6 +16,7 @@ module Result = struct
     | Bool
     | Char
     | Unit
+    | C_int of C_int.t
   [@@deriving sexp_of, equal, compare, hash]
 end
 
@@ -32,6 +35,7 @@ module Problem = struct
     | Result of Type.ty
     | Unit_argument
     | Pointer of Type.ty
+    | Pointer_result of Type.ty
   [@@deriving sexp_of]
 end
 
@@ -44,24 +48,28 @@ let con_name ty =
   | _ -> None
 ;;
 
+let c_int ty = Option.bind (con_name ty) ~f:C_int.of_type_name
+
+let rec arrows ty acc =
+  match Type.canonical_ty ty with
+  | TArrow (arg, res, _) -> arrows res (arg :: acc)
+  | _ -> List.rev acc, ty
+;;
+
 let of_type ty : (t, Problem.t) Core.Result.t =
-  let rec arrows ty acc =
-    match Type.canonical_ty ty with
-    | TArrow (arg, res, _) -> arrows res (arg :: acc)
-    | _ -> List.rev acc, ty
-  in
   let open Core.Result.Let_syntax in
   match arrows ty [] with
   | [], _ -> Error Not_a_function
   | args, result ->
     let%bind result =
-      match con_name result with
-      | Some "int" -> Ok Result.Int
-      | Some "bool" -> Ok Result.Bool
-      | Some "char" -> Ok Result.Char
-      | Some "unit" -> Ok Result.Unit
-      | Some ("string" | "ptr") -> Error (Problem.Pointer result)
-      | _ -> Error (Problem.Result result)
+      match c_int result, con_name result with
+      | Some c_int, _ -> Ok (Result.C_int c_int)
+      | None, Some "int" -> Ok Result.Int
+      | None, Some "bool" -> Ok Result.Bool
+      | None, Some "char" -> Ok Result.Char
+      | None, Some "unit" -> Ok Result.Unit
+      | None, Some ("string" | "ptr") -> Error (Problem.Pointer_result result)
+      | None, _ -> Error (Problem.Result result)
     in
     (match args with
      | [ arg ] when Option.equal String.equal (con_name arg) (Some "unit") ->
@@ -69,14 +77,24 @@ let of_type ty : (t, Problem.t) Core.Result.t =
      | args ->
        let%map args =
          List.map args ~f:(fun arg : (Arg.t, Problem.t) Core.Result.t ->
-           match con_name arg with
-           | Some "int" -> Ok Int
-           | Some "bool" -> Ok Bool
-           | Some "char" -> Ok Char
-           | Some ("string" | "ptr") -> Error (Pointer arg)
-           | Some "unit" -> Error Unit_argument
-           | _ -> Error (Argument arg))
+           match c_int arg, con_name arg with
+           | Some c_int, _ -> Ok (C_int c_int)
+           | None, Some "int" -> Ok Int
+           | None, Some "bool" -> Ok Bool
+           | None, Some "char" -> Ok Char
+           | None, Some "string" -> Ok String
+           | None, Some "ptr" -> Error (Pointer arg)
+           | None, Some "unit" -> Error Unit_argument
+           | None, _ -> Error (Argument arg))
          |> Core.Result.all
        in
        { args; result })
+;;
+
+let rec value_type ty =
+  match Type.canonical_ty ty with
+  | TArrow (arg, res, modes) ->
+    let int_if_c ty = if Option.is_some (c_int ty) then Type.int else ty in
+    Type.TArrow (int_if_c arg, value_type res, modes)
+  | ty -> if Option.is_some (c_int ty) then Type.int else ty
 ;;

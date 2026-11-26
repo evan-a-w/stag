@@ -408,3 +408,68 @@ let%expect_test "the prelude's and core's externals may always be called at \
     ("denying Foo" Bar.labs (policy (Denied (external_ Bar.labs) (library ()))))
     |}]
 ;;
+
+(* C's [abs] returns an [int]: read as an [int64_t], its sign would be lost. *)
+let%expect_test "C integer types are converted to and from int" =
+  run
+    {|
+external abs : C.int -> C.int = "abs"
+external labs : C.long -> C.long = "labs"
+external to_upper : C.int -> C.int = "toupper"
+external narrow : C.int8 -> C.uint8 = "abs"
+let negative = abs (Int.sub 0 7)
+let small = labs (Int.sub 0 7)
+let upper = to_upper 97
+let widened = narrow (Int.sub 0 1)
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "C integer arguments out of range err" =
+  run
+    {|
+external abs : C.int -> C.int = "abs"
+external byte : C.uint8 -> C.uint8 = "abs"
+let max_int32 = abs 2147483647
+let too_big = abs 2147483648
+let negative_unsigned = byte (Int.sub 0 1)
+let too_big_byte = byte 256
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "C results out of the range of int err" =
+  run
+    {|
+external labs : C.ulong -> C.ulong = "labs"
+let least = Int.sub (Int.sub 0 4611686018427387903) 1
+let max = labs 4611686018427387903
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "strings are passed to C as NUL-terminated copies" =
+  run
+    {|
+external strlen : string -> C.size_t = "strlen"
+external atoi : string -> C.int = "atoi"
+external strcmp : string -> string -> C.int = "strcmp"
+let len = strlen "hello"
+let empty = strlen ""
+let parsed = atoi "-42"
+let compared = (strcmp "a" "b", strcmp "b" "b")
+let nul = strlen "a\000b"
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "an external's C integer types and strings, with modes" =
+  modes
+    {|
+external strlen : string @ local -> C.size_t @ portable = "strlen"
+let f (s @ local) = strlen s
+external r : int -> C.int8 = "r"
+external c : C.int -> string = "c"
+|};
+  [%expect {| |}]
+;;

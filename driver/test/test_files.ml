@@ -237,7 +237,7 @@ let%expect_test "errors" =
   [%expect {| (Typecheck ((Duplicate_module A) @ dir/a.stag:1:0-0)) |}];
   run [ file "a.stag" "let x = 1"; file "b.stag" "let y = A.z" ];
   [%expect {| (Typecheck ((Not_in_scope A.z) @ b.stag:1:8-11)) |}];
-  run [ file "a.stag" "let x = 1"; file "b.stag" "let y = C.z" ];
+  run [ file "a.stag" "let x = 1"; file "b.stag" "let y = Z.z" ];
   [%expect {| (Typecheck ((Unbound_module C) @ b.stag:1:8-9)) |}];
   run [];
   [%expect {| --- |}]

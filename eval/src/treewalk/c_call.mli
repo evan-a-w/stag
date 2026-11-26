@@ -8,8 +8,10 @@ type t
 val create : unit -> t
 
 (** Calls [symbol], found by [dlsym] in the process, with [args], of the stag
-    types of [signature]'s arguments. Errs, saying why, if there is no such
-    symbol, or if it returns an [int64_t] out of the range of [int]. *)
+    types of [signature]'s arguments, after flushing stdout and stderr. Errs,
+    saying why, if there is no such symbol, if an argument is out of the range
+    of its C integer type or is a string with a NUL character, or if it returns
+    a value out of the range of [int]. *)
 val call
   :  t
   -> symbol:string
