@@ -8,7 +8,14 @@ open! Import
 
 (** [entry] is the type of the entry of the quote's context. An entry whose type
     is not a variable gets none. *)
-val record : entry:Type.ty -> Typecheck_error.Unusable_in_quote.t -> unit
+val record
+  :  entry:Type.ty
+  -> name:string
+  -> Typecheck_error.Unusable_in_quote.t
+  -> unit
 
-(** Of the context entry of type [entry] of spliced code. *)
-val find : entry:Type.ty -> Typecheck_error.Unusable_in_quote.t option
+(** Of the context entry of type [entry] of spliced code, for [name]. *)
+val find
+  :  entry:Type.ty
+  -> name:string
+  -> Typecheck_error.Unusable_in_quote.t option

@@ -1085,53 +1085,76 @@ let holding t =
         dormant.kind)
 ;;
 
-(* A generic node's constraints are those its scheme keeps, which imply the
-   rest. The nodes of edges into it may have schemes of their own, generalized
-   later, so their floors count too: to a fixpoint, as the edges may form
-   cycles. *)
-let scheme_lower t =
-  let floors = Int.Table.create () in
-  let into = Int.Table.create () in
-  let nodes = Queue.create () in
-  let todo = Stack.singleton t in
-  while not (Stack.is_empty todo) do
-    let node = Stack.pop_exn todo in
-    if not (Hashtbl.mem floors node.id)
-    then (
-      Hashtbl.set floors ~key:node.id ~data:node.lower;
-      Hashtbl.set
-        into
-        ~key:node.id
-        ~data:
-          (List.filter_map (holding node) ~f:(function
-            | Lower (_, point) -> Some (`Point point)
-            | Edge (lo, morphism, hi) when phys_equal hi node ->
-              Stack.push todo lo;
-              Some (`From (lo, morphism))
-            | Edge _ | Upper _ -> None));
-      Queue.enqueue nodes node)
-  done;
-  let floor node = Hashtbl.find_exn floors node.id in
-  let changed = ref true in
-  while !changed do
-    changed := false;
-    Queue.iter nodes ~f:(fun node ->
-      let lower =
-        List.fold
-          (Hashtbl.find_exn into node.id)
-          ~init:(floor node)
-          ~f:(fun lower -> function
-          | `Point point -> Int.max lower point
-          | `From (lo, morphism) ->
-            Int.max lower (Morphism.left morphism (floor lo)))
-      in
-      if lower > floor node
-      then (
-        Hashtbl.set floors ~key:node.id ~data:lower;
-        changed := true))
-  done;
-  floor t
-;;
+module Floors = struct
+  type t = int Int.Table.t
+
+  let create () = Int.Table.create ()
+
+  (* A generic node's constraints are those its scheme keeps, which imply the
+     rest. The nodes of edges into it may have schemes of their own, generalized
+     later, so their floors count too: to a fixpoint, as the edges may form
+     cycles. A floor computed is final, as it is a fixpoint over all the nodes
+     it comes from, so [t] keeps it for later queries. *)
+  let lower (known : t) node =
+    match Hashtbl.find known node.id with
+    | Some floor -> floor
+    | None ->
+      let floors = Int.Table.create () in
+      let into = Int.Table.create () in
+      let dependents = Int.Table.create () in
+      let nodes = Queue.create () in
+      let todo = Stack.singleton node in
+      while not (Stack.is_empty todo) do
+        let node = Stack.pop_exn todo in
+        if not (Hashtbl.mem floors node.id)
+        then (
+          Hashtbl.set floors ~key:node.id ~data:node.lower;
+          Hashtbl.set
+            into
+            ~key:node.id
+            ~data:
+              (List.filter_map (holding node) ~f:(function
+                | Lower (_, point) -> Some (`Point point)
+                | Edge (lo, morphism, hi) when phys_equal hi node ->
+                  (match Hashtbl.find known lo.id with
+                   | Some floor -> Some (`Point (Morphism.left morphism floor))
+                   | None ->
+                     Stack.push todo lo;
+                     Hashtbl.add_multi dependents ~key:lo.id ~data:node;
+                     Some (`From (lo, morphism)))
+                | Edge _ | Upper _ -> None));
+          Queue.enqueue nodes node)
+      done;
+      let floor node = Hashtbl.find_exn floors node.id in
+      let queued = Int.Hash_set.create () in
+      Queue.iter nodes ~f:(fun node -> Hash_set.add queued node.id);
+      while not (Queue.is_empty nodes) do
+        let node = Queue.dequeue_exn nodes in
+        Hash_set.remove queued node.id;
+        let lower =
+          List.fold
+            (Hashtbl.find_exn into node.id)
+            ~init:(floor node)
+            ~f:(fun lower -> function
+            | `Point point -> Int.max lower point
+            | `From (lo, morphism) ->
+              Int.max lower (Morphism.left morphism (floor lo)))
+        in
+        if lower > floor node
+        then (
+          Hashtbl.set floors ~key:node.id ~data:lower;
+          List.iter (Hashtbl.find_multi dependents node.id) ~f:(fun dependent ->
+            if not (Hash_set.mem queued dependent.id)
+            then (
+              Hash_set.add queued dependent.id;
+              Queue.enqueue nodes dependent)))
+      done;
+      Hashtbl.iteri floors ~f:(fun ~key ~data -> Hashtbl.set known ~key ~data);
+      floor node
+  ;;
+end
+
+let scheme_lower t = Floors.lower (Floors.create ()) t
 
 let scheme_upper t =
   List.fold (holding t) ~init:t.upper ~f:(fun upper -> function
@@ -1150,13 +1173,13 @@ let forward t =
       | Edge _ | Upper _ | Lower _ -> None)
 ;;
 
-let raised seeds =
+let raised ?(floors = Floors.create ()) seeds =
   let estimates = Int.Table.create () in
   let raised = Int.Table.create () in
   let nodes = Queue.create () in
   let estimate node =
     Hashtbl.find_or_add estimates node.id ~default:(fun () ->
-      let lower = scheme_lower node in
+      let lower = Floors.lower floors node in
       if lower > node.lower
       then (
         Hashtbl.set raised ~key:node.id ~data:node;

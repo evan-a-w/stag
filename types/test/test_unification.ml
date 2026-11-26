@@ -2295,3 +2295,32 @@ let%expect_test "generalizing and reopening are not allowed under atomically" =
     ("cannot be undone, so not allowed under atomically" Scheme.reopen)
     |}]
 ;;
+
+let%expect_test "what is queued to settle all runs, even if one raises" =
+  let result =
+    Or_error.try_with (fun () ->
+      Fresh.settle (fun () ->
+        let queue f = ignore (Fresh.settle f : (unit, _) Result.t) in
+        queue (fun () ->
+          print_endline "first";
+          Ok ());
+        queue (fun () -> failwith "second raises");
+        queue (fun () ->
+          print_endline "third";
+          Ok ());
+        Ok ()))
+  in
+  print_s [%message (result : (unit, Unification_error.t) Result.t Or_error.t)];
+  ignore
+    (Fresh.settle (fun () ->
+       print_endline "a later settle runs alone";
+       Ok ())
+     : (unit, _) Result.t);
+  [%expect
+    {|
+    first
+    third
+    (result (Error (Failure "second raises")))
+    a later settle runs alone
+    |}]
+;;

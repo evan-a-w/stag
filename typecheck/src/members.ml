@@ -161,10 +161,11 @@ let constructor_types
     , result )
 ;;
 
-(* The record type [fields] (not empty) are of: [expected] if it is known to be
-   a record type, else that of the first qualified field (or ref), else the
-   first of the unqualified fields' types in scope that has all of them. *)
-let record_type (scope : Scope.t) fields ~expected ~loc =
+(* The record type [fields] are of: [expected] if it is known to be a record
+   type, else that of the first qualified field (or ref), else the first of the
+   unqualified fields' types in scope that has all of them. *)
+let record_type (scope : Scope.t) fields_ne ~expected ~loc =
+  let fields = Nonempty_list.to_list fields_ne in
   let of_field field =
     let%bind.Result (field : Type_env.Field.t) =
       find_field scope field ~loc ~known:None
@@ -197,7 +198,7 @@ let record_type (scope : Scope.t) fields ~expected ~loc =
             | Ok _ | Error _ -> None)
         with
         | Some known -> Ok known
-        | None -> of_field (fst (List.hd_exn fields))))
+        | None -> of_field (fst (Nonempty_list.hd fields_ne))))
 ;;
 
 let is_given fields (member : Type_env.Field.t) =
@@ -216,13 +217,13 @@ module Resolved = struct
 end
 
 let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc =
-  let%bind.Result () =
-    if List.is_empty fields
-    then Typecheck_error.error ~loc Empty_record
-    else Ok ()
+  let%bind.Result first, rest =
+    match fields with
+    | [] -> Typecheck_error.error ~loc Empty_record
+    | first :: rest -> Ok (first, rest)
   in
   let%bind.Result (known : Type_env.Field.t Known.t) =
-    record_type scope fields ~expected ~loc
+    record_type scope (first :: rest) ~expected ~loc
   in
   let find (field, x) =
     let%bind.Result (found : Type_env.Field.t) =
@@ -248,7 +249,9 @@ let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc 
     |> List.map ~f:find
     |> Result.all
   in
-  let%bind.Result fields = List.map fields ~f:find |> Result.all in
+  let%bind.Result ((first, (_ : Loc.t), _) as found) = find first in
+  let%bind.Result rest = List.map rest ~f:find |> Result.all in
+  let fields = found :: rest in
   let%bind.Result () =
     Duplicates.check
       (List.map fields ~f:(fun (field, loc, _) ->
@@ -268,16 +271,13 @@ let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc 
       false
     | Some _ | None -> true
   in
-  match fields with
-  | [] -> Typecheck_error.error ~loc Empty_record
-  | (first, (_ : Loc.t), _) :: _ ->
-    Ok
-      { Resolved.known
-      ; declared = first.record
-      ; record_type = first.record_type
-      ; fields
-      ; complete
-      }
+  Ok
+    { Resolved.known
+    ; declared = first.record
+    ; record_type = first.record_type
+    ; fields
+    ; complete
+    }
 ;;
 
 let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =

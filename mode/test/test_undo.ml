@@ -173,3 +173,35 @@ let%expect_test "what is queued until settled all runs, even if one raises" =
     nothing left queued
     |}]
 ;;
+
+let%expect_test "a set aside that raises leaves the enclosing group as it was" =
+  let fail = ref false in
+  Undo.register_scoped ~set_aside:(fun () ->
+    if !fail then failwith "set aside raises";
+    Fn.id);
+  let r = ref 0 in
+  let set x =
+    let old = !r in
+    Undo.record (fun () -> r := old);
+    r := x
+  in
+  let result =
+    Undo.atomically (fun () ->
+      set 1;
+      fail := true;
+      let permanent =
+        Or_error.try_with (fun () -> Undo.permanent (fun () -> set 2))
+      in
+      fail := false;
+      print_s [%message (permanent : unit Or_error.t)];
+      (* Still within the group, so its changes are still undone. *)
+      set 3;
+      Error ())
+  in
+  print_s [%message (result : (unit, unit) Result.t) ~r:(!r : int)];
+  [%expect
+    {|
+    (permanent (Error (Failure "set aside raises")))
+    ((result (Error ())) (r 0))
+    |}]
+;;

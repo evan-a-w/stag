@@ -77,12 +77,17 @@ let permanent f =
   suspended := !suspended + saved_depth;
   depth := 0;
   log := [];
-  let restores = List.map !scoped ~f:(fun set_aside -> set_aside ()) in
-  Exn.protect ~f ~finally:(fun () ->
-    List.iter restores ~f:(fun restore -> restore ());
-    suspended := !suspended - saved_depth;
-    depth := saved_depth;
-    log := saved_log)
+  let restores = ref [] in
+  Exn.protect
+    ~f:(fun () ->
+      List.iter !scoped ~f:(fun set_aside ->
+        restores := set_aside () :: !restores);
+      f ())
+    ~finally:(fun () ->
+      List.iter !restores ~f:(fun restore -> restore ());
+      suspended := !suspended - saved_depth;
+      depth := saved_depth;
+      log := saved_log)
 ;;
 
 let when_settled f = if settled () then f () else Queue.enqueue settled_queue f

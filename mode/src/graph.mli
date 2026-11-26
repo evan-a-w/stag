@@ -159,10 +159,20 @@ val above : t -> t list
 
 val axis : t -> Axis.Any.t
 
+(** Scheme lower bounds ([scheme_lower]), shared by queries made while the graph
+    doesn't change. *)
+module Floors : sig
+  type node := t
+  type t
+
+  val create : unit -> t
+  val lower : t -> node -> int
+end
+
 (** The nodes that rise, with their least points, if each node given is raised
     to its point, by the constraints that hold: a generic node's are those its
     scheme keeps. [None] if one can't be. *)
-val raised : (t * int) list -> (t * int) list option
+val raised : ?floors:Floors.t -> (t * int) list -> (t * int) list option
 
 (** The nodes [t]'s lower bound may come from, through edges and dormant edges
     not fired, and the layouts, not known, those wait for. *)

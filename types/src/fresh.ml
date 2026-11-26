@@ -57,16 +57,29 @@ let settle f =
     let queue = Queue.create () in
     Queue.enqueue queue f;
     settling := Some queue;
-    let rec drain first_error =
+    let rec drain first_error first_exn =
       match Queue.dequeue queue with
-      | None -> first_error
+      | None ->
+        Option.iter first_exn ~f:(fun (exn, backtrace) ->
+          Exn.raise_with_original_backtrace exn backtrace);
+        first_error
       | Some f ->
-        drain
-          (match first_error, f () with
-           | (Error _ as error), _ | Ok (), error -> error)
+        (match f () with
+         | result ->
+           drain
+             (match first_error, result with
+              | (Error _ as error), _ | Ok (), error -> error)
+             first_exn
+         | exception exn ->
+           drain
+             first_error
+             (Some
+                (Option.value
+                   first_exn
+                   ~default:(exn, Backtrace.Exn.most_recent ()))))
     in
     Exn.protect
-      ~f:(fun () -> drain (Ok ()))
+      ~f:(fun () -> drain (Ok ()) None)
       ~finally:(fun () -> settling := None)
 ;;
 

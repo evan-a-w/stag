@@ -169,6 +169,7 @@ let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
     Option.iter unusable ~f:(fun entry ->
       Unusable_in_quotes.record
         ~entry:ty
+        ~name
         { loc; var_level = entry.level; used_at = scope.level });
     ty, Typed.Var_ref.Free name
   | Unusable kind -> Typecheck_error.error ~loc kind

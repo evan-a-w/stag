@@ -37,7 +37,8 @@ val cons : t -> Cons.t
     section has its own): then once what that one runs is done, so watchers
     binding variables whose watchers bind others don't nest. All that is queued
     runs, even after an error, so each adds its constraints: the first error of
-    all goes to the outermost [settle]. *)
+    all goes to the outermost [settle], and if one raises, the rest still run
+    before the first exception is raised again. *)
 val settle
   :  (unit -> (unit, Unification_error.t) Result.t)
   -> (unit, Unification_error.t) Result.t

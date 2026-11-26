@@ -294,6 +294,7 @@ module Node = struct
   let upper = Graph.scheme_upper
   let raised = Graph.raised
 
+  module Floors = Graph.Floors
   module Fate = Graph.Fate
 
   let fate = Graph.fate

@@ -2275,7 +2275,7 @@ and substitute_entry
     let kind : Typecheck_error.Kind.t =
       match kind, scope.quote with
       | Not_in_scope _, None ->
-        (match Unusable_in_quotes.find ~entry:ty with
+        (match Unusable_in_quotes.find ~entry:ty ~name with
          | Some unusable -> Free_in_spliced_code { name; unusable }
          | None -> kind)
       | _ -> kind
