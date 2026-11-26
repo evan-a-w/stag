@@ -810,18 +810,31 @@ let as_external : Core.Lru.t[int, string, external] = cache
 
 ## C functions
 
-`external` binds a C function, called through libffi. For now only immediates
-(`int`, `bool`, `char`, `unit`) may cross.
+`external` binds a C function, called through libffi. Its type says the C
+types: `int`, `bool` and `char` as themselves (an `int` is an `int64_t`), C's
+integer types as `C.int`, `C.uint8`, `C.size_t` etc., and `unit` results as
+`void`. Stag sees each C integer type as an `int`: arguments are range checked,
+and so are results, as an `int` has 63 bits. A `string` argument is passed as a
+`const char *` to a NUL-terminated copy, valid only during the call.
 
 ```stag
 external labs : int -> int = "labs"
 let a = labs (Int.sub 0 42)         (* val a : int = 42 *)
+external strlen : string -> C.size_t = "strlen"
+let n = strlen "hello"              (* val n : int = 5 *)
+external toupper : C.int -> C.int = "toupper"
+let upper = Core.Char.of_code_exn (toupper (Core.Char.code 'a'))   (* val upper : char = 'A' *)
 ```
 
+Other pointers can't cross yet, so neither can a `string` result.
+
 ```stag-error
-external strlen : string -> int = "strlen"
-(* Error: string *)
+external getenv : string -> string = "getenv"
+(* Error: string would be returned by C as a pointer *)
 ```
+
+Buffered output is flushed before every C call, so a C function writing to the
+same file descriptors, or calling `exit`, sees it in order.
 
 At compile time, C calls are only allowed in libraries whose stanza says
 `(compile_time_c_calls)` (see the project above).
