@@ -65,11 +65,13 @@ type module_ =
   ; enclosing : t option
   ; splice : splice option (* Of a spliced module. *)
   ; program : program
+  ; warnings : Warning.Settings.t (* At its start. *)
   }
 
 and t =
   { module_ : module_
   ; position : Position.t
+  ; warnings : Warning.Settings.t
   }
 
 and entry =
@@ -133,11 +135,11 @@ let join path = String.concat path ~sep:"."
 let sexp_of_t t = Sexp.Atom (join t.module_.path)
 let canonical_name t name = join (t.module_.path @ [ name ])
 
-let enter t name =
-  { module_ = Hashtbl.find_exn t.module_.modules name; position = End }
-;;
+let at_end module_ = { module_; position = End; warnings = module_.warnings }
+let enter t name = at_end (Hashtbl.find_exn t.module_.modules name)
+let warnings (t : t) = t.warnings
 
-let create ~path ~loc ~enclosing ~splice ~program =
+let create ~path ~loc ~enclosing ~splice ~program ~warnings =
   { members = Member.Table.create ()
   ; modules = String.Table.create ()
   ; entries = Queue.create ()
@@ -148,10 +150,20 @@ let create ~path ~loc ~enclosing ~splice ~program =
   ; enclosing
   ; splice
   ; program
+  ; warnings
   }
 ;;
 
-let create_root ?enclosing ?(path = []) ~types ~declare ~force ~report () =
+let create_root
+  ?enclosing
+  ?(path = [])
+  ?(warnings = Warning.Settings.default)
+  ~types
+  ~declare
+  ~force
+  ~report
+  ()
+  =
   let module_ =
     create
       ~path
@@ -159,10 +171,11 @@ let create_root ?enclosing ?(path = []) ~types ~declare ~force ~report () =
       ~enclosing
       ~splice:None
       ~program:{ declare; force; report; outside = enclosing }
+      ~warnings
   in
   List.iter types ~f:(fun name ->
     Hashtbl.set module_.members ~key:(Member Type, name) ~data:None);
-  { module_; position = End }
+  at_end module_
 ;;
 
 let rec declarations_of entries =
@@ -178,11 +191,12 @@ let rec declarations_of entries =
 let declarations t = declarations_of t.module_.entries
 
 (* The members [toplevel] adds to the module it is in. *)
-let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
+let rec members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
   let member namespace (name : Name.t) =
     (Member_kind.Member namespace, name.txt), name
   in
   match toplevel.txt with
+  | Attributed (toplevel, _) -> members toplevel
   | Let (name, _, _, _) | Let_mut (name, _, _) | External { name; _ } ->
     [ member Value name ]
   | Type { name; params = _; kind } ->
@@ -201,18 +215,19 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
     [ member Constructor name ]
   | Module (name, _) | Module_splice (name, _, _) ->
     [ (Module, name.txt), name ]
-  | Expect_test _ | Bench _ | Include _ -> []
+  | Expect_test _ | Bench _ | Include _ | Attribute _ -> []
 ;;
 
 (* [toplevels] but those whose names, or type parameters, are taken by those
    before them or by [taken], the members of the module [path] they are added
    to, and with types' constructors and fields so taken left out, each reported. *)
 let rec unique_among ~path taken toplevels ~report =
-  List.filter_map toplevels ~f:(fun (toplevel : Toplevel.t) ->
+  List.filter_map toplevels ~f:(fun (written : Toplevel.t) ->
     let error ~loc kind =
       report (Typecheck_error.create ~loc kind);
       None
     in
+    let toplevel, _ = Toplevel.unattributed written in
     let params_unique =
       match toplevel.txt with
       | Type { name; params; kind = _ } ->
@@ -236,7 +251,9 @@ let rec unique_among ~path taken toplevels ~report =
       | Module_splice _
       | Expect_test _
       | Bench _
-      | Include _ -> Some ()
+      | Include _
+      | Attributed _
+      | Attribute _ -> Some ()
     in
     let%bind.Option () = params_unique in
     let added = Member.Hash_set.create () in
@@ -268,9 +285,10 @@ let rec unique_among ~path taken toplevels ~report =
         | (Alias _ | Abstract | Splice _) as kind -> kind
       in
       Some
-        { toplevel with
-          txt = Toplevel.Type { decl with kind = kept_kind decl.kind }
-        }
+        (Toplevel.map_unattributed written ~f:(fun toplevel ->
+           { toplevel with
+             txt = Toplevel.Type { decl with kind = kept_kind decl.kind }
+           }))
     | ( _ :: _
       , ( Let _
         | Let_mut _
@@ -281,34 +299,39 @@ let rec unique_among ~path taken toplevels ~report =
         | Module_splice _
         | Expect_test _
         | Bench _
-        | Include _ ) ) ->
+        | Include _
+        | Attributed _
+        | Attribute _ ) ) ->
       (* Their only member, if any, is their name. *)
       assert false
     | [], _ ->
       Hash_set.iter added ~f:(Hash_set.add taken);
       Some
-        (match toplevel.txt with
-         | Module (name, toplevels) ->
-           { toplevel with
-             txt =
-               Toplevel.Module
-                 ( name
-                 , unique_among
-                     ~path:(path @ [ name.txt ])
-                     (Member.Hash_set.create ())
-                     toplevels
-                     ~report )
-           }
-         | Let _
-         | Let_mut _
-         | Type _
-         | Exception _
-         | External _
-         | Malformed_exception _
-         | Module_splice _
-         | Expect_test _
-         | Bench _
-         | Include _ -> toplevel))
+        (Toplevel.map_unattributed written ~f:(fun toplevel ->
+           match toplevel.txt with
+           | Module (name, toplevels) ->
+             { toplevel with
+               txt =
+                 Toplevel.Module
+                   ( name
+                   , unique_among
+                       ~path:(path @ [ name.txt ])
+                       (Member.Hash_set.create ())
+                       toplevels
+                       ~report )
+             }
+           | Let _
+           | Let_mut _
+           | Type _
+           | Exception _
+           | External _
+           | Malformed_exception _
+           | Module_splice _
+           | Expect_test _
+           | Bench _
+           | Include _
+           | Attributed _
+           | Attribute _ -> toplevel)))
 ;;
 
 let unique module_ toplevels ~report =
@@ -327,6 +350,7 @@ let submodule (scope : t) (name : Name.t) ~splice =
       ~enclosing:(Some scope)
       ~splice
       ~program:scope.module_.program
+      ~warnings:scope.warnings
   in
   Hashtbl.add_exn scope.module_.modules ~key:name.txt ~data:module_;
   module_
@@ -334,68 +358,42 @@ let submodule (scope : t) (name : Name.t) ~splice =
 
 (* Adds [toplevels] to [module_], in place of the include [parent] if given. *)
 let rec register module_ toplevels ~parent ~generated_by =
-  let prefix, into =
+  let prefix, into, warnings =
     match parent with
-    | None -> [], module_.entries
-    | Some { scope = { position = At prefix; _ }; into = Into_include into; _ }
-      -> prefix, into
+    | None -> [], module_.entries, module_.warnings
+    | Some
+        { scope = { position = At prefix; warnings; _ }
+        ; into = Into_include into
+        ; _
+        } -> prefix, into, warnings
     | Some _ -> raise_s [%message "Module_scope.register: not an include"]
   in
-  List.iter toplevels ~f:(fun (toplevel : Toplevel.t) ->
-    let scope = { module_; position = At (prefix @ [ Queue.length into ]) } in
-    let splice (expr : Expr.t) ~expansion ~into =
-      let loc =
-        match expansion with
-        | None -> toplevel.loc
-        | Some _ -> { toplevel.loc with stop = expr.loc.stop }
-      in
-      { expr; toplevel; loc; scope; into; state = Pending }
-    in
-    match toplevel.txt with
-    | Include (expr, expansion) ->
-      let splice =
-        splice expr ~expansion ~into:(Into_include (Queue.create ()))
-      in
-      Queue.enqueue into (Included splice);
-      Queue.enqueue module_.includes splice
-    | Let _
-    | Let_mut _
-    | Type _
-    | Exception _
-    | External _
-    | Malformed_exception _
-    | Expect_test _
-    | Bench _
-    | Module _
-    | Module_splice _ ->
-      module_.program.declare scope toplevel ~generated_by;
-      Queue.enqueue into (Written { toplevel; scope; generated_by });
-      List.iter (members toplevel) ~f:(fun (member, _) ->
-        Hashtbl.add_exn module_.members ~key:member ~data:parent);
-      (match toplevel.txt with
-       | Module (name, toplevels) ->
-         let module_ = submodule scope name ~splice:None in
-         register module_ toplevels ~parent:None ~generated_by
-       | Module_splice (name, expr, expansion) ->
-         ignore
-           (submodule
-              scope
-              name
-              ~splice:
-                (Some (splice expr ~expansion ~into:(Into_module name.txt)))
-            : module_)
-       | Type ({ kind = Splice e; _ } as decl) ->
-         let splice =
-           { expr = e.txt
-           ; toplevel
-           ; loc = e.loc
-           ; scope
-           ; into = Into_type decl
-           ; state = Pending
-           }
+  ignore
+    (List.fold toplevels ~init:warnings ~f:(fun warnings written ->
+       let toplevel, attributes = Toplevel.unattributed written in
+       let scope =
+         { module_
+         ; position = At (prefix @ [ Queue.length into ])
+         ; warnings = Attribute.apply_warnings attributes warnings
+         }
+       in
+       let splice (expr : Expr.t) ~expansion ~into =
+         let loc =
+           match expansion with
+           | None -> toplevel.loc
+           | Some _ -> { toplevel.loc with stop = expr.loc.stop }
          in
-         Hashtbl.add_exn module_.definitions ~key:decl.name.txt ~data:splice;
-         Queue.enqueue module_.includes splice
+         { expr; toplevel; loc; scope; into; state = Pending }
+       in
+       match toplevel.txt with
+       | Attribute attribute -> Attribute.apply_warnings [ attribute ] warnings
+       | Include (expr, expansion) ->
+         let splice =
+           splice expr ~expansion ~into:(Into_include (Queue.create ()))
+         in
+         Queue.enqueue into (Included splice);
+         Queue.enqueue module_.includes splice;
+         warnings
        | Let _
        | Let_mut _
        | Type _
@@ -404,7 +402,50 @@ let rec register module_ toplevels ~parent ~generated_by =
        | Malformed_exception _
        | Expect_test _
        | Bench _
-       | Include _ -> ()))
+       | Module _
+       | Module_splice _
+       | Attributed _ ->
+         module_.program.declare scope written ~generated_by;
+         Queue.enqueue into (Written { toplevel = written; scope; generated_by });
+         List.iter (members toplevel) ~f:(fun (member, _) ->
+           Hashtbl.add_exn module_.members ~key:member ~data:parent);
+         (match toplevel.txt with
+          | Module (name, toplevels) ->
+            let module_ = submodule scope name ~splice:None in
+            register module_ toplevels ~parent:None ~generated_by
+          | Module_splice (name, expr, expansion) ->
+            ignore
+              (submodule
+                 scope
+                 name
+                 ~splice:
+                   (Some (splice expr ~expansion ~into:(Into_module name.txt)))
+               : module_)
+          | Type ({ kind = Splice e; _ } as decl) ->
+            let splice =
+              { expr = e.txt
+              ; toplevel
+              ; loc = e.loc
+              ; scope
+              ; into = Into_type decl
+              ; state = Pending
+              }
+            in
+            Hashtbl.add_exn module_.definitions ~key:decl.name.txt ~data:splice;
+            Queue.enqueue module_.includes splice
+          | Let _
+          | Let_mut _
+          | Type _
+          | Exception _
+          | External _
+          | Malformed_exception _
+          | Expect_test _
+          | Bench _
+          | Include _
+          | Attributed _
+          | Attribute _ -> ());
+         warnings)
+     : Warning.Settings.t)
 ;;
 
 let add t toplevels =
@@ -847,7 +888,7 @@ and find_written
     | [] -> Member namespace, name
     | _ :: _ -> Module, name
   in
-  match%bind.Result lookup { module_; position = End } member with
+  match%bind.Result lookup (at_end module_) member with
   | Visible ->
     (match rest with
      | [] -> Ok (join (module_.path @ [ name ]))
@@ -878,7 +919,7 @@ and find_written
         ( Typecheck_error.Kind.Unbound_module (with_names path written)
         , prefix_loc loc ~path ~written )
     in
-    if after_failed_splice { module_; position = End } member
+    if after_failed_splice (at_end module_) member
     then Error Typecheck_error.already_reported
     else
       Error
@@ -1065,7 +1106,7 @@ let iter_declarations t ~f =
          | Into_module _ | Into_type _ -> ())
       | Written { toplevel; scope; generated_by } ->
         f scope toplevel ~generated_by;
-        (match toplevel.txt with
+        (match (fst (Toplevel.unattributed toplevel)).txt with
          | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
          | Let _
@@ -1076,7 +1117,9 @@ let iter_declarations t ~f =
          | Malformed_exception _
          | Expect_test _
          | Bench _
-         | Include _ -> ()))
+         | Include _
+         | Attributed _
+         | Attribute _ -> ()))
   in
   iter_module t.module_
 ;;

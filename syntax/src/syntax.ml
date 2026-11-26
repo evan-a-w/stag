@@ -91,6 +91,82 @@ module Name = struct
   type t = string Located.t [@@deriving sexp_of, compare, equal]
 end
 
+module Warning = Warning
+
+(** [[@name "payload"]], [[@@name "payload"]] or [[@@@name "payload"]]. *)
+module Attribute = struct
+  type t =
+    { name : Name.t (** Possibly dotted, as [foo.bar]. *)
+    ; payload : string Located.t option
+    }
+  [@@deriving sexp_of, compare, equal]
+
+  module Position = struct
+    type t =
+      | Expr (** [e [@name]] *)
+      | Item (** [item [@@name]] *)
+      | Floating (** [[@@@name]] *)
+    [@@deriving sexp_of, compare, equal]
+
+    let ats = function
+      | Expr -> "@"
+      | Item -> "@@"
+      | Floating -> "@@@"
+    ;;
+  end
+
+  (** The spec of a [warning] attribute, if it is one and its spec parses. *)
+  let warning_spec { name; payload } =
+    match name.txt, payload with
+    | "warning", Some payload -> Result.ok (Warning.Spec.of_string payload.txt)
+    | _ -> None
+  ;;
+
+  (** [settings] as the [warning] attributes among [ts] change them, in order. *)
+  let apply_warnings ts settings =
+    List.fold ts ~init:settings ~f:(fun settings t ->
+      match warning_spec t with
+      | Some spec -> Warning.Settings.apply settings spec
+      | None -> settings)
+  ;;
+
+  (** Errs, at the name or payload, unless the attribute is a known one, in a
+      position it is written at, with the payload it takes. *)
+  let validate { name; payload } ~(position : Position.t) =
+    let ats = Position.ats position in
+    let written = sprintf "`[%s%s]`" ats name.txt in
+    match name.txt, position, payload with
+    | "nontail", Expr, None -> Ok ()
+    | "nontail", Expr, Some payload ->
+      Error (payload.loc, "`[@nontail]` takes no payload")
+    | "nontail", (Item | Floating), _ ->
+      Error
+        ( name.loc
+        , sprintf
+            "%s: `nontail` is an expression's attribute, as in `f x [@nontail]`"
+            written )
+    | "warning", _, None ->
+      Error
+        ( name.loc
+        , sprintf
+            "%s takes a warning spec, as in `[%swarning \"-unused-arm\"]`"
+            written
+            ats )
+    | "warning", _, Some payload ->
+      (match Warning.Spec.of_string payload.txt with
+       | Ok (_ : Warning.Spec.t) -> Ok ()
+       | Error message -> Error (payload.loc, message))
+    | _ ->
+      Error
+        ( name.loc
+        , sprintf
+            "unknown attribute %s: the attributes are `[@nontail]` and \
+             `[%swarning \"spec\"]`"
+            written
+            ats )
+  ;;
+end
+
 (* The syntax's types are mutually recursive, as splices in type positions hold
    expressions and struct quotes hold declarations; each is re-exported by its
    module below. They are in [Defs], so that their constructors (eg. [Error])
@@ -247,6 +323,8 @@ module Defs = struct
     | Exclave of expr (** [exclave_ e] *)
     | Region of expr (** [region_ e] *)
     | Nontail of expr (** [f x [@nontail]], of an application. *)
+    | Attributed of expr * Attribute.t
+    (** [e [@name payload]], of an attribute but [[@nontail]]. *)
     | Annotated of expr * annot
     (** [(e : t @ m)], of an expression not a variable, whose annotation is
         [Var]'s. *)
@@ -293,6 +371,9 @@ module Defs = struct
         ; param : bench_param option
         ; body : expr
         }
+    | Attributed of toplevel * Attribute.t (** [item [@@name payload]] *)
+    | Attribute of Attribute.t
+    (** [[@@@name payload]], about the rest of the enclosing module. *)
   [@@deriving sexp_of, compare, equal]
 end
 
@@ -475,6 +556,7 @@ module Expr = struct
     | Exclave of t
     | Region of t
     | Nontail of t
+    | Attributed of t * Attribute.t
     | Annotated of t * Annot.t
     | Forget of Name.t list * t
     | Error
@@ -530,6 +612,26 @@ module Toplevel = struct
         ; param : Bench_param.t option
         ; body : Expr.t
         }
+    | Attributed of t * Attribute.t
+    | Attribute of Attribute.t
+
+  (** [t] without the attributes [[@@name]] written on it, and those, innermost
+      first. *)
+  let rec unattributed (t : t) =
+    match t.txt with
+    | Attributed (t, attribute) ->
+      let t, attributes = unattributed t in
+      t, attributes @ [ attribute ]
+    | _ -> t, []
+  ;;
+
+  (** [t] with [f] of it [unattributed], under the same attributes. *)
+  let rec map_unattributed (t : t) ~f =
+    match t.txt with
+    | Attributed (inner, attribute) ->
+      { t with txt = Attributed (map_unattributed inner ~f, attribute) }
+    | _ -> f t
+  ;;
 
   let sexp_of_t = sexp_of_toplevel
   let sexp_of_desc = sexp_of_toplevel_desc

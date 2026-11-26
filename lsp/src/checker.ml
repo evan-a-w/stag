@@ -68,7 +68,9 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
     | Module_splice _
     | Include _
     | Expect_test _
-    | Bench _ ->
+    | Bench _
+    | Attributed _
+    | Attribute _ ->
       Option.some_if
         (not
            (Loc.File.equal

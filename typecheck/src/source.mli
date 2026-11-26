@@ -104,6 +104,7 @@ module Expr : sig
       (** [(e : t @ m)], as written or generated (eg. a variable's annotation
           kept by re-inference). *)
       | Forget of Syntax.Name.t list * t
+      | Attributed of t * Syntax.Attribute.t
       | Marked of Typed.Marker.t * t
       | App of t * t
       | Let of

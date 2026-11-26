@@ -32,6 +32,15 @@ let located f (g : _ Located.t) (w : _ Located.t) =
 
 let name = located (same String.equal)
 
+let attribute
+  ({ name = n; payload } : Attribute.t)
+  ({ name = n'; payload = payload' } : Attribute.t)
+  =
+  let* n = name n n' in
+  let+ payload = option (located (same String.equal)) payload payload' in
+  { Attribute.name = n; payload }
+;;
+
 let decl_path_desc (g : Decl_path.t) (w : Decl_path.t) =
   match g, w with
   | (Resolved _ | Root _), (Path _ | Root _) -> Some g
@@ -358,6 +367,10 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Nontail e, Nontail e' ->
     let+ e = expr e e' in
     Expr.Nontail e
+  | Attributed (e, a), Attributed (e', a') ->
+    let* e = expr e e' in
+    let+ a = attribute a a' in
+    Expr.Attributed (e, a)
   | Annotated (e, a), Annotated (e', a') ->
     let* e = expr e e' in
     let+ a = annot a a' in
@@ -397,6 +410,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Exclave _
       | Region _
       | Nontail _
+      | Attributed _
       | Annotated _
       | Forget _
       | Error )
@@ -488,6 +502,13 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     in
     let+ body = expr body body' in
     Toplevel.Bench { name = n; param; body }
+  | Attributed (t, a), Attributed (t', a') ->
+    let* t = toplevel t t' in
+    let+ a = attribute a a' in
+    Toplevel.Attributed (t, a)
+  | Attribute a, Attribute a' ->
+    let+ a = attribute a a' in
+    Toplevel.Attribute a
   | ( ( Let _
       | Let_mut _
       | Type _
@@ -498,7 +519,9 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
       | Module_splice _
       | Include _
       | Expect_test _
-      | Bench _ )
+      | Bench _
+      | Attributed _
+      | Attribute _ )
     , _ ) -> None
 
 and toplevels gs ws = list toplevel gs ws

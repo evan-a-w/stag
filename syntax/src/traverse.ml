@@ -256,6 +256,7 @@ let rec expr (v : _ Visitor_type.t) ctx (e : Expr.t) : Expr.t =
     | Exclave e -> Exclave (sub e)
     | Region e -> Region (sub e)
     | Nontail e -> Nontail (sub e)
+    | Attributed (e, a) -> Attributed (sub e, a)
     | Annotated (e, a) ->
       let e = sub e in
       Annotated (e, annot a)
@@ -335,6 +336,8 @@ and toplevel (v : _ Visitor_type.t) ctx (t : Toplevel.t) : Toplevel.t =
         Option.value_map param ~default:[] ~f:(fun p -> [ p.name.txt ])
       in
       Bench { name; param; body = child (Child.binding binds) body }
+    | Attributed (item, a) -> Attributed (v.toplevel v ctx item, a)
+    | Attribute _ -> t.txt
   in
   { t with txt }
 ;;

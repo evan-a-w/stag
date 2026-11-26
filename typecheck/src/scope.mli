@@ -32,6 +32,9 @@ type t =
   (** The uses of toplevels being checked made by the code, by the innermost
       [let] whose definition is being checked. *)
   ; expansion : bool (** See [Reporter.expansion]. *)
+  ; warnings : Warning.Settings.t
+  (** At the code: those of its module, changed by enclosing [warning]
+      attributes. *)
   }
 
 and quote =

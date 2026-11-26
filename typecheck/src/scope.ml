@@ -25,6 +25,7 @@ type t =
   ; owner : Allocation_sites.Frame.t option
   ; uses : Local_uses.t
   ; expansion : bool
+  ; warnings : Warning.Settings.t
   }
 
 and quote =

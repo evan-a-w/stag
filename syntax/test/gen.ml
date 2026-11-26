@@ -70,6 +70,24 @@ let string t =
     ]
 ;;
 
+(* Of the attributes the parser accepts in any position: [warning], with specs
+   needing escapes or written with spaces, tabs, newlines and commas. *)
+let attribute t : Attribute.t =
+  { name = loc "warning"
+  ; payload =
+      Some
+        (loc
+           (pick
+              t
+              [ "-unused-arm"
+              ; "@unused-arm +non-exhaustive"
+              ; "-all"
+              ; "+all,-unused-arm"
+              ; "\t@all ,\n -non-exhaustive\n"
+              ]))
+  }
+;;
+
 (* Unlocated, as the rest. *)
 let list_items items = List.map items ~f:(fun item -> Loc.none, item)
 
@@ -365,6 +383,7 @@ and expr t : Expr.t =
                  then { ty = Some (annot_type t); mode = None }
                  else { ty = None; mode = Some (mode_expr t) } ))
          ; (fun t -> Forget (list t ~min:1 ~max:3 name, expr t))
+         ; (fun t -> Attributed (expr t, attribute t))
          ])
 
 and type_decl t : Type_decl.t =
@@ -390,7 +409,7 @@ and type_decl t : Type_decl.t =
 
 and toplevel t : Toplevel.t =
   loc
-    (match int t 11 with
+    (match int t 13 with
      | 0 -> Toplevel.Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
      | 1 | 2 -> Type (type_decl t)
      | 3 -> Expect_test { name = loc (string t); body = expr t }
@@ -416,6 +435,10 @@ and toplevel t : Toplevel.t =
      | 9 ->
        External { name = name t; ty = type_expr t; symbol = loc (string t) }
      | 10 -> Let_mut (name t, annot t, expr t)
+     | 11 when t.size > 0 ->
+       t.size <- t.size - 1;
+       Attributed (toplevel t, attribute t)
+     | 12 -> Attribute (attribute t)
      | _ -> Let (name t, [], Annot.none, expr t))
 
 and expansion t =

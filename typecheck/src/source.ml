@@ -165,6 +165,7 @@ module Expr = struct
       | Var of Var.t
       | Annotated of t * Syntax.Annot.t
       | Forget of Syntax.Name.t list * t
+      | Attributed of t * Syntax.Attribute.t
       | Marked of Typed.Marker.t * t
       | App of t * t
       | Let of
@@ -308,6 +309,7 @@ module Expr = struct
     | Nontail expr -> Marked (Nontail, sub expr)
     | Annotated (expr, annot) -> Annotated (sub expr, annot)
     | Forget (names, expr) -> Forget (names, sub expr)
+    | Attributed (expr, attribute) -> Attributed (sub expr, attribute)
     | Error -> Error
   ;;
 

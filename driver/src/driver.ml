@@ -83,7 +83,9 @@ module Module_group = struct
             | Module_splice _
             | Include _
             | Expect_test _
-            | Bench _ )
+            | Bench _
+            | Attributed _
+            | Attribute _ )
         ; _
         } -> raise_s [%message "Driver.check_modules: a file is not a module"]
   ;;

@@ -357,6 +357,7 @@ and check_toplevel_in
     ; owner = None
     ; uses = Uses.of_code program scc
     ; expansion = false
+    ; warnings = Module_scope.warnings toplevel.module_
     }
   in
   let modes = Scope.modes scope in
@@ -725,6 +726,17 @@ and expr_type
       (List.map names ~f:(fun (name : Syntax.Name.t) -> name.txt))
       ~level:scope.level
       ~f:(fun () -> expr_type t scope ~at ~expr:body)
+  | Attributed (inner, attribute) ->
+    expr_type
+      ?expected
+      ~hint
+      ~applied
+      t
+      { scope with
+        warnings = Syntax.Attribute.apply_warnings [ attribute ] scope.warnings
+      }
+      ~at
+      ~expr:inner
   | Var (Ref var_ref) ->
     (match var_ref_type t scope ~at var_ref ~loc with
      | Error error -> fail error
@@ -2638,6 +2650,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; owner = None
   ; uses = Uses.of_code program scc
   ; expansion = false
+  ; warnings = Module_scope.warnings module_
   }
 ;;
 
@@ -2900,6 +2913,7 @@ let declare
   (toplevel : Syntax.Toplevel.t)
   ~generated_by
   =
+  let toplevel, _ = Syntax.Toplevel.unattributed toplevel in
   let generated =
     Option.map generated_by ~f:(fun splice -> Generated.create splice toplevel)
   in
@@ -2988,7 +3002,14 @@ let declare
       name
       Syntax.Annot.none
       (Located.create ~loc:toplevel.loc (Syntax.Expr.Lit Unit))
-  | (Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _), _ -> ()
+  | ( ( Module _
+      | Module_splice _
+      | Include _
+      | Expect_test _
+      | Bench _
+      | Attributed _
+      | Attribute _ )
+    , _ ) -> ()
 ;;
 
 module Deferred = struct
@@ -3009,6 +3030,7 @@ let check_declarations t (program : Program_env.t) module_ =
   Module_scope.iter_declarations
     module_
     ~f:(fun module_ (toplevel : Syntax.Toplevel.t) ~generated_by ->
+      let toplevel, _ = Syntax.Toplevel.unattributed toplevel in
       let defer (kind : Deferred.t) =
         let generated =
           Option.map generated_by ~f:(fun splice ->
@@ -3043,7 +3065,8 @@ let check_declarations t (program : Program_env.t) module_ =
       | Expect_test { name; body } -> defer (Deferred.Expect_test (name, body))
       | Bench { name; param; body } ->
         defer (Deferred.Bench (name, param, body))
-      | Module _ | Module_splice _ | Include _ -> ());
+      | Module _ | Module_splice _ | Include _ | Attributed _ | Attribute _ ->
+        ());
   Queue.to_list deferred
 ;;
 
@@ -3065,7 +3088,7 @@ let rec items (program_env : Program_env.t) module_ =
   List.filter_map
     (Module_scope.declarations module_)
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Typed.Program.Item.t option ->
-      match toplevel.txt with
+      match (fst (Syntax.Toplevel.unattributed toplevel)).txt with
       | Let ({ txt = name; loc = _ }, _, _, _)
       | Let_mut ({ txt = name; loc = _ }, _, _)
       | External { name = { txt = name; loc = _ }; _ } ->
@@ -3083,7 +3106,9 @@ let rec items (program_env : Program_env.t) module_ =
       | Malformed_exception _
       | Expect_test _
       | Bench _
-      | Include _ -> None)
+      | Include _
+      | Attributed _
+      | Attribute _ -> None)
 ;;
 
 let invalid_prelude error =
@@ -3127,8 +3152,8 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
   List.filter_map
     (Module_scope.declarations module_)
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
-      match toplevel.txt with
-      | Expect_test _ | Bench _ | Include _ -> None
+      match (fst (Syntax.Toplevel.unattributed toplevel)).txt with
+      | Expect_test _ | Bench _ | Include _ | Attributed _ | Attribute _ -> None
       | Let ({ txt = name; loc = _ }, _, _, _)
       | Let_mut ({ txt = name; loc = _ }, _, _)
       | External { name = { txt = name; loc = _ }; _ } ->

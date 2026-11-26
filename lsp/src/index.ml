@@ -176,7 +176,8 @@ module Syntax_at = struct
       recurse e;
       snds fields
     | Poly_variant (_, e) -> Option.iter e ~f:recurse
-    | Stack e | Exclave e | Region e | Nontail e -> recurse e
+    | Stack e | Exclave e | Region e | Nontail e | Attributed (e, _) ->
+      recurse e
     | Annotated (e, _) -> recurse e
     | Forget (_, e) -> recurse e
   ;;
@@ -458,8 +459,10 @@ let rec declarations
   let set table (name : Syntax.Name.t) =
     Hashtbl.set table ~key:(canonical name) ~data:name.loc
   in
-  List.iter toplevels ~f:(fun toplevel ->
+  let rec item (toplevel : Syntax.Toplevel.t) =
     match toplevel.txt with
+    | Attributed (toplevel, _) -> item toplevel
+    | Attribute _ -> ()
     | Let (name, bindings, _, body) ->
       set t.values name;
       Hashtbl.set values ~key:(canonical name) ~data:(name, bindings, body)
@@ -491,7 +494,9 @@ let rec declarations
         ~values
         ~prefix
         (up_to_date_expansion ~up_to_date toplevel)
-    | Expect_test _ | Bench _ -> ())
+    | Expect_test _ | Bench _ -> ()
+  in
+  List.iter toplevels ~f:item
 ;;
 
 let rec files ~prefix (group : Driver.Module_group.t) =
@@ -568,7 +573,9 @@ let create
         List.iter args ~f:(Syntax_at.expr syntax));
       Syntax_at.expr syntax body
     | Module (_, toplevels) -> List.iter toplevels ~f:syntax_of_toplevel
-    | Type _ | Exception _ | External _ | Malformed_exception _ -> ()
+    | Attributed (toplevel, _) -> syntax_of_toplevel toplevel
+    | Type _ | Exception _ | External _ | Malformed_exception _ | Attribute _
+      -> ()
   in
   List.iter files ~f:(fun (_, toplevel) -> syntax_of_toplevel toplevel);
   List.iter files ~f:(fun (_, toplevel) ->

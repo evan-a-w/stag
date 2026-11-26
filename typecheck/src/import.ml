@@ -35,3 +35,4 @@ module Mode = Stag_mode
 module C_signature = Stag_ir.C_signature
 module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
 module Undo = Stag_mode.Private.Undo
+module Warning = Stag_syntax.Warning
