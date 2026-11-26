@@ -330,3 +330,29 @@ let use (u : unit) = match f 1 with *n -> n
        : Region_check.Outcome.t)];
   [%expect {| (Returned (value 2) (on_heap 1) (in_regions 2)) |}]
 ;;
+
+(* What [stack_] allocates of a part is local, and the rest of it as it would
+   be, whether or not what uses the value wants its components' modes. *)
+let%expect_test "[stack_] places each part alike, however the value is used" =
+  Mode_helpers.allocations
+    {|
+let ident x = x
+let shaped (n : int) (g : int -> int) =
+  let p = stack_ (Ptr.make n, Box.make g) in
+  match p with (a, b) -> Int.add a.* (b.* n)
+let whole (n : int) (g : int -> int) =
+  let p = ident (stack_ (Ptr.make n, Box.make g)) in
+  match p with (a, b) -> Int.add a.* (b.* n)
+|};
+  [%expect {|
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val shaped : int @ 'm0 -> ((int -> int) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val whole : int @ 'm0 -> ((int -> int) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    t.stag:4:2-5:44 Partial_application in shaped: heap, caller's region if res is local
+    t.stag:4:18-28 Pointer in shaped: region
+    t.stag:4:30-40 Box in shaped: region
+    t.stag:7:2-8:44 Partial_application in whole: heap, caller's region if res is local
+    t.stag:7:25-35 Pointer in whole: region
+    t.stag:7:37-47 Box in whole: region
+    |}]
+;;

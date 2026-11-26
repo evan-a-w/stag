@@ -169,6 +169,12 @@ val raised : (t * int) list -> (t * int) list option
     not fired, and the layouts, not known, those wait for. *)
 val lower_sources : t -> t list * Layout.t list
 
+(** Bounds: a generic node's, those its scheme gives its instances, with what
+    it adds once a layout guarding it has pointers. *)
+val scheme_lower : t -> int
+
+val scheme_upper : t -> int
+
 (** The lower bound [t] would have if the nodes but generic ones were raised to
     the points [raised] gives, by the edges added. *)
 val lower_assuming : t -> raised:(t -> int option) -> int

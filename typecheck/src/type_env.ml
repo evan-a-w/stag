@@ -1454,27 +1454,23 @@ let value_parameters t (root : Decl.t) =
 
 (* A recursive group is solved by iterating from [Bivariant] until nothing
    changes. Only the outermost declaration's result is cached, as the others'
-   depend on assumptions about it. *)
+   depend on assumptions about it. A definition its splice is still computing
+   isn't known: what depends on it takes it to be invariant, and isn't cached. *)
 let variances t =
   let assumed = String.Table.create () in
-  (* A definition its splice is still computing is taken to be invariant, and
-     what depends on it isn't cached. *)
   let complete = ref true in
   let rec lookup name =
     match name with
     | name when String.equal name Type.ptr_name ->
       Some [ Variance.Invariant; Invariant ]
     | name when String.equal name Type.box_name -> Some [ Variance.Covariant ]
-    | _ -> Option.map (Hashtbl.find t.types name) ~f:of_decl
+    | _ -> Option.bind (Hashtbl.find t.types name) ~f:of_decl
   and of_decl (decl : Decl.t) =
     match decl.variances with
-    | Some variances -> variances
+    | Some variances -> Some variances
     | None ->
-      let invariant () =
-        List.map (Decl.params decl) ~f:(fun _ -> Variance.Invariant)
-      in
       (match Hashtbl.find assumed decl.name with
-       | Some variances -> variances
+       | Some variances -> Some variances
        | None ->
          (match
             match decl.decl.kind with
@@ -1483,8 +1479,9 @@ let variances t =
           with
           | Error `Splice ->
             complete := false;
-            invariant ()
-          | Error `Failed -> invariant ()
+            None
+          | Error `Failed ->
+            Some (List.map (Decl.params decl) ~f:(fun _ -> Variance.Invariant))
           | Ok (kind, _) ->
             let outermost = Hashtbl.is_empty assumed in
             if outermost then complete := true;
@@ -1506,7 +1503,7 @@ let variances t =
             in
             Hashtbl.remove assumed decl.name;
             if outermost && !complete then decl.variances <- Some variances;
-            variances))
+            Some variances))
   in
   lookup
 ;;
@@ -1767,7 +1764,7 @@ let decide_pending t (decl : Decl.t) ~check =
   Option.iter decl.pending_layouts ~f:(fun { whole; args } ->
     decl.pending_layouts <- None;
     let reason why =
-      Mode.Reason.create
+      Mode.Reason.layout
         ~loc:decl.decl.name.loc
         (sprintf "its type turned out to be %s, %s" decl.decl.name.txt why)
     in

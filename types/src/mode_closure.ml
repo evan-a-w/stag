@@ -56,8 +56,17 @@ let create vars ~floors =
     ; raises = Mode_node.Table.create ()
     }
   in
+  (* A generic node's bound its scheme adds once a layout has pointers raises
+     what it is below. *)
+  let scheme_lowers =
+    List.concat_map vars ~f:(fun var ->
+      List.map Mode.Axis.Any.all ~f:(fun (T axis) ->
+        let node = Mode.Var.node var axis in
+        node, Mode.Var.Node.lower node))
+  in
   let floors =
     List.map floors ~f:(fun (node, point) -> solver_node t node, point)
+    @ scheme_lowers
   in
   { t with floors; base = levels t floors }
 ;;

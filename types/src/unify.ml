@@ -1068,16 +1068,23 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
   | _, TVar ({ state = Unbound _; _ } as var) when join -> bind_copy var ty1
   | TCon (name1, args1), TCon (name2, args2)
     when String.equal name1 name2 && List.length args1 = List.length args2 ->
-    let variances =
+    let known, variances =
       match Fresh.variances state.fresh name1 with
       | Some variances when List.length variances = List.length args1 ->
-        variances
-      | Some _ | None -> List.map args1 ~f:(fun _ -> Variance.Invariant)
+        true, variances
+      | Some _ | None -> false, List.map args1 ~f:(fun _ -> Variance.Invariant)
     in
-    iter2_result
-      (List.zip_exn args1 args2)
-      variances
-      ~f:(fun (arg1, arg2) (variance : Variance.t) ->
+    let unknown_variances : Unification_error.t -> Unification_error.t
+      = function
+      | (Type_mismatch (_, _, Modes error) | Bound_var error) when not known ->
+        Type_mismatch (expected, actual, Unknown_variances (name1, error))
+      | error -> error
+    in
+    Result.map_error ~f:unknown_variances
+    @@ iter2_result
+         (List.zip_exn args1 args2)
+         variances
+         ~f:(fun (arg1, arg2) (variance : Variance.t) ->
         match arg1, arg2, variance with
         | ATy lower, ATy upper, Covariant -> co ~lower ~upper
         | ATy upper, ATy lower, Contravariant -> contra ~lower ~upper

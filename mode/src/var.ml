@@ -301,8 +301,8 @@ module Node = struct
 
   let var_id = Graph.var_id
   let axis = Graph.axis
-  let lower = Graph.lower
-  let upper = Graph.upper
+  let lower = Graph.scheme_lower
+  let upper = Graph.scheme_upper
   let raised = Graph.raised
 
   module Fate = Graph.Fate

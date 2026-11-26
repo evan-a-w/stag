@@ -604,14 +604,64 @@ let cell = Ptr.make (loop ())
     {|
     pointer-free, g before: ok
     pointer-free, g after: ok
-    with pointers, g before: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:11-16), then x is passed to the function (at t.stag:6:20-31), then x is used (at t.stag:6:30-31), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:6:30-31), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6)
+    with pointers, g before: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:11-16), then x is passed to the function (at t.stag:6:20-31), then x is used (at t.stag:6:30-31), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:6:30-31)
     with pointers, g after: t.stag:8:20-31: This is regional, because it is annotated local (at t.stag:8:11-16), then x is passed to the function (at t.stag:8:20-31), then x is used (at t.stag:8:30-31), then its type turned out to be t[int], which has pointers, but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:8:30-31)
     of a pointer-free argument, g before: ok
     of a pointer-free argument, g after: ok
-    of an argument with pointers, g before: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:11-16), then x is passed to the function (at t.stag:6:20-31), then x is used (at t.stag:6:30-31), then its type turned out to be t, which has pointers when an argument that has them is (at t.stag:7:5-6), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:6:30-31), then its type turned out to be t, which has pointers when an argument that has them is (at t.stag:7:5-6)
+    of an argument with pointers, g before: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:11-16), then x is passed to the function (at t.stag:6:20-31), then x is used (at t.stag:6:30-31), then its type turned out to be t, which has pointers when an argument that has them is (at t.stag:7:5-6), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:6:30-31)
     of an argument with pointers, g after: t.stag:8:20-31: This is regional, because it is annotated local (at t.stag:8:11-16), then x is passed to the function (at t.stag:8:20-31), then x is used (at t.stag:8:30-31), then its type turned out to be t[string], which has pointers, but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:8:30-31)
     crossing in its splice, pointer_free: ok
     crossing in its splice, with_pointers: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:20-25), then x is passed to the function (at t.stag:6:29-52), then x is used (at t.stag:6:46-47), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6), but must be at most global, because it is annotated global (at t.stag:6:37-43), then it is bound by an annotated let (at t.stag:6:37-43)
     crossing in its splice, of_param: ok
+    |}]
+;;
+
+(* Its variances aren't known either: its arguments are then equated, which is
+   reported as that, rather than as their modes differing. *)
+let%expect_test "a type's variance while its splice computes it" =
+  let program ~splice =
+    [%string
+      {|let of_param = Stag.Type_decl.Kind.Variant (Cons (Box.make (("A", Cons (Box.make (Stag.Type_expr.Var "a", Nil))), Nil)))
+let h (x : t[string -> string]) : t[string -> string @ local] = x
+type t['a] = .~(%{splice})
+|}]
+  in
+  List.iter [ "of_param"; "let _ = h in of_param" ] ~f:(fun splice ->
+    printf "%s: " splice;
+    located (program ~splice));
+  [%expect {|
+    of_param: ok
+    let _ = h in of_param: t.stag:2:64-65: This expression has type t[string -> string] but an expression was expected of type t[string -> string @ local]
+    The definition of t is not known yet, as its splice is still being run, so its arguments must be equal, but their modes differ: This is local, because it is annotated local (at t.stag:2:55-60), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:2:23-29)
+    |}]
+;;
+
+(* A scheme taken while a type's layout isn't known keeps the constraints that
+   are added once it is found to have pointers: they print as any others. *)
+let%expect_test "a scheme taken while its type's splice runs" =
+  let program ~splice =
+    [%string
+      {|let of_param = Stag.Type_decl.Kind.Variant (Cons (Box.make (("A", Cons (Box.make (Stag.Type_expr.Var "a", Nil))), Nil)))
+let g (x : t[string]) = x
+let k (x : t[string]) = let y @ global = g x in y
+let i (x : t[int]) = let y @ global = x in y
+type t['a] = .~(%{splice})
+|}]
+  in
+  List.iter [ "of_param"; "let _ = k in let _ = i in of_param" ]
+    ~f:(fun splice ->
+      modes (program ~splice);
+      Mode_helpers.round_trip (program ~splice) ~show:`Quiet);
+  [%expect {|
+    val of_param : Stag.Type_decl.Kind.t
+    val g : t[string] @ 'm0 -> t[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val k : t[string] @ 'm0 -> t[string] @ 'm1 with 'm0 <= 'm1 and 'm0 <= global
+    val i : t[int] @ _ -> t[int] @ _
+    type t['a] = A of 'a
+    val of_param : Stag.Type_decl.Kind.t
+    val g : t[string] @ 'm0 -> t[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val k : t[string] @ 'm0 -> t[string] @ 'm1 with 'm0 <= 'm1 and 'm0 <= global
+    val i : t[int] @ _ -> t[int] @ _
+    type t['a] = A of 'a
     |}]
 ;;
