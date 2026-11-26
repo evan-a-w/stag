@@ -479,16 +479,12 @@ reported at the use:
   as in types. Once the code the local is in is checked, its uses are those of
   the code, refined in place like an awaiting scheme's (the local's scheme with
   them), and an error of one is reported there, once, not again at the
-  local's instances. A quote written in the local's scope (in a splice) uses
-  it as a free variable, provided where the code is spliced: the quote's uses
-  of it are instances of the local there, with instances of its uses, as
-  `c`'s in the quote would be, whether or not the code ends up spliced, and
-  even if it is where another binder provides it, which must then have a type
-  the local's instance has. As the
-  quote's free variable has one type, unlike `c`, a wrong use may then also
-  be reported at the quote's other uses of it. Capturing the local at the
-  splice makes no instance of its uses: the code's own uses of it do, where
-  it is written, or in the expansion. As for any variable a `let` generalizes, an unknown
+  local's instances. A quote's free variable is no instance of the local
+  (it is provided where the code is spliced): a splice capturing the local
+  is, as it would be once the toplevel is finished. The expansion of a
+  splice repeats the uses its quotes and captures made, so an error of one
+  of its own is shown only if no other error explains its component
+  failing. As for any variable a `let` generalizes, an unknown
   layout of such a use is decided then to have pointers: a local can be
   stricter than using the toplevel directly in code that is not generalized.
 - A component that is not generalized (see the value restriction) doesn't

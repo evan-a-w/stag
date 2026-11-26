@@ -20,6 +20,7 @@ let rec root t =
 ;;
 
 let failed t = (root t).failed
+let same t u = phys_equal (root t) (root u)
 let fail t = (root t).failed <- true
 
 let is_abandoned t =

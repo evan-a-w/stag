@@ -5,6 +5,7 @@ type t =
   ; module_ : Module_scope.t
   ; syntax_splice : Syntax_splice.t option
   ; generated : Generated.t option
+  ; expansion : bool
   }
 
 let wrap_error t error =

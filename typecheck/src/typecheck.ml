@@ -305,6 +305,7 @@ and check_toplevel_in
     ; allocations = Some sites
     ; owner = None
     ; uses = Uses.of_code program scc
+    ; expansion = false
     }
   in
   let modes = Scope.modes scope in
@@ -2147,6 +2148,7 @@ and expand
               Type_env.Annotation_vars.create
                 scope.program.type_env
                 ~rank:scope.rank
+          ; expansion = true
           }
         in
         check_expr t scope ~at ~expr:(Source.Expr.Generated generated) ~ty)
@@ -2314,7 +2316,7 @@ and substitute_entry
         t
         ~presence
         ~ty1:ty
-        ~ty2:(Uses.instantiate_captured t scope entry ~loc)
+        ~ty2:(Uses.instantiate_entry t scope entry ~loc)
       |> lift ~loc
     in
     Some entry.binder
@@ -2582,6 +2584,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; allocations = None
   ; owner = None
   ; uses = Uses.of_code program scc
+  ; expansion = false
   }
 ;;
 

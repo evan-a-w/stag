@@ -31,6 +31,7 @@ type t =
   ; uses : Local_uses.t
   (** The uses of toplevels being checked made by the code, by the innermost
       [let] whose definition is being checked. *)
+  ; expansion : bool (** See [Reporter.expansion]. *)
   }
 
 and quote =

@@ -24,6 +24,7 @@ type t =
   ; allocations : Allocation_sites.t option
   ; owner : Allocation_sites.Frame.t option
   ; uses : Local_uses.t
+  ; expansion : bool
   }
 
 and quote =
@@ -161,6 +162,7 @@ let reporter t =
   ; module_ = t.module_
   ; syntax_splice = t.syntax_splice
   ; generated = t.generated
+  ; expansion = t.expansion
   }
 ;;
 

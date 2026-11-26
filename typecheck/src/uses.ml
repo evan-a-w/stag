@@ -57,27 +57,19 @@ let quoted_use t (scope : Scope.t) (toplevel : Toplevel_binding.t) ~loc =
   ty
 ;;
 
-let add_local_instances (scope : Scope.t) ~instantiate ~loc templates =
-  List.iter templates ~f:(fun (use : Quoted_use.t) ->
-    Local_uses.add
-      scope.uses
-      (Quoted_use.local_instance
-         use
-         ~ty:(instantiate use.ty)
-         ~loc
-         ~reporter:(Scope.reporter scope)))
-;;
-
 let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
   let instantiate = Scope.instantiate ~at:loc t scope in
   match entry.binder with
   | Local ident ->
     let ty = instantiate entry.scheme in
-    add_local_instances
-      scope
-      ~instantiate
-      ~loc
-      (Local_uses.templates scope.uses ident);
+    List.iter (Local_uses.templates scope.uses ident) ~f:(fun use ->
+      Local_uses.add
+        scope.uses
+        (Quoted_use.local_instance
+           use
+           ~ty:(instantiate use.ty)
+           ~loc
+           ~reporter:(Scope.reporter scope)));
     ty
   | Toplevel ident ->
     instance
@@ -94,25 +86,6 @@ let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
              ~loc
              ~via:[]
              ~reporter:(Scope.reporter scope)))
-;;
-
-let instantiate_captured t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
-  Scope.instantiate ~at:loc t scope entry.scheme
-;;
-
-let free_use t (scope : Scope.t) (entry : Env.Entry.t) ~ty ~loc =
-  match entry.binder with
-  | Toplevel _ -> Ok ()
-  | Local ident ->
-    (match Local_uses.templates scope.uses ident with
-     | [] -> Ok ()
-     | templates ->
-       let instantiate = Scope.instantiate ~at:loc t scope in
-       let%map.Result () =
-         Unify.unify_ty t ~ty1:ty ~ty2:(instantiate entry.scheme)
-         |> Typecheck_error.lift ~loc
-       in
-       add_local_instances scope ~instantiate ~loc templates)
 ;;
 
 let use_entry
@@ -222,20 +195,15 @@ let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
       ~at
       ~why:(sprintf "%s is a free variable of the quote" name)
       ~loc;
-    let%bind.Result ty =
+    let%map.Result ty =
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
       |> Typecheck_error.lift ~loc
     in
-    let%map.Result () =
-      match unusable with
-      | None -> Ok ()
-      | Some entry ->
-        Unusable_in_quotes.record
-          ~entry:ty
-          ~name
-          { loc; var_level = entry.level; used_at = scope.level };
-        free_use t scope entry ~ty ~loc
-    in
+    Option.iter unusable ~f:(fun entry ->
+      Unusable_in_quotes.record
+        ~entry:ty
+        ~name
+        { loc; var_level = entry.level; used_at = scope.level });
     ty, Typed.Var_ref.Free name
   | Unusable kind -> Typecheck_error.error ~loc kind
 ;;

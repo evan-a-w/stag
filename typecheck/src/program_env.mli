@@ -60,15 +60,24 @@ val allocation_id : t -> Typed.Allocation.Id.t
 val report
   :  ?component:Component.t
   -> ?once:string
+  -> ?fallback:bool
   -> t
   -> Typecheck_error.t
   -> unit
 
-val report_by : t -> Reporter.t -> ?once:string -> Typecheck_error.t -> unit
+(** A [fallback] error is shown only if no other of the component is. *)
+val report_by
+  :  ?fallback:bool
+  -> t
+  -> Reporter.t
+  -> ?once:string
+  -> Typecheck_error.t
+  -> unit
 
 (** A use of a toplevel being checked, in a quote: its error is shown once,
-    however many instances of the quoting code have it. The code using it did
-    not check. *)
+    however many instances of the quoting code have it, and in an expansion,
+    only as a fallback (see [Reporter.expansion]). The code using it did not
+    check. *)
 val report_use : t -> Quoted_use.t -> Unification_error.t -> unit
 
 val errors : t -> Typecheck_error.t list
