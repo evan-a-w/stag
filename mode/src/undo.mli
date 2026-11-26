@@ -34,5 +34,10 @@ val register_scoped : set_aside:(unit -> unit -> unit) -> unit
     after the rest. *)
 val when_settled : (unit -> unit) -> unit
 
+(** Whether a cache of what [atomically] may undo can be filled now: not in
+    [permanent] under [atomically], where filling it couldn't be undone with
+    what it was computed from. *)
+val cacheable : unit -> bool
+
 (** Raises if under [atomically], for changes that can't be undone. *)
 val assert_not_atomic : string -> unit

@@ -110,6 +110,17 @@ module Link_layout = struct
       | Unbound _ | Link _ -> false)
   ;;
 
+  (* With undo, as the structure between [target] and [frontier] may be. *)
+  let set table (var : (Type.ty, Nothing.t) Type.Var.t) t =
+    let old = Hashtbl.find table var.id in
+    Mode.Private.Undo.change
+      ~undo:(fun () ->
+        match old with
+        | Some old -> Hashtbl.set table ~key:var.id ~data:old
+        | None -> Hashtbl.remove table var.id)
+      (fun () -> Hashtbl.set table ~key:var.id ~data:t)
+  ;;
+
   let find table (var : (Type.ty, Nothing.t) Type.Var.t) ~target ~frontier =
     match Hashtbl.find table var.id with
     | Some t
@@ -1765,22 +1776,22 @@ let pointer_free' t ~check root =
       let ids layouts = List.map layouts ~f:Mode.Layout.id |> Int.Set.of_list in
       (* Only what is found again from the variables is kept. *)
       if (not pending)
+         && Mode.Private.Undo.cacheable ()
          && Set.equal
               (ids mine)
               (ids (List.map depends_on ~f:(Var_layout.of_ty (layouts t))))
       then
-        Hashtbl.set
+        Link_layout.set
           t.link_layouts
-          ~key:var.id
-          ~data:
-            { target
-            ; frontier
-            ; generic = Link_layout.generic frontier
-            ; pointer_free
-            ; depends_on =
-                List.dedup_and_sort depends_on ~compare:(fun a b ->
-                  Int.compare a.Type.Var.id b.id)
-            };
+          var
+          { target
+          ; frontier
+          ; generic = Link_layout.generic frontier
+          ; pointer_free
+          ; depends_on =
+              List.dedup_and_sort depends_on ~compare:(fun a b ->
+                Int.compare a.Type.Var.id b.id)
+          };
       pointer_free
   (* Has pointers once its definition does, or an argument that has pointers
      where the definition gives it pointers. *)

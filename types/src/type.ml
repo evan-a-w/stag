@@ -334,6 +334,8 @@ module Frontier = struct
              | Link _ -> false
              | Unbound _ | Generic -> true) -> Some vars
     | Not_only_variables target' when phys_equal target target' -> None
+    | (Variables _ | Not_only_variables _ | Not_computed)
+      when not (Mode.Private.Undo.cacheable ()) -> None
     | Variables _ | Not_only_variables _ | Not_computed ->
       (* Not in place until known, so a cycle is found as not only variables. *)
       set var (Not_only_variables target);

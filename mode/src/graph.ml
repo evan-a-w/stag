@@ -1160,57 +1160,84 @@ module Above_each = struct
     ; above : Bitset.t array
     }
 
-  (* Each node's set is its own position if kept, and the sets of the nodes it
-     has edges to: the nodes are found in one search from all [sources], then
-     given their sets in the order the search finished them, which is after
-     those they lead to unless they form a cycle, so repeated until none
-     changes. *)
+  (* The nodes are found in one search from all [sources], which also gives
+     their strongly connected components (Tarjan's), each after those it leads
+     to: so each component's set, its kept nodes' positions and the sets of the
+     components it has edges to, is made in one pass. *)
   let create sources ~keep =
-    let position = Int.Table.create () in
+    let index = Int.Table.create () in
+    let low = Int.Table.create () in
+    let on_stack = Int.Hash_set.create () in
+    let component = Stack.create () in
     let finished = Queue.create () in
-    let kept = Queue.create () in
+    let components = Queue.create () in
+    let start node =
+      let at = Hashtbl.length index in
+      Hashtbl.set index ~key:node.id ~data:at;
+      Hashtbl.set low ~key:node.id ~data:at;
+      Stack.push component node;
+      Hash_set.add on_stack node.id
+    in
+    let lower node bound =
+      Hashtbl.update low node.id ~f:(fun current ->
+        Int.min (Option.value_exn current) bound)
+    in
+    let close node =
+      let rec pop members =
+        let member = Stack.pop_exn component in
+        Hash_set.remove on_stack member.id;
+        if phys_equal member node
+        then member :: members
+        else pop (member :: members)
+      in
+      Queue.enqueue components (pop [])
+    in
     let visit source =
-      let todo = Stack.singleton (source, ref source.succ) in
-      if not (Hashtbl.mem position source.id)
+      if not (Hashtbl.mem index source.id)
       then (
-        Hashtbl.set position ~key:source.id ~data:(-1);
+        start source;
+        let todo = Stack.singleton (source, ref source.succ) in
         while not (Stack.is_empty todo) do
           let node, edges = Stack.top_exn todo in
           match !edges with
           | edge :: rest ->
             edges := rest;
-            if not (Hashtbl.mem position edge.hi.id)
+            let hi = edge.hi in
+            if not (Hashtbl.mem index hi.id)
             then (
-              Hashtbl.set position ~key:edge.hi.id ~data:(-1);
-              Stack.push todo (edge.hi, ref edge.hi.succ))
+              start hi;
+              Stack.push todo (hi, ref hi.succ))
+            else if Hash_set.mem on_stack hi.id
+            then lower node (Hashtbl.find_exn index hi.id)
           | [] ->
             ignore (Stack.pop_exn todo : node * edge list ref);
-            Queue.enqueue finished node
+            Queue.enqueue finished node;
+            let node_low = Hashtbl.find_exn low node.id in
+            Option.iter (Stack.top todo) ~f:(fun (parent, _) ->
+              lower parent node_low);
+            if node_low = Hashtbl.find_exn index node.id then close node
         done)
     in
     List.iter sources ~f:visit;
-    let finished = Queue.to_array finished in
-    Array.iter finished ~f:(fun node ->
+    let position = Int.Table.create () in
+    let kept = Queue.create () in
+    Queue.iter finished ~f:(fun node ->
       if keep node
       then (
         Hashtbl.set position ~key:node.id ~data:(Queue.length kept);
         Queue.enqueue kept node));
     let kept = Queue.to_array kept in
     let sets = Int.Table.create () in
-    Array.iter finished ~f:(fun node ->
+    Queue.iter components ~f:(fun members ->
       let set = Bitset.create (Array.length kept) in
-      let at = Hashtbl.find_exn position node.id in
-      if at >= 0 then Bitset.add set at;
-      Hashtbl.set sets ~key:node.id ~data:set);
-    let changed = ref true in
-    while !changed do
-      changed := false;
-      Array.iter finished ~f:(fun node ->
-        let set = Hashtbl.find_exn sets node.id in
-        List.iter node.succ ~f:(fun edge ->
-          if Bitset.union set (Hashtbl.find_exn sets edge.hi.id)
-          then changed := true))
-    done;
+      List.iter members ~f:(fun member ->
+        Option.iter (Hashtbl.find position member.id) ~f:(Bitset.add set));
+      List.iter members ~f:(fun member ->
+        List.iter member.succ ~f:(fun edge ->
+          Option.iter (Hashtbl.find sets edge.hi.id) ~f:(fun above ->
+            ignore (Bitset.union set above : bool))));
+      List.iter members ~f:(fun member ->
+        Hashtbl.set sets ~key:member.id ~data:set));
     { kept
     ; above =
         Array.of_list_map sources ~f:(fun source ->
