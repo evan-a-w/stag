@@ -105,7 +105,7 @@ let create () =
   }
 ;;
 
-let count t var ~(side : [ `Arg | `Res | `Mode_arg ]) =
+let count t var ~(side : [ `Arg | `Res | `Res_at | `Mode_arg ]) =
   let id = Mode.Var.id var in
   Hashtbl.set t.vars ~key:id ~data:var;
   (match side with
@@ -113,6 +113,7 @@ let count t var ~(side : [ `Arg | `Res | `Mode_arg ]) =
    | `Res ->
      Hash_set.add t.on_arrows id;
      Hash_set.add t.results id
+   | `Res_at -> Hash_set.add t.results id
    | `Mode_arg -> ());
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);

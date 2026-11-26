@@ -607,6 +607,10 @@ let sum = (Int.add 1 2 : int @ portable)    (* val sum : int = 3 *)
    modes, this is just string -> string). *)
 let same (x : string @ 'm) : string @ 'm = x
 
+(* A locality with a mode variable fixes the locality, the variable giving
+   the stage and provenance: a cache's comparison is ['k @ local 'p -> ...]. *)
+let first_len (f : string @ local 'm -> int) (s : string @ 'm) = f s
+
 (* `with` bounds variables (written results are at least portable). *)
 let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let ok = capped 1                   (* val ok : int = 1 *)
@@ -764,8 +768,9 @@ parameter is the provenance of the keys and values held: a map of GC
 strings is also one of possibly external strings (it is covariant), but a
 cache, being mutable, is invariant. What they build goes where the caller
 wants it, as their builders return it with `exclave_`, and `int` values
-cross every axis. A comparison takes keys of any provenance, as
-`Core.String.compare` does. A pair's components keep their own modes, so
+cross every axis. A comparison takes keys of the map's or cache's
+provenance: `Core.String.compare` takes any, while one only for GC keys
+suits only a GC map or cache. A pair's components keep their own modes, so
 `concat` can match `(l, r)` without either map's mode constraining the
 other's.
 A value used at compile time and lifted into code must be `portable`, and

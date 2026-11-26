@@ -2629,7 +2629,7 @@ let prim_partial ty ~args =
       then (
         match modes.res with
         | Var var -> Some var
-        | Fixed _ -> None)
+        | Fixed _ | Var_at _ -> None)
       else go res (args - 1)
     | _ -> None
   in

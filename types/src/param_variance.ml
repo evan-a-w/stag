@@ -54,9 +54,9 @@ let compute ~con ~params (kind : Signature.Type_decl.Kind.t) =
       ty contra arg;
       ty variance res;
       let side variance (side : Arrow_modes.Side.t) =
-        match side with
-        | Var var -> mode_var variance var
-        | Fixed _ -> ()
+        match Arrow_modes.Side.var side with
+        | Some var -> mode_var variance var
+        | None -> ()
       in
       side contra modes.arg;
       side variance modes.res;

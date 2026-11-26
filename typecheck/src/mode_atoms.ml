@@ -45,3 +45,14 @@ let declared ~(default : Mode.Const.t) atoms ~loc =
      | Const -> Ok { const with provenance = Static }
      | Portable | Nonportable -> Ok const)
 ;;
+
+let locality : Syntax.Mode_expr.Atom.t -> Mode.Locality.t = function
+  | Global -> Global
+  | Regional -> Regional
+  | Local -> Local
+  | (Const | Portable | Nonportable | Static | Gc | External) as atom ->
+    raise_s
+      [%message
+        "not a locality, as written with a mode variable"
+          (atom : Syntax.Mode_expr.Atom.t)]
+;;

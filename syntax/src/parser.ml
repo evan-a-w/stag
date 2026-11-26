@@ -287,16 +287,51 @@ let starts_external t =
   | _ -> false
 ;;
 
-(** [@ 'm] or [@ local portable], after the [@]. *)
+(** [@ 'm], [@ local portable] or [@ local 'm], after the [@]. *)
 let mode_expr t : Mode_expr.t =
   let start = loc t in
+  let starts_var t =
+    match peek t with
+    | Underscore | Tyvar _ | Weak_tyvar _ -> true
+    | _ -> false
+  in
+  let var t =
+    match peek t with
+    | Underscore ->
+      advance t;
+      "_"
+    | _ -> (tyvar t).txt
+  in
+  (* A mode after the variable would be an axis it already gives. *)
+  let no_atom_after t ~var =
+    match peek t with
+    | Lident name when not (String.equal name "and") ->
+      (match Mode_expr.Atom.of_string name with
+       | Some atom ->
+         fail
+           (loc t)
+           (match Mode_expr.Atom.axis atom with
+            | Locality ->
+              sprintf
+                "a locality comes before the mode variable, as in `%s %s`"
+                name
+                (Mode_expr.var_to_string var)
+            | Stage | Provenance ->
+              sprintf
+                "the mode variable `%s` already gives the %s"
+                (Mode_expr.var_to_string var)
+                (Mode_expr.Axis.to_string (Mode_expr.Atom.axis atom)))
+       | None -> ())
+    | Tyvar _ | Weak_tyvar _ | Underscore ->
+      fail (loc t) "a mode has at most one mode variable"
+    | _ -> ()
+  in
   match peek t with
-  | Underscore ->
-    advance t;
-    since t start (Mode_expr.Var "_")
-  | Tyvar _ | Weak_tyvar _ ->
-    let var = tyvar t in
-    located ~loc:var.loc (Mode_expr.Var var.txt)
+  | Underscore | Tyvar _ | Weak_tyvar _ ->
+    let var = var t in
+    let mode = since t start (Mode_expr.Var var) in
+    no_atom_after t ~var;
+    mode
   | Lident _ | External ->
     let rec loop acc =
       match peek t with
@@ -337,7 +372,21 @@ let mode_expr t : Mode_expr.t =
       | _ -> List.rev acc
     in
     let atoms = loop [] in
-    since t start (Mode_expr.Atoms atoms)
+    if not (starts_var t)
+    then since t start (Mode_expr.Atoms atoms)
+    else (
+      match atoms with
+      | [ atom ] when Mode_expr.Axis.equal (Mode_expr.Atom.axis atom) Locality
+        ->
+        let var = var t in
+        let mode = since t start (Mode_expr.Var_at (atom, var)) in
+        no_atom_after t ~var;
+        mode
+      | _ ->
+        fail
+          (loc t)
+          "only a locality may be written with a mode variable, as in `local \
+           'm`: the variable gives the stage and provenance")
   | _ -> expected t "a mode like `local`, or a mode variable like `'m`"
 ;;
 

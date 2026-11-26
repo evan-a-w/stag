@@ -96,20 +96,18 @@ module Make (B : Builder) = struct
 
   let no_antiquote _ _ = None
 
+  let mode_atom atom =
+    con
+      ("Stag.Mode_expr.Atom." ^ Sexp.to_string (Mode_expr.Atom.sexp_of_t atom))
+      []
+  ;;
+
   let mode_expr ({ txt; loc = _ } : Mode_expr.t) =
     match txt with
     | Var var -> con "Stag.Mode_expr.Var" [ B.string var ]
-    | Atoms atoms ->
-      con
-        "Stag.Mode_expr.Atoms"
-        [ list
-            (fun atom ->
-              con
-                ("Stag.Mode_expr.Atom."
-                 ^ Sexp.to_string (Mode_expr.Atom.sexp_of_t atom))
-                [])
-            atoms
-        ]
+    | Atoms atoms -> con "Stag.Mode_expr.Atoms" [ list mode_atom atoms ]
+    | Var_at (locality, var) ->
+      con "Stag.Mode_expr.Var_at" [ mode_atom locality; B.string var ]
   ;;
 
   let mode_axis (axis : Mode_expr.Axis.t) =
@@ -123,15 +121,7 @@ module Make (B : Builder) = struct
     match term with
     | Mode m -> con "Mode" [ mode_expr m ]
     | Axis (axis, m) -> con "Axis" [ mode_axis axis; mode_expr m ]
-    | Meet (t, atom) ->
-      con
-        "Meet"
-        [ mode_term t
-        ; con
-            ("Stag.Mode_expr.Atom."
-             ^ Sexp.to_string (Mode_expr.Atom.sexp_of_t atom))
-            []
-        ]
+    | Meet (t, atom) -> con "Meet" [ mode_term t; mode_atom atom ]
     | Release t -> con "Release" [ mode_term t ]
     | Static_if_const t -> con "Static_if_const" [ mode_term t ]
     | Const_if_static t -> con "Const_if_static" [ mode_term t ]

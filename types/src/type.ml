@@ -803,6 +803,9 @@ let sexp_of_modes ({ arg; res; curry = _ } : Arrow_modes.t) =
     | Fixed const when Mode.Const.equal const Arrow_modes.default_const -> []
     | Fixed const -> [ [%sexp (name : string), (const : Mode.Const.t)] ]
     | Var _ -> []
+    | Var_at { locality = Global; _ } -> []
+    | Var_at { locality; _ } ->
+      [ [%sexp (name : string), (locality : Mode.Locality.t)] ]
   in
   side "arg" arg @ side "res" res
 ;;
@@ -1235,10 +1238,26 @@ module Printer = struct
     | atoms -> Some (String.concat ~sep:" " atoms)
   ;;
 
+  let locality_atom locality =
+    Sexp.to_string (Mode.Locality.sexp_of_t locality) |> String.lowercase
+  ;;
+
+  (* A [Var_at] side's atoms, where modes aren't printed in full: its locality
+     unless [global], and [external] if it is known to be. *)
+  let var_at_atoms var locality =
+    (if Mode.Locality.equal locality Global
+     then []
+     else [ locality_atom locality ])
+    @
+    if Mode.Provenance.equal (Mode.Var.lower var).provenance External
+    then [ "external" ]
+    else []
+  ;;
+
   (* A side's variable printed as the constant it is fixed to, as [Fixed]. *)
   let effective t (side : Arrow_modes.Side.t) : Arrow_modes.Side.t =
-    match side, t.modes, t.counting with
-    | Var var, Some modes, None ->
+    match Arrow_modes.Side.var side, t.modes, t.counting with
+    | Some var, Some modes, None ->
       (match Mode_printing.side modes var with
        | `Name _ -> side
        | `Atoms atoms ->
@@ -1249,9 +1268,13 @@ module Printer = struct
          Fixed
            { stage = Mode.Stage.of_index_exn (point (T Stage))
            ; provenance = Mode.Provenance.of_index_exn (point (T Provenance))
-           ; locality = Mode.Locality.of_index_exn (point (T Locality))
+           ; locality =
+               (match side with
+                | Var_at { locality; _ } -> locality
+                | Fixed _ | Var _ ->
+                  Mode.Locality.of_index_exn (point (T Locality)))
            })
-    | (Var _ | Fixed _), _, _ -> side
+    | (Some _ | None), _, _ -> side
   ;;
 
   let is_default_side t side =
@@ -1262,6 +1285,11 @@ module Printer = struct
     | Var var ->
       (match t.modes with
        | None -> (not t.declaration) && Option.is_none (lower_atoms var)
+       | Some _ -> false)
+    | Var_at { var; locality } ->
+      (match t.modes with
+       | None ->
+         (not t.declaration) && List.is_empty (var_at_atoms var locality)
        | Some _ -> false)
   ;;
 
@@ -1283,11 +1311,45 @@ module Printer = struct
          Option.value_map (lower_atoms var) ~default:"" ~f:(fun atom ->
            " @ " ^ atom)
        | Some modes, Some _ ->
-         Mode_printing.count modes var ~side:position;
+         Mode_printing.count
+           modes
+           var
+           ~side:
+             (match position with
+              | `Arg -> `Arg
+              | `Res -> `Res);
          " @ _"
        | Some modes, None ->
          (match Mode_printing.side modes var with
           | `Name name -> " @ " ^ name
+          | `Atoms _ -> assert false))
+    | Var_at { var; locality } ->
+      (* In a declaration, a mode parameter alone is [global]. *)
+      let at name =
+        " @ "
+        ^ (if t.declaration && Mode.Locality.equal locality Global
+           then ""
+           else locality_atom locality ^ " ")
+        ^ name
+      in
+      (match t.modes, t.counting with
+       | None, _ when t.declaration -> at (mode_var_name t var)
+       | None, _ ->
+         (match var_at_atoms var locality with
+          | [] -> ""
+          | atoms -> " @ " ^ String.concat ~sep:" " atoms)
+       | Some modes, Some _ ->
+         Mode_printing.count
+           modes
+           var
+           ~side:
+             (match position with
+              | `Arg -> `Mode_arg
+              | `Res -> `Res_at);
+         at "_"
+       | Some modes, None ->
+         (match Mode_printing.side modes var with
+          | `Name name -> at name
           | `Atoms _ -> assert false))
   ;;
 
@@ -1349,6 +1411,7 @@ module Printer = struct
     match effective t side with
     | Fixed const -> const.locality
     | Var var -> (Mode.Var.lower var).locality
+    | Var_at { locality; _ } -> locality
   ;;
 
   (* A declared curried arrow's result defaults to as local as the arguments
@@ -1360,6 +1423,9 @@ module Printer = struct
     match effective t side, t.modes with
     | Var _, Some _ -> false
     | Var _, None | Fixed _, _ -> true
+    (* Its locality is written, or, a mode parameter's, is [global] anyway. *)
+    | Var_at _, Some _ -> false
+    | Var_at _, None -> not t.declaration
   ;;
 
   let rec ty_to_string ?curried t ~prec ty =
@@ -1416,7 +1482,7 @@ module Printer = struct
           (* As read back: a named argument adds nothing to the default. *)
           (match effective t modes.arg, t.modes with
            | Var _, Some _ -> curried
-           | (Fixed _ | Var _), _ ->
+           | (Fixed _ | Var _ | Var_at _), _ ->
              Mode.Locality.join curried (side_locality t modes.arg))
         | _ -> Global
       in

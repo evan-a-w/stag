@@ -231,19 +231,10 @@ let reopen t ~rank = List.iter (nodes t) ~f:(Graph.reopen ~rank)
 
 (* A type's parameters are made when first needed, which may be under
    [atomically]. *)
-let create_generic ?at_most ids =
+let create_generic ids =
   let id = Id_source.next ids in
-  let uppers =
-    match at_most with
-    | None -> []
-    | Some (const, reason) ->
-      List.filter_map Axis.Any.all ~f:(fun (T axis as any) ->
-        let point = index axis (Const.get const axis) in
-        Option.some_if (point < Axis.Any.size any - 1) (any, point, reason))
-  in
   let node =
     Graph.create_generic
-      ~uppers
       ~var_id:id
       [ T Stage; T Provenance; T Locality ]
       ~edges:(fun node ->

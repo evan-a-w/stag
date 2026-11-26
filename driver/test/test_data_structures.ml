@@ -58,8 +58,8 @@ let%expect_test "signatures" =
     module Lru : sig
       type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0] @@ 'm0]
       type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-      type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ external local -> ('a @ external local -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0] @@ 'm0], 'm0] @@ 'm0]; first : ptr[link['a, 'b, 'm0] @@ 'm0]; last : ptr[link['a, 'b, 'm0] @@ 'm0]; size : ptr[int] }
-      val create : int @ 'm0 -> (('a @ external local -> ('a @ external local -> int) @ external local) @ 'm2 -> t['a, 'b, _] @ 'm3) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and nonportable gc <= 'm3 and gc <= 'm1
+      type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0] @@ 'm0], 'm0] @@ 'm0]; first : ptr[link['a, 'b, 'm0] @@ 'm0]; last : ptr[link['a, 'b, 'm0] @@ 'm0]; size : ptr[int] }
+      val create : int @ 'm0 -> (('a @ local 'm3 -> ('a @ local 'm3 -> int) @ external local) @ 'm2 -> t['a, 'b, 'm3] @ 'm4) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm4 and release(locality('m2)) <= locality('m4) and nonportable gc <= 'm4 and gc <= 'm1
       val length : t['a, 'b, _] @ _ -> int @ _
       module Internal : sig
         val unlink : t['a, 'b, 'm1] @ 'm0 -> (ptr[entry['a, 'b, 'm1] @@ 'm3] @ _ -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and gc <= 'm2
@@ -67,10 +67,10 @@ let%expect_test "signatures" =
         val use : t['a, 'b, 'm1] @ 'm0 -> (ptr[entry['a, 'b, 'm1] @@ 'm1] @ 'm3 -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
         val evict_last : t['a, 'b, 'm0] @ _ -> unit @ _ with gc <= 'm0
       end
-      val find : t['a, 'b, 'm1] @ 'm0 -> ('a @ _ -> option['b] @ 'm3) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3 and gc <= 'm2
+      val find : t['a, 'b, 'm1] @ 'm0 -> ('a @ 'm3 -> option['b] @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm4 and stage('m3) <= stage('m1) and provenance('m3) <= provenance('m1) and gc <= 'm2
       val add : t['a, 'b, 'm1] @ 'm0 -> ('a @ 'm3 -> ('b @ 'm5 -> unit @ _) @ 'm4) @ 'm2 with 'm0 <= 'm4 and 'm0 <= 'm2 and nonportable gc <= 'm1 and 'm3 <= 'm1 and 'm3 <= 'm4 and 'm3 <= global and 'm5 <= 'm1 and 'm5 <= global and gc <= 'm4 and gc <= 'm2
-      val mem : t['a, 'b, _] @ 'm0 -> ('a @ _ -> bool @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-      val remove : t['a, 'b, 'm1] @ 'm0 -> ('a @ _ -> unit @ _) @ 'm2 with 'm0 <= 'm2 and gc <= 'm1 and gc <= 'm2
+      val mem : t['a, 'b, 'm1] @ 'm0 -> ('a @ 'm3 -> bool @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and gc <= 'm2
+      val remove : t['a, 'b, 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ _) @ 'm2 with 'm0 <= 'm2 and gc <= 'm1 and 'm3 <= 'm1 and gc <= 'm2
       val clear : t['a, 'b, _] @ _ -> unit @ _
       val to_list : t['a, 'b, 'm0] @ _ -> list['a * 'b] @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     end
@@ -198,10 +198,9 @@ let gc_compare (a @ gc) (b @ gc) = Core.String.compare a b
 let exts : Core.Map.t[string, int, external] = Core.Map.empty
 let found = Core.Map.find gc_compare exts "k"
 |}
-      (* A cache keeps its comparison for any key, so of any provenance. *)
     ; {|
 let gc_compare (a @ gc) (b @ gc) = Core.String.compare a b
-let gcs : Core.Lru.t[string, int, gc] = Core.Lru.create 1 gc_compare
+let exts_lru : Core.Lru.t[string, int, external] = Core.Lru.create 1 gc_compare
 |}
     ; {|
 let exts_lru : Core.Lru.t[string, int, external] = Core.Lru.create 1 Core.String.compare
@@ -219,8 +218,8 @@ let read (u : unit) =
     Their modes differ: This is external, because it is annotated external (at t.stag:2:31-39), then e is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:50-59), then it is passed to a function (at t.stag:5:2-59), then a function is used at a type with other modes, then k is passed to the function (at <core>/map.stag:160:2-170:66), then k is used (at <core>/map.stag:166:38-39), then it is held by a field or argument with a modality (at <core>/map.stag:166:38-39), then a type is used at one with another mode, but must be at most gc, because a type is used at one with another mode
     This expression has type Core.Map.t[string, int, external] but an expression was expected of type Core.Map.t[string, int, 'm0]
     Their modes differ: This is external, because a type is used at one with another mode, but must be at most gc, because it is annotated gc (at t.stag:4:29-31), then a function is used at a type with other modes, then it is passed to a function (at <core>/map.stag:176:18-30), then k2 is used (at <core>/map.stag:176:28-30), then it is bound to a part (at <core>/map.stag:175:27-29), then the types are unified
-    This expression has type string -> int but an expression was expected of type string @ external local -> int
-    Their modes differ: This is external, because a function type fixes it, as a function is used at a type with other modes, but must be at most gc, because it is annotated gc (at t.stag:4:29-31)
+    This expression has type string -> int but an expression was expected of type string @ local external -> int
+    Their modes differ: This is external, because the types are unified, then a function is used at a type with other modes, but must be at most gc, because it is annotated gc (at t.stag:4:29-31)
     This is external, because the types are unified, then it is read from a pointer's cell, which may hold it (at <core>/lru.stag:133:35-41), then it is dereferenced (at <core>/lru.stag:133:35-41), then its field is read (at <core>/lru.stag:133:35-47), then it is held (at <core>/lru.stag:133:35-47), then it is held (at <core>/lru.stag:133:22-48), then it is passed to a function (at <core>/lru.stag:133:11-68), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes, then the function returns it (at <core>/lru.stag:133:11-68), then it is held (at <core>/lru.stag:133:11-68), then the function returns it (at <core>/lru.stag:130:4-133:68), then a function is used at a type with other modes, then the function returns it (at <core>/lru.stag:135:2-16), then the function returns it (at <core>/lru.stag:129:2-135:16), then a function is used at a type with other modes, then the function returns it (at t.stag:7:8-33), then b is used (at t.stag:8:21-22), then it is dereferenced (at t.stag:8:21-24), then k is used (at t.stag:8:55-56), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:8:55-56)
     |}]
 ;;
@@ -440,7 +439,7 @@ let read (u : unit) =
     This expression has type Core.Lru.t[string, string, gc] but an expression was expected of type Core.Lru.t[string, string, external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
     This is external, because it is annotated external (at t.stag:2:31-39), then e is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:43-52), then it is passed to a function (at t.stag:5:22-52), but must be at most gc, because the types are unified, then Ptr.make holds it, then a function is used at a type with other modes, then it is passed to a function (at <core>/lru.stag:102:15-68), then it is held (at <core>/lru.stag:102:42-43), then v is used (at <core>/lru.stag:102:42-43), then v is passed to the function (at <core>/lru.stag:97:2-108:17), then a function is used at a type with other modes
-    This is external, because it is annotated external (at t.stag:2:31-39), then e is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-48), then it is passed to a function (at t.stag:5:22-48), but must be at most gc, because the types are unified, then a type is used at one with another mode, then it is held by a field or argument with a modality (at <core>/map.stag:166:38-39), then k is used (at <core>/map.stag:166:38-39), then k is passed to the function (at <core>/map.stag:160:2-170:66), then a function is used at a type with other modes, then it is passed to a function (at <core>/lru.stag:104:17-46), then k is used (at <core>/lru.stag:104:45-46), then k is passed to the function (at <core>/lru.stag:97:2-108:17), then a function is used at a type with other modes
+    This is external, because it is annotated external (at t.stag:2:31-39), then e is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-48), then it is passed to a function (at t.stag:5:22-48), but must be at most gc, because the types are unified, then a function is used at a type with other modes, then it is passed to a function (at <core>/map.stag:163:18-27), then k is used (at <core>/map.stag:163:26-27), then k is passed to the function (at <core>/map.stag:160:2-170:66), then a function is used at a type with other modes, then it is passed to a function (at <core>/lru.stag:104:17-46), then k is used (at <core>/lru.stag:104:45-46), then k is passed to the function (at <core>/lru.stag:97:2-108:17), then a function is used at a type with other modes
     This is external, because the types are unified, then it is read from a pointer's cell, which may hold it (at <core>/lru.stag:92:9-15), then it is dereferenced (at <core>/lru.stag:92:9-15), then its field is read (at <core>/lru.stag:92:9-21), then it is held (at <core>/lru.stag:92:9-21), then the function returns it (at <core>/lru.stag:88:2-92:21), then a function is used at a type with other modes, then the function returns it (at t.stag:7:8-30), then s is used (at t.stag:8:24-25), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:8:24-25)
     |}]
 ;;
@@ -472,5 +471,32 @@ let leaks (u : unit) = region_ (let c @ local = Core.Lru.create 2 Core.Int.compa
     {|
     This is local, because it is annotated local (at t.stag:8:40-45), then c is used (at t.stag:8:86-87), then the [region_] returns it (at t.stag:8:31-88), then the [region_] gives it (at t.stag:8:23-88), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:8:23-88)
     This is local, because it is annotated local (at t.stag:8:40-45), then c is used (at t.stag:8:86-87), but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) (at t.stag:8:31-88)
+    |}]
+;;
+
+let%expect_test "a cache's comparison takes keys of its provenance" =
+  check
+    (ext
+     ^ {|
+let gc_compare (a @ gc) (b @ gc) = Core.String.compare a b
+let gcs : Core.Lru.t[string, int, gc] = Core.Lru.create 1 gc_compare
+let any_gcs : Core.Lru.t[string, int, gc] = Core.Lru.create 1 Core.String.compare
+let any_exts : Core.Lru.t[string, int, external] =
+  Core.Lru.create 1 Core.String.compare
+let fill (u : unit) =
+  Core.Lru.add gcs "k" 1;
+  Core.Lru.add any_gcs "k" 1;
+  Core.Lru.add any_exts (ext "k") 1;
+  (Core.Lru.find gcs "k", Core.Lru.find any_exts "k")
+|}
+    );
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val gc_compare : string @ 'm0 -> (string @ 'm2 -> int @ _) @ 'm1 with gc <= 'm0 and 'm0 <= 'm1 and 'm0 <= gc and gc <= 'm2 and 'm2 <= gc
+    val gcs : Core.Lru.t[string, int, gc]
+    val any_gcs : Core.Lru.t[string, int, gc]
+    val any_exts : Core.Lru.t[string, int, external]
+    val fill : unit @ _ -> option[int] * option[int] @ _
     |}]
 ;;

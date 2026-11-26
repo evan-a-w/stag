@@ -497,15 +497,6 @@ module Of_value = struct
         | _ -> raise Bad_arguments)
 
   and mode_expr value ~loc : Mode_expr.t =
-    let atom value =
-      variant
-        "Stag.Mode_expr.Atom.t"
-        value
-        ~f:(fun constructor args : Mode_expr.Atom.t ->
-          match Args.count args with
-          | 0 -> Mode_expr.Atom.t_of_sexp (Atom constructor)
-          | _ -> raise Bad_arguments)
-    in
     Located.create
       ~loc
       (variant
@@ -517,7 +508,7 @@ module Of_value = struct
            | "Var", 1 -> Var (arg 0 (ident Tyvar))
            | "Atoms", 1 ->
              arg 0 (fun value : Mode_expr.desc ->
-               let atoms = list atom value in
+               let atoms = list mode_atom value in
                if List.is_empty atoms
                   || List.contains_dup
                        (List.map atoms ~f:Mode_expr.Atom.axis)
@@ -527,6 +518,15 @@ module Of_value = struct
                    ~expected:"atoms of distinct axes, at least one"
                    value
                else Atoms atoms)
+           | "Var_at", 2 ->
+             let locality =
+               arg 0 (fun value ->
+                 let atom = mode_atom value in
+                 match Mode_expr.Atom.axis atom with
+                 | Locality -> atom
+                 | Stage | Provenance -> unexpected ~expected:"a locality" value)
+             in
+             Var_at (locality, arg 1 (ident Tyvar))
            | _ -> raise Bad_arguments))
 
   and row ~(labels : Ident_kind.t) value ~loc : Type_expr.row =

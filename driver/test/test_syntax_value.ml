@@ -82,7 +82,7 @@ let%expect_test "the prelude's signature" =
         module Atom : sig
           type t = Const | Portable | Nonportable | Static | Gc | External | Global | Regional | Local
         end
-        type t = Var of string | Atoms of list[Atom.t]
+        type t = Var of string | Atoms of list[Atom.t] | Var_at of Atom.t * string
         module Term : sig
           type t = Mode of Mode_expr.t | Axis of Axis.t * Mode_expr.t | Meet of ptr[t * Atom.t] | Release of ptr[t] | Static_if_const of ptr[t] | Const_if_static of ptr[t]
         end
@@ -271,8 +271,8 @@ let%expect_test "the prelude's signature" =
       module Lru : sig
         type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
         type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ external local -> ('a @ external local -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
-        val create : int -> ('a @ external local -> ('a @ external local -> int) @ external local) -> t['a, 'b, 'm0]
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ external local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        val create : int -> ('a @ local -> ('a @ local -> int) @ external local) -> t['a, 'b, 'm0]
         val length : t['a, 'b, 'm0] -> int
         module Internal : sig
           val unlink : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
@@ -805,7 +805,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 121)
+    ((constructors 122)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Region
        prelude.Stag.Expr.Store prelude.Stag.Mode_expr.Atom.External
@@ -816,11 +816,12 @@ let%expect_test "constructors are made as the typechecker resolves them" =
        prelude.Stag.Mode_expr.Term.Axis
        prelude.Stag.Mode_expr.Term.Const_if_static
        prelude.Stag.Mode_expr.Term.Meet prelude.Stag.Mode_expr.Term.Release
-       prelude.Stag.Mode_expr.Term.Static_if_const prelude.Stag.Pattern.Deref
-       prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_decl.Param.Mode prelude.Stag.Type_expr.Arg.Mode
-       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Mode_expr.Term.Static_if_const prelude.Stag.Mode_expr.Var_at
+       prelude.Stag.Pattern.Deref prelude.Stag.Toplevel.External
+       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_decl.Param.Mode
+       prelude.Stag.Type_expr.Arg.Mode prelude.Stag.Type_ref.Path.Prelude
+       prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;

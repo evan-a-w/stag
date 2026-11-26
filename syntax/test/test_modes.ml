@@ -457,3 +457,46 @@ let%expect_test "modalities on type arguments" =
     }
     |}]
 ;;
+
+let%expect_test "a locality with a mode variable" =
+  ty "'a @ local 'm -> ('a @ local 'm -> int) @ regional 'n";
+  ty "'a @ global _ -> 'a";
+  prog "let f (x @ local 'm) : int @ global 'n = x";
+  prog "type t['p : mode] = { f : string @ local 'p -> int }";
+  print
+    "type t['p : mode] = { f : string @ local 'p -> (int @ local 'p -> int) @ \
+     global 'p }";
+  ty "'a @ local 'm 'n -> 'a";
+  ty "'a @ 'm local -> 'a";
+  ty "'a @ portable 'm -> 'a";
+  ty "'a @ local gc 'm -> 'a";
+  ty "'a @ local local 'm -> 'a";
+  prog "let f (x : int @ 'm) : int @ 'n with local 'm <= 'n = x";
+  prog
+    "let f (x : int @ 'm) : int @ 'n with locality(local 'm) <= locality('n) = \
+     x";
+  [%expect
+    {|
+    (Arrow (Moded (Var a) (Var_at Local m))
+     (Moded (Arrow (Moded (Var a) (Var_at Local m)) (Con int ()))
+      (Var_at Regional n)))
+    (Arrow (Moded (Var a) (Var_at Global _)) (Var a))
+    ((Let f ((x ((mode (Var_at Local m)))))
+      ((ty (Con int ())) (mode (Var_at Global n))) (Var x ())))
+    ((Type
+      ((name t) (params ((Mode p)))
+       (kind
+        (Record
+         ((f (Arrow (Moded (Con string ()) (Var_at Local p)) (Con int ())))))))))
+    type t['p : mode] = {
+      f : string @ local 'p -> (int @ local 'p -> int) @ global 'p;
+    }
+    t.stag:1:14-16: a mode has at most one mode variable
+    t.stag:1:8-13: a locality comes before the mode variable, as in `local 'm`
+    t.stag:1:14-16: only a locality may be written with a mode variable, as in `local 'm`: the variable gives the stage and provenance
+    t.stag:1:14-16: only a locality may be written with a mode variable, as in `local 'm`: the variable gives the stage and provenance
+    t.stag:1:11-16: `local` and `local` are both locality modes
+    t.stag:1:37-51: a constraint relates whole variables or axes, as in `'m <= 'n` or `locality('m) <= locality('n)`: a locality with a variable, as in `local 'm`, is only the mode of a type or binding
+    t.stag:1:37-71: a constraint relates whole variables or axes, as in `'m <= 'n` or `locality('m) <= locality('n)`: a locality with a variable, as in `local 'm`, is only the mode of a type or binding
+    |}]
+;;

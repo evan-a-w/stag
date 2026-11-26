@@ -8,6 +8,23 @@ module Side : sig
     (** As in declarations and builtins, whose arrows are not polymorphic in
         their modes. *)
     | Var of Mode.Var.t
+    | Var_at of
+        { var : Mode.Var.t
+        ; locality : Mode.Locality.t
+        }
+    (** The variable's stage and provenance, and a fixed locality: as written
+        [@ local 'm], or a declaration's mode parameter, [@ 'p], whose locality
+        is [global]. *)
+
+  val var : t -> Mode.Var.t option
+
+  module On_axis : sig
+    type 'a t =
+      | Point of 'a
+      | Var of Mode.Var.t
+  end
+
+  val on_axis : t -> 'a Mode.Axis.t -> 'a On_axis.t
 end
 
 type t =

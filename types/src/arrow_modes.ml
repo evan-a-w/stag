@@ -4,6 +4,29 @@ module Side = struct
   type t =
     | Fixed of Mode.Const.t
     | Var of Mode.Var.t
+    | Var_at of
+        { var : Mode.Var.t
+        ; locality : Mode.Locality.t
+        }
+
+  let var = function
+    | Fixed _ -> None
+    | Var var | Var_at { var; _ } -> Some var
+  ;;
+
+  module On_axis = struct
+    type 'a t =
+      | Point of 'a
+      | Var of Mode.Var.t
+  end
+
+  let on_axis (type a) t (axis : a Mode.Axis.t) : a On_axis.t =
+    match t, axis with
+    | Fixed const, _ -> Point (Mode.Const.get const axis)
+    | Var var, _ -> Var var
+    | Var_at { locality; _ }, Locality -> Point locality
+    | Var_at { var; _ }, (Stage | Provenance) -> Var var
+  ;;
 end
 
 type t =
@@ -51,21 +74,24 @@ let curry_reason =
 
 let equate_side (side1 : Side.t) (side2 : Side.t) ~reason =
   match side1, side2 with
-  | Fixed const1, Fixed const2 ->
-    let on axis =
-      Mode.Error.equal_on
-        axis
-        (Mode.Const.get const1 axis)
-        (Mode.Const.get const2 axis)
-        reason
-    in
-    let%bind.Result () = on Stage in
-    let%bind.Result () = on Provenance in
-    on Locality
   | Var var, Fixed const | Fixed const, Var var ->
     let%bind.Result () = Mode.Var.at_least_const var const fixed_reason in
     Mode.Var.at_most_const var const fixed_reason
   | Var var1, Var var2 -> Mode.Var.equate var1 var2 reason
+  | (Fixed _ | Var_at _), _ | Var _, Var_at _ ->
+    let on (type a) (axis : a Mode.Axis.t) =
+      match Side.on_axis side1 axis, Side.on_axis side2 axis with
+      | Point p1, Point p2 -> Mode.Error.equal_on axis p1 p2 reason
+      | Var var, Point p | Point p, Var var ->
+        let%bind.Result () = Mode.Var.at_least var axis p fixed_reason in
+        Mode.Var.at_most var axis p fixed_reason
+      | Var var1, Var var2 ->
+        let%bind.Result () = Mode.Var.submode_on var1 var2 axis reason in
+        Mode.Var.submode_on var2 var1 axis reason
+    in
+    let%bind.Result () = on Stage in
+    let%bind.Result () = on Provenance in
+    on Locality
 ;;
 
 let equate t1 t2 =
@@ -75,9 +101,9 @@ let equate t1 t2 =
 ;;
 
 let iter_side (side : Side.t) ~(local_ f) =
-  match side with
-  | Var var -> f var [@nontail]
-  | Fixed _ -> Ok ()
+  match Side.var side with
+  | Some var -> f var [@nontail]
+  | None -> Ok ()
 ;;
 
 let iter_result t ~(local_ f) =
@@ -91,9 +117,9 @@ let iter_result t ~(local_ f) =
 
 let exists t ~(local_ f) =
   let side (side : Side.t) =
-    match side with
-    | Var var -> f var
-    | Fixed _ -> false
+    match Side.var side with
+    | Some var -> f var
+    | None -> false
   in
   side t.arg || side t.res || (side t.curry [@nontail])
 ;;
@@ -104,6 +130,9 @@ let map_side (side : Side.t) ~f : Side.t =
   | Var var ->
     let var' = f var in
     if phys_equal var var' then side else Var var'
+  | Var_at { var; locality } ->
+    let var' = f var in
+    if phys_equal var var' then side else Var_at { var = var'; locality }
 ;;
 
 let map t ~f =
@@ -119,7 +148,10 @@ let same_side (a : Side.t) (b : Side.t) =
   match a, b with
   | Fixed a, Fixed b -> Mode.Const.equal a b
   | Var a, Var b -> Mode.Var.id a = Mode.Var.id b
-  | Fixed _, Var _ | Var _, Fixed _ -> false
+  | Var_at a, Var_at b ->
+    Mode.Var.id a.var = Mode.Var.id b.var
+    && Mode.Locality.equal a.locality b.locality
+  | (Fixed _ | Var _ | Var_at _), _ -> false
 ;;
 
 let same t t' =
@@ -137,20 +169,21 @@ let sub_fixed_reason =
 
 let sub_side (lower : Side.t) (upper : Side.t) =
   match lower, upper with
-  | Fixed lower, Fixed upper ->
-    let on axis =
-      Mode.Error.le_on
-        axis
-        ~lower:(Mode.Const.get lower axis)
-        ~upper:(Mode.Const.get upper axis)
-        sub_reason
+  | Var var, Fixed const -> Mode.Var.at_most_const var const sub_fixed_reason
+  | Fixed const, Var var -> Mode.Var.at_least_const var const sub_fixed_reason
+  | Var lower, Var upper -> Mode.Var.submode lower upper sub_reason
+  | (Fixed _ | Var_at _), _ | Var _, Var_at _ ->
+    let on (type a) (axis : a Mode.Axis.t) =
+      match Side.on_axis lower axis, Side.on_axis upper axis with
+      | Point lower, Point upper ->
+        Mode.Error.le_on axis ~lower ~upper sub_reason
+      | Var var, Point p -> Mode.Var.at_most var axis p sub_fixed_reason
+      | Point p, Var var -> Mode.Var.at_least var axis p sub_fixed_reason
+      | Var lower, Var upper -> Mode.Var.submode_on lower upper axis sub_reason
     in
     let%bind.Result () = on Stage in
     let%bind.Result () = on Provenance in
     on Locality
-  | Var var, Fixed const -> Mode.Var.at_most_const var const sub_fixed_reason
-  | Fixed const, Var var -> Mode.Var.at_least_const var const sub_fixed_reason
-  | Var lower, Var upper -> Mode.Var.submode lower upper sub_reason
 ;;
 
 let sub ~lower ~upper =

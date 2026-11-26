@@ -109,8 +109,9 @@ module Stag = struct
     type t = Int of int | Bool of bool | String of string | Char of char | Unit
   end
 
-  (* A mode as written after [@]: [@ 'm], standing for every axis, or
-     [@ local portable], at most one of each axis. *)
+  (* A mode as written after [@]: [@ 'm], standing for every axis,
+     [@ local portable], at most one of each axis, or [@ local 'm], a
+     locality and a variable for the other axes. *)
   module Mode_expr = struct
     module Axis = struct
       type t = Stage | Provenance | Locality
@@ -129,7 +130,7 @@ module Stag = struct
         | Local
     end
 
-    type t = Var of string | Atoms of list[Atom.t]
+    type t = Var of string | Atoms of list[Atom.t] | Var_at of Atom.t * string
 
     (* A side of a constraint [lower <= upper]: a mode, on every axis, or a
        variable on one axis, [Axis], under functions: [meet] and [release] on

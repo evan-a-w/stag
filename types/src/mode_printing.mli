@@ -15,8 +15,14 @@ val create : unit -> t
 
 (** Counts an occurrence, on an arrow's argument or result, or as a type's mode
     argument, which reads only its stage and provenance, while counting what a
-    rendering names. *)
-val count : t -> Mode.Var.t -> side:[ `Arg | `Res | `Mode_arg ] -> unit
+    rendering names. [`Res_at] is a result's whose locality is fixed
+    ([@ local 'm]), reading only its stage and provenance; an argument's is
+    counted as [`Mode_arg]. *)
+val count
+  :  t
+  -> Mode.Var.t
+  -> side:[ `Arg | `Res | `Res_at | `Mode_arg ]
+  -> unit
 
 (** After counting a rendering: groups the variables counted so far. *)
 val settle : t -> unit

@@ -826,14 +826,15 @@ let call (x : takes[gc]) = x.f (ext "a")
     );
   [%expect
     {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:31-40), then it is passed to a function (at t.stag:5:27-40), but must be at most gc, because the types are unified, then a function is used at a type with other modes |}];
-  (* A mode parameter has no locality: the arrow's is the default, global. *)
+  (* A mode parameter has no locality: alone, the arrow's is the default,
+     global. *)
   check
     {|
 type takes['p : mode] = { f : string @ 'p -> int }
 let call (x : takes[gc]) (s @ local) = x.f s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:30-35), then s is passed to the function (at t.stag:3:39-44), then s is used (at t.stag:3:43-44), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:39-44), but must be at most global, because it is a mode parameter on an arrow in a declaration, which is global (at t.stag:2:11-20), then a function is used at a type with other modes |}];
+    {| This is regional, because it is annotated local (at t.stag:3:30-35), then s is passed to the function (at t.stag:3:39-44), then s is used (at t.stag:3:43-44), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:39-44), but must be at most global, because a function type fixes it, as a function is used at a type with other modes |}];
   round_trip
     {|
 type cmp['k, 'p : mode] = { compare : 'k @ 'p -> 'k @ 'p -> int }
@@ -846,5 +847,65 @@ let apply (c : cmp[string, external]) (f : alias[gc]) = c.compare (f "a") "b"
     type cmp['a, 'm0 : mode] = { compare : 'a @ 'm0 -> 'a @ 'm0 -> int }
     type alias['m0 : mode] = string @ 'm0 -> string @ 'm0
     val apply : cmp[string, external] @ 'm0 -> ((string -> string) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    |}]
+;;
+
+let%expect_test "a locality with a mode parameter" =
+  (* The locality is written; the parameter gives the stage and provenance. *)
+  round_trip
+    (ext
+     ^ {|
+type takes['p : mode] = { f : string @ local 'p -> int }
+type gives['p : mode] = { g : unit -> string @ regional 'p }
+let call (x : takes[gc]) (s @ local) = x.f s
+let takes_ok (x : takes[external]) : takes[gc] = x
+let gives_ok (x : gives[gc]) : gives[external] = x
+|}
+    )
+    ~show:`Signature;
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    type takes['m0 : mode] = { f : string @ local 'm0 -> int }
+    type gives['m0 : mode] = { g : unit -> string @ regional 'm0 }
+    val call : takes[gc] @ 'm0 -> (string @ 'm2 -> int @ _) @ 'm1 with 'm0 <= 'm1 and local <= 'm2 and 'm2 <= gc and gc <= 'm1
+    val takes_ok : takes[external] @ 'm0 -> takes[gc] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val gives_ok : gives[gc] @ 'm0 -> gives[external] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    |}];
+  check
+    (ext
+     ^ {|
+type takes['p : mode] = { f : string @ local 'p -> int }
+let ext_bad (x : takes[gc]) = x.f (ext "a")
+|}
+    );
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:34-43), then it is passed to a function (at t.stag:5:30-43), but must be at most gc, because the types are unified, then a function is used at a type with other modes |}];
+  (* In an annotation, too: the variable's locality is left free. *)
+  round_trip
+    {|
+let f (g : string @ local 'm -> int) (s : string @ 'm) = (g s, s)
+let h (s @ local 'm) : string @ global 'm = "x"
+let k (x : string @ 'm) (g : string @ local 'm -> int @ global 'm) = g x
+|}
+    ~show:`Signature;
+  [%expect
+    {|
+    val f : (string @ local 'm1 -> int) @ 'm0 -> (string @ 'm1 -> int * string @ 'm3) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3 and release(locality('m1)) <= locality('m3) and gc <= 'm2
+    val h : 'a @ 'm0 -> string @ 'm1 with local <= 'm0 and stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1) and 'm1 <= 'm0 and 'm1 <= global
+    val k : string @ 'm0 -> ((string @ local 'm0 -> int @ global 'm0) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    |}];
+  List.iter
+    ~f:(fun source ->
+      check source;
+      print_endline "")
+    [ "type t['p : mode] = { x : string @@ local 'p }"
+    ; "type t['p : mode] = { f : string @ local 'q -> int }"
+    ];
+  [%expect
+    {|
+    This mode is invalid: a modality is a mode parameter or modes, not a locality with a mode parameter
+
+    The mode variable 'q is not allowed in a declaration unless it is a parameter declared ['q : mode]: its arrows have fixed modes
     |}]
 ;;
