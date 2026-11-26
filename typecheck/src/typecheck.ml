@@ -396,7 +396,8 @@ and check_toplevel_in
         members
         ~layouts
         ~component:scc.component
-        ~quoting:scc.quoting;
+        ~quoting:scc.quoting
+        ~reopened:scc.reopened;
       Scc_frame.clear scc;
       while Stack.length program.unfinished > unfinished do
         Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
@@ -1257,33 +1258,25 @@ and let_type
   if Option.is_none closure then Mode_shape.lower_rank shape ~rank:scope.rank;
   (* The uses its definition made of toplevels being checked are generalized
      with it, each instance having its own (see [Local_uses]). *)
-  let uses = Local_uses.uses inner.uses in
-  let tys = ty :: List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty) in
-  let templates =
-    if generalized
-    then (
-      Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
-      List.iter
-        (Scheme.generalize_watchers t ~rank:scope.rank tys)
-        ~f:(fun error ->
-          Scope.report scope (Typecheck_error.unification_error ~loc error));
-      decided (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional);
-      let templates =
-        List.filter uses ~f:(fun (use : Quoted_use.t) ->
-          not
-            (Hash_set.is_empty
-               (Scheme.reachable_ids ~rank:scope.rank [ use.ty ])))
-      in
-      Scheme.generalize t ~rank:scope.rank tys;
-      templates)
-    else (
-      Unify.lower_ty ~rank:scope.rank ty;
-      [])
-  in
-  Local_uses.leave inner.uses ~rank:scope.rank ~ident ~scheme:ty ~templates;
+  Local_uses.leave
+    inner.uses
+    ~rank:scope.rank
+    ~ident
+    ~ty
+    ~generalize:
+      (Option.some_if generalized (fun tys ->
+         Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
+         List.iter
+           (Scheme.generalize_watchers t ~rank:scope.rank tys)
+           ~f:(fun error ->
+             Scope.report scope (Typecheck_error.unification_error ~loc error));
+         decided
+           (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional);
+         Scheme.generalize t ~rank:scope.rank tys));
   if not generalized
-  then
-    decided (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional);
+  then (
+    Unify.lower_ty ~rank:scope.rank ty;
+    decided (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional));
   let in_ =
     Env.with_bindings
       scope.locals
@@ -2562,9 +2555,8 @@ end
 
 (* Checks the code of [scope] (see [Uses.code_checked]). *)
 let checking_code t scope f =
-  let checked = f () in
-  Uses.code_checked t scope;
-  checked
+  (* Even if [f] raises: the uses it handed on are not left generalized. *)
+  Exn.protect ~f ~finally:(fun () -> Uses.code_checked t scope)
 ;;
 
 let toplevel_scope ?generated t program module_ ~level ~in_expect_test =

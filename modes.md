@@ -475,10 +475,13 @@ reported at the use:
   A local generalized does the same with the uses its definition makes (by
   instances, or in quotes) of toplevels being checked: each instance of the
   local has instances of them, of its own, so
-  `let f = c in (f .<1>., f .<"s">.)` is as `(c .<1>., c .<"s">.)`. Once the
-  code the local is in is checked, its uses are those of the code, refined in
-  place like an awaiting scheme's, and an error of one is reported there,
-  once, not again at the local's instances.
+  `let f = c in (f .<1>., f .<"s">.)` is as `(c .<1>., c .<"s">.)`, in modes
+  as in types. Once the code the local is in is checked, its uses are those of
+  the code, refined in place like an awaiting scheme's (the local's scheme with
+  them), and an error of one is reported there, once, not again at the
+  local's instances. As for any variable a `let` generalizes, an unknown
+  layout of such a use is decided then to have pointers: a local can be
+  stricter than using the toplevel directly in code that is not generalized.
 - A component that is not generalized (see the value restriction) doesn't
   generalize the use either: it is unified with an instance of the
   toplevel's scheme once it is finished.

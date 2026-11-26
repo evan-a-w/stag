@@ -24,13 +24,16 @@ let of_code (program : Program_env.t) (scc : Scc_frame.t) =
 
 let code_checked t (scope : Scope.t) =
   List.iter
-    (Local_uses.take_schemes scope.uses)
-    ~f:(fun ((_ : Type.ty), (templates : Quoted_use.t list)) ->
+    (Local_uses.take_generalized scope.uses)
+    ~f:(fun { Local_uses.Generalized.scheme; templates } ->
+      (match scope.scc.kind with
+       | Toplevel -> Scc_frame.add_reopened scope.scc scheme
+       | Code _ -> ());
       match
         Scheme.reopen
           t
           ~rank:(Scc_frame.use_rank scope.scc)
-          (List.map templates ~f:(fun use -> use.ty))
+          (scheme :: List.map templates ~f:(fun (use : Quoted_use.t) -> use.ty))
       with
       | Ok () -> ()
       | Error error ->
@@ -58,7 +61,7 @@ let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
   match entry.binder with
   | Local ident ->
     let ty = instantiate entry.scheme in
-    List.iter (Local_uses.generalized scope.uses ident) ~f:(fun use ->
+    List.iter (Local_uses.templates scope.uses ident) ~f:(fun use ->
       Local_uses.add
         scope.uses
         (Quoted_use.local_instance

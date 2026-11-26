@@ -1,11 +1,18 @@
 open! Import
 
+module Generalized = struct
+  type t =
+    { scheme : Type.ty
+    ; templates : Quoted_use.t list
+    }
+end
+
 module Code = struct
   type t =
     { rank : Type.Rank.t
     ; dispatch : Quoted_use.t -> unit
-    ; generalized : Quoted_use.t list Typed.Ident.Table.t
-    ; mutable schemes : (Type.ty * Quoted_use.t list) list
+    ; templates : Quoted_use.t list Typed.Ident.Table.t
+    ; mutable generalized : Generalized.t list (** Latest first. *)
     }
 end
 
@@ -19,8 +26,8 @@ let create ~rank ~dispatch =
   { code =
       { rank
       ; dispatch
-      ; generalized = Typed.Ident.Table.create ()
-      ; schemes = []
+      ; templates = Typed.Ident.Table.create ()
+      ; generalized = []
       }
   ; enclosing = None
   ; uses = []
@@ -37,34 +44,45 @@ let add t (use : Quoted_use.t) =
   | Some _ -> t.uses <- use :: t.uses
 ;;
 
-let uses t = List.rev t.uses
-
-let leave t ~rank ~ident ~scheme ~templates =
+let leave t ~rank ~ident ~ty ~generalize =
   let enclosing =
     match t.enclosing with
     | Some enclosing -> enclosing
     | None -> raise_s [%message "Local_uses.leave: not of a let"]
   in
-  List.iter (uses t) ~f:(fun (use : Quoted_use.t) ->
-    if List.mem templates use ~equal:phys_equal
-    then t.code.dispatch use
-    else (
-      Unify.lower_ty ~rank use.ty;
-      add enclosing use));
+  let uses = List.rev t.uses in
+  t.uses <- [];
+  let lower (use : Quoted_use.t) = Unify.lower_ty ~rank use.ty in
+  let templates =
+    match generalize with
+    | None ->
+      List.iter uses ~f:lower;
+      []
+    | Some generalize ->
+      let templates, others =
+        List.partition_tf uses ~f:(fun (use : Quoted_use.t) ->
+          Scheme.generalizes ~rank use.ty)
+      in
+      List.iter others ~f:lower;
+      generalize
+        (ty :: List.map templates ~f:(fun (use : Quoted_use.t) -> use.ty));
+      templates
+  in
   if not (List.is_empty templates)
   then (
-    Hashtbl.set t.code.generalized ~key:ident ~data:templates;
-    t.code.schemes <- (scheme, templates) :: t.code.schemes);
-  t.uses <- []
+    Hashtbl.set t.code.templates ~key:ident ~data:templates;
+    t.code.generalized
+    <- { Generalized.scheme = ty; templates } :: t.code.generalized);
+  List.iter uses ~f:(add enclosing)
 ;;
 
-let generalized t ident =
-  Hashtbl.find t.code.generalized ident |> Option.value ~default:[]
+let templates t ident =
+  Hashtbl.find t.code.templates ident |> Option.value ~default:[]
 ;;
 
-let take_schemes t =
-  let schemes = t.code.schemes in
-  t.code.schemes <- [];
-  Hashtbl.clear t.code.generalized;
-  List.rev schemes
+let take_generalized t =
+  let generalized = t.code.generalized in
+  t.code.generalized <- [];
+  Hashtbl.clear t.code.templates;
+  List.rev generalized
 ;;

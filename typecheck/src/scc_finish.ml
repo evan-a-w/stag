@@ -196,6 +196,7 @@ let finish_scc
   ~layouts
   ~(component : Component.t)
   ~quoting
+  ~reopened
   =
   let is_member (use : Quoted_use.t) =
     List.exists members ~f:(fun (member : Toplevel_binding.t) ->
@@ -318,12 +319,24 @@ let finish_scc
            (Typecheck_error.unification_error ~loc:member.expr.loc error))));
   List.iter others ~f:(fun (use : Quoted_use.t) ->
     List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
+  (match members with
+   | [] -> ()
+   | first :: _ ->
+     List.iter (List.concat_map reopened ~f:settle_joins) ~f:(fun error ->
+       Program_env.report
+         program
+         (Module_scope.within
+            first.module_
+            (Typecheck_error.unification_error ~loc:first.expr.loc error))));
   (* The layouts of what its types reach but it doesn't generalize are decided
      where they are bound. *)
   let except =
     if generalize
     then None
-    else Some (Hash_set.mem (Scheme.reachable_ids ~rank:0 (tys @ others_tys)))
+    else
+      Some
+        (Hash_set.mem
+           (Scheme.reachable_ids ~rank:0 (tys @ others_tys @ reopened)))
   in
   (match members with
    | [] -> ()
@@ -353,10 +366,7 @@ let finish_scc
   let awaiting =
     if generalize
     then (
-      Scheme.generalize
-        t
-        ~rank:0
-        (tys @ List.map others ~f:(fun (use : Quoted_use.t) -> use.ty));
+      Scheme.generalize t ~rank:0 (tys @ others_tys @ reopened);
       match others with
       | [] -> None
       | _ :: _ ->

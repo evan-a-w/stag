@@ -801,3 +801,157 @@ let c (n : int) y z = let j = match n with %s in .< ident .~j >.
     val c : int @ 'm0 -> (<'a>{..'b} @ 'm2 -> (<'a>{..'b} @ 'm4 -> <'a>{..'c} @ 'm5) @ 'm3) @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm5 and gc <= 'm3 and gc <= 'm1
     |}]
 ;;
+
+let%expect_test "a local generalizes the modes of its uses of toplevels being \
+                 checked, as their types"
+  =
+  let program h =
+    sprintf
+      {|
+let ident (x : ptr[int]) = .~(let _ = h () in .< x >.)
+let same (a : 'a) (b : 'a) = a
+let h (u : unit) = %s
+|}
+      h
+  in
+  let direct = {|.< same ident (fun (p : ptr[int]) -> Ptr.make 0) >.|} in
+  let local =
+    {|let f = .< same ident (fun (p : ptr[int]) -> Ptr.make 0) >. in f|}
+  in
+  List.iter [ direct; local ] ~f:(fun h ->
+    print_endline h;
+    match Mode_helpers.signature (program h) with
+    | Ok signature ->
+      String.split_lines signature
+      |> List.filter ~f:(String.is_prefix ~prefix:"val h")
+      |> List.iter ~f:(printf "  %s\n")
+    | Error errors -> List.iter errors ~f:(printf "  %s\n"));
+  (* So a local value passed to [ident] is not taken for a global one. *)
+  show
+    (program local
+     ^ {|
+let mut g = Ptr.make 0
+let k (u : unit) = .< fun (q : ptr[int] @ local) -> g <- .~(h ()) q >.
+|}
+    );
+  [%expect
+    {|
+    .< same ident (fun (p : ptr[int]) -> Ptr.make 0) >.
+      val h : unit @ _ -> <ptr[int] @ 'm0 -> ptr[int] @ 'm1>{..'a} @ _ with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable gc <= 'm1
+    let f = .< same ident (fun (p : ptr[int]) -> Ptr.make 0) >. in f
+      val h : unit @ _ -> <ptr[int] @ 'm0 -> ptr[int] @ 'm1>{..'a} @ _ with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable gc <= 'm1
+    This is local, because it is annotated local (at t.stag:7:42-47), then q is passed to the function (at t.stag:7:22-67), then q is used (at t.stag:7:66-67), then it is passed to a function (at t.stag:7:57-67), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:27-54), then x is used (at t.stag:2:49-50), then the function returns it (at t.stag:2:27-54), then a function is used at a type with other modes, then the function returns it (at t.stag:7:57-67), then it is assigned to g (at t.stag:7:52-67), but must be at most global, because g is a toplevel (at t.stag:6:12-22)
+    |}]
+;;
+
+let%expect_test "a local's instances have their own modes of its uses of \
+                 toplevels being checked"
+  =
+  let program f =
+    sprintf
+      {|
+let ident (x : ptr[int]) = .~(let _ = h () in .< x >.)
+let mut g = Ptr.make 0
+let h (u : unit) =
+  let f = %s in
+  .< fun (q : ptr[int] @ local) (r : ptr[int]) -> let _ = .~f q in g <- .~f r >.
+|}
+      f
+  in
+  show (program {|.< ident >.|});
+  (* Not generalized, it has one. *)
+  show (program {|(fun (z : unit) -> .< ident >.) ()|});
+  [%expect
+    {|
+    val ident : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val g : ptr[int]
+    val h : unit @ _ -> <ptr[int] @ 'm0 -> (ptr[int] @ 'm2 -> unit @ _) @ 'm1>{..'a} @ _ with local <= 'm0 and 'm0 <= 'm1 and 'm2 <= global and nonportable gc <= 'm1
+    This expression has type ptr[int] @ regional -> ptr[int] @ local but an expression was expected of type ptr[int] @ regional -> ptr[int]
+    Their modes differ: This is local, because it is annotated local (at t.stag:6:25-30), then q is passed to the function (at t.stag:6:5-77), then q is used (at t.stag:6:62-63), then it is passed to a function (at t.stag:6:58-63), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:27-54), then x is used (at t.stag:2:49-50), then the function returns it (at t.stag:2:27-54), then a function is used at a type with other modes, but must be at most global, because g is a toplevel (at t.stag:3:12-22), then it is assigned to g (at t.stag:6:67-77), then the function returns it (at t.stag:6:72-77), then a function is used at a type with other modes
+    |}]
+;;
+
+let%expect_test "a local's use holding a variable of an enclosing local is \
+                 generalized with each"
+  =
+  (* [f]'s use of [c2] is [g]'s too, so each instance of [g] has its own. *)
+  let program ~ident ~g =
+    sprintf
+      {|
+let ident2 %s y = .~(let _ = h () in .< x >.)
+let c2 w z = .< ident2 .~w .~z >.
+let h (u : unit) = %s
+|}
+      ident
+      g
+  in
+  List.iter
+    [ {|let g w = let f = fun z -> c2 w z in 0 in (g .< 1 >., g .< "s" >.)|}
+    ; {|let g w = let f = fun z -> c2 w z in f in (g .< 1 >. .< 2 >., g .< "s" >. .< 3 >.)|}
+    ]
+    ~f:(fun g ->
+      print_endline g;
+      List.iter [ "(x : int)"; "x" ] ~f:(fun ident ->
+        match Mode_helpers.located_errors (program ~ident ~g) with
+        | Ok () ->
+          (match Mode_helpers.signature (program ~ident ~g) with
+           | Ok signature ->
+             String.split_lines signature
+             |> List.filter ~f:(String.is_prefix ~prefix:"val h")
+             |> List.iter ~f:(printf "  %s: %s\n" ident)
+           | Error _ -> ())
+        | Error errors ->
+          List.iter errors ~f:(fun (loc, message) ->
+            printf
+              "  %s: %s: %s\n"
+              ident
+              (Sexp.to_string [%sexp (loc : Loc.t)])
+              message)));
+  [%expect
+    {|
+    let g w = let f = fun z -> c2 w z in 0 in (g .< 1 >., g .< "s" >.)
+      (x : int): t.stag:4:73-74: In this instance of c2, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+      x: val h : unit @ _ -> int * int @ _
+    let g w = let f = fun z -> c2 w z in f in (g .< 1 >. .< 2 >., g .< "s" >. .< 3 >.)
+      (x : int): t.stag:4:81-82: In this instance of c2, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+      x: val h : unit @ _ -> <int>{..'a} * <string>{..'b} @ 'm0 with gc <= 'm0
+    |}]
+;;
+
+let%expect_test "a local decides the layouts of its uses of toplevels being \
+                 checked as it generalizes them"
+  =
+  (* As for any variable a [let] generalizes, its unknown layout has pointers:
+     [v] is taken to have pointers, though [ident] turns out to make it [int],
+     unless the [let] is the toplevel's own, not generalized. *)
+  let program h =
+    sprintf
+      {|
+let ident (x : int) = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let tie (v : 'a @ local) (q : <'a>{..'r}) = 0
+let app f = f
+let h = app (fun (u : unit) -> %s)
+|}
+      h
+  in
+  let body =
+    {|fun (v @ local) q -> let _ = tie v (c q) in let s @ global = v in s|}
+  in
+  List.iter
+    [ body; sprintf "let f = %s in f" body ]
+    ~f:(fun h ->
+      print_endline h;
+      match Mode_helpers.located_errors (program h) with
+      | Ok () -> print_endline "  ok"
+      | Error errors ->
+        List.iter errors ~f:(fun (loc, message) ->
+          printf "  %s: %s\n" (Sexp.to_string [%sexp (loc : Loc.t)]) message));
+  [%expect
+    {|
+    fun (v @ local) q -> let _ = tie v (c q) in let s @ global = v in s
+      ok
+    let f = fun (v @ local) q -> let _ = tie v (c q) in let s @ global = v in s in f
+      t.stag:6:31-111: This is regional, because it is annotated local (at t.stag:6:48-53), then v is passed to the function (at t.stag:6:39-106), then v is used (at t.stag:6:100-101), but must be at most global, because it is annotated global (at t.stag:6:91-97), then it is bound by an annotated let (at t.stag:6:91-97)
+    |}]
+;;

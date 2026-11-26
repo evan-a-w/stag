@@ -20,11 +20,15 @@ type t = private
   ; mutable pending : Toplevel_binding.t list
   ; mutable quoting : Quoted_use.t list
   (** The uses a toplevel's code made of toplevels being checked, latest first. *)
+  ; mutable reopened : Type.ty list
+  (** The types of the locals of a toplevel's code whose schemes were reopened
+      (see [Uses.code_checked]), generalized with its component, if it is. *)
   }
 
 val create : int -> t Kind.t -> t
 val add_pending : t -> Toplevel_binding.t -> unit
 val add_quoting : t -> Quoted_use.t -> unit
+val add_reopened : t -> Type.ty -> unit
 
 (** Its component is finished or abandoned. *)
 val clear : t -> unit
