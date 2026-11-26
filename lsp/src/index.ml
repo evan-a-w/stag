@@ -216,7 +216,9 @@ let is_arrow ty =
 
 let add_binder t (name : Syntax.Name.t) ~label ~ty ~ident =
   Option.iter ident ~f:(fun ident ->
-    Hashtbl.set t.locals ~key:ident ~data:name.loc);
+    (* An or-pattern binds an ident on each side: the first is its definition. *)
+    ignore
+      (Hashtbl.add t.locals ~key:ident ~data:name.loc : [ `Ok | `Duplicate ]));
   if is_arrow ty then add_function t name.loc;
   add
     t
