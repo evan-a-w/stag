@@ -1,5 +1,8 @@
 open! Import
 
+(* Each element or diagonal an alignment looks at. *)
+let work = Work.create "syntax.format"
+
 (* [v.(k + d)], of the [d]th of [vs], is the furthest x reached on diagonal [k]
    (= x - y) with [d] edits. *)
 let myers a b ~equal =
@@ -9,6 +12,7 @@ let myers a b ~equal =
     let x = ref x in
     let y = ref y in
     while !x < n && !y < m && equal a.(!x) b.(!y) do
+      Work.incr work;
       incr x;
       incr y
     done;
@@ -25,6 +29,7 @@ let myers a b ~equal =
   let rec forward vs ~d =
     let v = Array.create ~len:((2 * d) + 1) 0 in
     let rec diagonals k =
+      Work.incr work;
       if k > d
       then None
       else (
@@ -138,6 +143,7 @@ let align a b ~compare =
       && !prefix < b_len
       && equal a.(a_pos + !prefix) b.(b_pos + !prefix)
     do
+      Work.incr work;
       matched.(a_pos + !prefix) <- Some (b_pos + !prefix);
       incr prefix
     done;

@@ -106,37 +106,43 @@ let y2 = N.y
 ;;
 
 let%expect_test "semantic tokens of a large typechecked file take linear time" =
-  let lines = 20_000 in
-  let source =
-    String.concat
-      (List.init lines ~f:(fun i -> sprintf "let v%d = Int.add %d 1\n" i i))
+  let tokens lines =
+    let source =
+      String.concat
+        (List.init lines ~f:(fun i -> sprintf "let v%d = Int.add %d 1\n" i i))
+    in
+    let measured = ref String.Map.empty in
+    Client.with_server
+      ~files:[ "a.stag", source ]
+      (fun client ->
+        Client.did_open client "a.stag";
+        Client.print_hover client "a.stag" ~line:0 ~character:12;
+        let tokens, counts =
+          Work.Private.measure (fun () ->
+            Client.request
+              client
+              "textDocument/semanticTokens/full"
+              (Client.text_document client "a.stag"))
+        in
+        (match tokens with
+         | Some json ->
+           let tokens = Lsp_types.SemanticTokens.t_of_yojson json in
+           printf "%d tokens\n" (Array.length tokens.data / 5)
+         | None -> ());
+        measured := counts);
+    !measured
   in
-  Client.with_server
-    ~files:[ "a.stag", source ]
-    (fun client ->
-      Client.did_open client "a.stag";
-      Client.print_hover client "a.stag" ~line:0 ~character:12;
-      let start = Time_ns.now () in
-      let tokens =
-        Client.request
-          client
-          "textDocument/semanticTokens/full"
-          (Client.text_document client "a.stag")
-      in
-      let elapsed = Time_ns.diff (Time_ns.now ()) start in
-      (match tokens with
-       | Some json ->
-         let tokens = Lsp_types.SemanticTokens.t_of_yojson json in
-         printf "%d tokens\n" (Array.length tokens.data / 5)
-       | None -> ());
-      print_s
-        [%sexp (Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 5) : bool)];
-      [%expect
-        {|
-        0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
-        140000 tokens
-        true
-        |}])
+  let growth = Work.Private.growth ~small:2500 ~large:10_000 tokens in
+  print_s [%message (growth : Work.Private.Growth.t String.Map.t)];
+  [%expect {|
+    0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+    17500 tokens
+    0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+    17500 tokens
+    0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+    70000 tokens
+    (growth ((allocated_words Linear) (lsp.text Linear) (lsp.tokens Linear)))
+    |}]
 ;;
 
 let%expect_test "inline expansions" =

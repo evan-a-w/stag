@@ -574,6 +574,9 @@ module Path = struct
   ;;
 end
 
+(* Each node or edge a search of the graph looks at. *)
+let work = Work.create "mode.graph"
+
 (* The constraints between [start] and the nodes [stop] accepts, through paths
    in nodes [through] accepts: [start <= m(other)] going [Up],
    [other <= m(start)] going [Down]. *)
@@ -588,6 +591,7 @@ let implied start ~(direction : Direction.t) ~stop ~through =
       | Down -> node.pred
     in
     List.iter edges ~f:(fun edge ->
+      Work.incr work;
       let other, morphism, path =
         match direction with
         | Up ->
@@ -705,6 +709,7 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
         then visit (union guards current)
     in
     let step other morphism guards path =
+      Work.incr work;
       let kept =
         match direction with
         | Up -> is_kept other
@@ -920,6 +925,7 @@ let generalize nodes ~rank =
   let derivable ~excluding ~src ~dst m =
     let visited = Int.Table.create () in
     let rec go n acc =
+      Work.incr work;
       (phys_equal n dst && Morphism.le acc m)
       || ((not
              (List.mem (Hashtbl.find_multi visited n.id) acc ~equal:(fun a b ->
@@ -1143,6 +1149,7 @@ let above t =
   let todo = Stack.singleton t in
   while not (Stack.is_empty todo) do
     let node = Stack.pop_exn todo in
+    Work.incr work;
     if not (Hash_set.mem seen node.id)
     then (
       Hash_set.add seen node.id;
@@ -1199,6 +1206,7 @@ module Above_each = struct
         let todo = Stack.singleton (source, ref source.succ) in
         while not (Stack.is_empty todo) do
           let node, edges = Stack.top_exn todo in
+          Work.incr work;
           match !edges with
           | edge :: rest ->
             edges := rest;
@@ -1234,6 +1242,7 @@ module Above_each = struct
         Option.iter (Hashtbl.find position member.id) ~f:(Bitset.add set));
       List.iter members ~f:(fun member ->
         List.iter member.succ ~f:(fun edge ->
+          Work.incr work;
           Option.iter (Hashtbl.find sets edge.hi.id) ~f:(fun above ->
             ignore (Bitset.union set above : bool))));
       List.iter members ~f:(fun member ->
@@ -1279,6 +1288,7 @@ module Floors = struct
       let todo = Stack.singleton node in
       while not (Stack.is_empty todo) do
         let node = Stack.pop_exn todo in
+        Work.incr work;
         if not (Hashtbl.mem floors node.id)
         then (
           Hashtbl.set floors ~key:node.id ~data:node.lower;
@@ -1303,6 +1313,7 @@ module Floors = struct
       Queue.iter nodes ~f:(fun node -> Hash_set.add queued node.id);
       while not (Queue.is_empty nodes) do
         let node = Queue.dequeue_exn nodes in
+        Work.incr work;
         Hash_set.remove queued node.id;
         let lower =
           List.fold
@@ -1351,6 +1362,7 @@ let raised ?(floors = Floors.create ()) seeds =
   let raised = Int.Table.create () in
   let nodes = Queue.create () in
   let estimate node =
+    Work.incr work;
     Hashtbl.find_or_add estimates node.id ~default:(fun () ->
       let lower = Floors.lower floors node in
       if lower > node.lower
@@ -1401,6 +1413,7 @@ let lower_sources t =
   let todo = Stack.singleton t in
   while not (Stack.is_empty todo) do
     let node = Stack.pop_exn todo in
+    Work.incr work;
     if Hash_set.strict_add seen node.id |> Hash_set.Ok_or_duplicate.is_ok
     then (
       Queue.enqueue nodes node;
@@ -1430,6 +1443,7 @@ let lower_assuming t ~raised =
   let todo = Stack.singleton t in
   while not (Stack.is_empty todo) do
     let node = Stack.pop_exn todo in
+    Work.incr work;
     if not (Hashtbl.mem estimates node.id)
     then (
       Hashtbl.set
@@ -1446,6 +1460,7 @@ let lower_assuming t ~raised =
     let node = Queue.dequeue_exn nodes in
     let estimate = Hashtbl.find_exn estimates node.id in
     List.iter node.succ ~f:(fun edge ->
+      Work.incr work;
       match Hashtbl.find estimates edge.hi.id with
       | None -> ()
       | Some current ->
