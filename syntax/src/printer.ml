@@ -224,15 +224,8 @@ let bare_at at e = Level.compare (level e) at >= 0
 
 let rec extends_right e =
   match (unwrap e).txt with
-  | Let _
-  | Seq _
-  | Let_mut _
-  | Match _
-  | Fun _
-  | Stack _
-  | Exclave _
-  | Region _
-  | Forget _ -> true
+  | Let _ | Seq _ | Let_mut _ | Match _ | Fun _ | Forget _ -> true
+  | Stack body | Exclave body | Region body -> extends_right body
   | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;
@@ -247,12 +240,11 @@ let rec ends_with_match ~seq:in_seq e =
   | Let (_, _, _, _, body)
   | Let_mut (_, _, _, body)
   | Fun (_, body)
-  | Stack body
-  | Exclave body
-  | Region body
   | Forget (_, body) ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
+  | Stack body | Exclave body | Region body ->
+    bare_at Item body && ends_with_match ~seq:in_seq body
   | Assign (_, value) | Store (_, value) ->
     bare_at Assign value && ends_with_match ~seq:in_seq value
   | _ -> false
@@ -560,8 +552,7 @@ and annot_doc roots ({ ty; mode } : Annot.t) =
 
 and region roots (ctx : Ctx.t) keyword body =
   group
-    (text keyword
-     ^^ nest 2 (line ^^ expr roots { ctx with level = Ctx.body ctx } body))
+    (text keyword ^^ nest 2 (line ^^ expr roots { ctx with level = Item } body))
 
 and binding roots ((name : Name.t), annot) =
   if Annot.is_none annot

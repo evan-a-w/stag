@@ -103,7 +103,7 @@ let bad (u : unit) = let b = stack_ (Box.make 1) in (fun (c : box[int] @ local) 
     t.stag:5:16-19 Partial_application in apply: heap, caller's region if res is local
     t.stag:11:37-58 Box in use: region
     t.stag:11:45-57 Box in use: region
-    This is local, because it is annotated local (at t.stag:5:73-78), then c is passed to the function (at t.stag:5:52-85), then c is used (at t.stag:5:83-84), then the function returns it (at t.stag:5:83-84), then a function is used at a type with other modes, then the function returns it (at t.stag:5:52-87), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:5:21-98)
+    This is local, because it is annotated local (at t.stag:5:73-78), then c is passed to the function (at t.stag:5:52-85), then c is used (at t.stag:5:83-84), then the function returns it (at t.stag:5:83-84), then the function returns it (at t.stag:5:52-87), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:5:21-98)
     |}]
 ;;
 
@@ -312,7 +312,7 @@ let%expect_test "region_" =
     t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:4:76-88 Box in outer_kept: caller's region
     ----
-    This is local, because it is annotated local (at t.stag:4:36-41), then o is used (at t.stag:4:70-71), then it is passed to a function (at t.stag:4:60-72), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes, then the function returns it (at t.stag:4:60-72), then the [region_] returns it (at t.stag:4:60-72), then the [region_] gives it (at t.stag:4:52-72), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:28-72)
+    This is local, because it is annotated local (at t.stag:4:36-41), then o is used (at t.stag:4:70-71), then it is passed to a function (at t.stag:4:60-72), then Box.make holds it, then the function returns it (at t.stag:4:60-72), then the [region_] returns it (at t.stag:4:60-72), then the [region_] gives it (at t.stag:4:52-72), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:28-72)
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _

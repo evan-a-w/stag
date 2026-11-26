@@ -36,6 +36,7 @@ let rec nested_funs (body : Source.Expr.t) =
 
 let create
   ?(merge = true)
+  ?(result = `Fresh)
   t
   (scope : Scope.t)
   ~(args : (Source.Binder.t * Syntax.Annot.t) list)
@@ -82,7 +83,11 @@ let create
         ~data:mode;
       binder, ty, { annot with ty = resolved }, mode)
   in
-  let res_ty, result_annot = annot_type annot in
+  let res_ty, result_annot =
+    match result, annot with
+    | `Join, None -> Scope.join_ty t scope, None
+    | (`Fresh | `Join), _ -> annot_type annot
+  in
   let res_mode = moded res_mode in
   let partial_modes =
     List.drop_last args
