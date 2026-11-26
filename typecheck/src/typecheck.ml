@@ -304,6 +304,8 @@ and check_toplevel_in
     ; params = []
     ; allocations = Some sites
     ; owner = None
+    ; uses = Uses.of_code program scc
+    ; expansion = false
     }
   in
   let modes = Scope.modes scope in
@@ -377,6 +379,7 @@ and check_toplevel_in
         abandon program scc ~unfinished;
         raise Program_env.Uses_unfinished
     in
+    Uses.code_checked t scope;
     Mode_rules.Toplevel.outlives modes rules ~ty ~name ~loc;
     if program.reported > reported then Component.fail scc.component;
     (match toplevel.state with
@@ -394,7 +397,8 @@ and check_toplevel_in
         members
         ~layouts
         ~component:scc.component
-        ~quoting:scc.quoting;
+        ~quoting:scc.quoting
+        ~reopened:scc.reopened;
       Scc_frame.clear scc;
       while Stack.length program.unfinished > unfinished do
         Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
@@ -1160,7 +1164,9 @@ and let_type
   =
   let modes = Scope.modes scope in
   let node = expr_node ~loc in
-  let inner = { scope with rank = scope.rank + 1 } in
+  let inner =
+    { scope with rank = scope.rank + 1; uses = Local_uses.enter scope.uses }
+  in
   let is_function = not (List.is_empty args) in
   let name = Source.Binder.name binder in
   let frame = ref None in
@@ -1251,16 +1257,25 @@ and let_type
      closure capturing it and generalized keeps their constraints with it. A
      function's is its closure's. *)
   if Option.is_none closure then Mode_shape.lower_rank shape ~rank:scope.rank;
-  if generalized
+  (* The uses its definition made of toplevels being checked are generalized
+     with it, each instance having its own (see [Local_uses]). *)
+  Local_uses.leave
+    inner.uses
+    ~rank:scope.rank
+    ~ident
+    ~ty
+    ~generalize:
+      (Option.some_if generalized (fun tys ->
+         Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
+         List.iter
+           (Scheme.generalize_watchers t ~rank:scope.rank tys)
+           ~f:(fun error ->
+             Scope.report scope (Typecheck_error.unification_error ~loc error));
+         decided
+           (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional);
+         Scheme.generalize t ~rank:scope.rank tys));
+  if not generalized
   then (
-    Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
-    List.iter
-      (Scheme.generalize_watchers t ~rank:scope.rank [ ty ])
-      ~f:(fun error ->
-        Scope.report scope (Typecheck_error.unification_error ~loc error));
-    decided (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional);
-    Scheme.generalize t ~rank:scope.rank [ ty ])
-  else (
     Unify.lower_ty ~rank:scope.rank ty;
     decided (Var_layout.decide layouts ~rank:scope.rank ~finality:Provisional));
   let in_ =
@@ -2133,6 +2148,7 @@ and expand
               Type_env.Annotation_vars.create
                 scope.program.type_env
                 ~rank:scope.rank
+          ; expansion = true
           }
         in
         check_expr t scope ~at ~expr:(Source.Expr.Generated generated) ~ty)
@@ -2539,18 +2555,26 @@ module Failed = struct
     }
 end
 
+(* Checks the code of [scope] (see [Uses.code_checked]). *)
+let checking_code t scope f =
+  (* Even if [f] raises: the uses it handed on are not left generalized. *)
+  Exn.protect ~f ~finally:(fun () -> Uses.code_checked t scope)
+;;
+
 let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   let rank = 1 in
+  let scc =
+    Scc_frame.create
+      (Fresh.id t)
+      (Code { within = Stack.top program.Program_env.checking })
+  in
   { Scope.program
   ; level
   ; rank
   ; locals = Env.create ()
   ; quote = None
   ; module_
-  ; scc =
-      Scc_frame.create
-        (Fresh.id t)
-        (Code { within = Stack.top program.Program_env.checking })
+  ; scc
   ; annotation_vars = Type_env.Annotation_vars.create program.type_env ~rank
   ; in_expect_test
   ; generated
@@ -2559,6 +2583,8 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; params = []
   ; allocations = None
   ; owner = None
+  ; uses = Uses.of_code program scc
+  ; expansion = false
   }
 ;;
 
@@ -2568,7 +2594,8 @@ let check_expect_test t program module_ ~name ~body ~loc ~generated =
   in
   let at = Mode_rules.Expected.fresh (Scope.modes scope) in
   let body =
-    check_expr t scope ~at ~expr:(Source.Expr.Syntax body) ~ty:Type.unit
+    checking_code t scope (fun () ->
+      check_expr t scope ~at ~expr:(Source.Expr.Syntax body) ~ty:Type.unit)
   in
   { Typed.Expect_test.name; body; loc; generated = Option.is_some generated }
 ;;
@@ -2578,6 +2605,8 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
     toplevel_scope ?generated t program module_ ~level:0 ~in_expect_test:false
   in
   let at = Mode_rules.Expected.fresh (Scope.modes scope) in
+  checking_code t scope
+  @@ fun () ->
   match (param : Syntax.Bench_param.t option) with
   | None ->
     let body =
@@ -2674,12 +2703,13 @@ let stag_type name = Type.TCon (Prelude_path.canonical name, [])
 let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error =
   let reported = program.reported in
   let expr =
-    check_expr
-      t
-      scope
-      ~at:(Mode_rules.Expected.fresh (Scope.modes scope))
-      ~expr:(Source.Expr.Syntax expr)
-      ~ty
+    checking_code t scope (fun () ->
+      check_expr
+        t
+        scope
+        ~at:(Mode_rules.Expected.fresh (Scope.modes scope))
+        ~expr:(Source.Expr.Syntax expr)
+        ~ty)
   in
   Scc_frame.hand_over scope.Scope.scc;
   Var_layout.check_waiting (Type_env.layouts program.type_env);

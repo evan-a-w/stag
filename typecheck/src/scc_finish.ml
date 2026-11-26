@@ -45,12 +45,14 @@ let has_failed (toplevel : Toplevel_binding.t) =
 (* Relates [ty], the type of the toplevel [use] is of, to [use]'s type by
    variance, as a use of a finished toplevel is, reporting if they differ. In an
    instance of a scheme that failed, eg. as its own use of the toplevel differs,
-   the error was reported there. *)
+   or of a local's whose use failed, the error was reported there. *)
 let relate_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
   match Unify.sub_ty t ~lower:ty ~upper:use.ty with
   | Ok () -> true
   | Error error ->
-    if List.exists use.via ~f:(fun via ->
+    Quoted_use.fail use;
+    if Quoted_use.template_failed use
+       || List.exists use.via ~f:(fun via ->
          has_failed (Program_env.toplevel program via.toplevel))
     then Component.fail use.reporter.component
     else Program_env.report_use program use error;
@@ -126,7 +128,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
     then raise_s [%message "refine: a use not awaited" (use : Quoted_use.t)]);
   if not (List.is_empty finished)
   then (
-    let schemes = List.map awaiting.schemes ~f:snd in
+    let schemes = List.map awaiting.schemes ~f:snd @ awaiting.locals in
     (match
        Scheme.reopen
          t
@@ -194,6 +196,7 @@ let finish_scc
   ~layouts
   ~(component : Component.t)
   ~quoting
+  ~reopened
   =
   let is_member (use : Quoted_use.t) =
     List.exists members ~f:(fun (member : Toplevel_binding.t) ->
@@ -299,6 +302,10 @@ let finish_scc
             "finish_scc: member not checked" (member : Toplevel_binding.t)])
   in
   let others_tys = List.map others ~f:(fun (use : Quoted_use.t) -> use.ty) in
+  let reopened_tys =
+    List.map reopened ~f:(fun (local : Local_uses.Generalized.t) ->
+      local.scheme)
+  in
   (* What generalizing does to the join variables and layouts, or, if [tys] are
      not generalized, so fixed, its equivalent. Before placing allocations, as
      they may add constraints. *)
@@ -316,12 +323,19 @@ let finish_scc
            (Typecheck_error.unification_error ~loc:member.expr.loc error))));
   List.iter others ~f:(fun (use : Quoted_use.t) ->
     List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
+  List.iter reopened ~f:(fun (local : Local_uses.Generalized.t) ->
+    List.iter
+      (settle_joins local.scheme)
+      ~f:(Program_env.report_use program (Nonempty_list.hd local.templates)));
   (* The layouts of what its types reach but it doesn't generalize are decided
      where they are bound. *)
   let except =
     if generalize
     then None
-    else Some (Hash_set.mem (Scheme.reachable_ids ~rank:0 (tys @ others_tys)))
+    else
+      Some
+        (Hash_set.mem
+           (Scheme.reachable_ids ~rank:0 (tys @ others_tys @ reopened_tys)))
   in
   (match members with
    | [] -> ()
@@ -351,10 +365,7 @@ let finish_scc
   let awaiting =
     if generalize
     then (
-      Scheme.generalize
-        t
-        ~rank:0
-        (tys @ List.map others ~f:(fun (use : Quoted_use.t) -> use.ty));
+      Scheme.generalize t ~rank:0 (tys @ others_tys @ reopened_tys);
       match others with
       | [] -> None
       | _ :: _ ->
@@ -365,6 +376,7 @@ let finish_scc
                 tys
                 ~f:(fun (member : Toplevel_binding.t) ty ->
                   member.ident.name, ty)
+          ; locals = reopened_tys
           ; uses = others
           }
         in
@@ -373,6 +385,7 @@ let finish_scc
         Some awaiting)
     else (
       List.iter others ~f:pend;
+      List.iter reopened_tys ~f:(Unify.lower_ty ~rank:0);
       None)
   in
   if failed then Component.fail component;

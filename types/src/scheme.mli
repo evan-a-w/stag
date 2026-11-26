@@ -53,5 +53,8 @@ val generalize_watchers
     for a weak toplevel, whose type is then fixed without being generalized. *)
 val fix_joins : Fresh.t -> Type.ty list -> Unification_error.t list
 
-(** The ids of the variables [generalize] would generalize. *)
+(** Whether [generalize] would generalize any variable of [ty], type or mode. *)
+val generalizes : rank:Type.Rank.t -> Type.ty -> bool
+
+(** The ids of the type variables [generalize] would generalize. *)
 val reachable_ids : rank:Type.Rank.t -> Type.ty list -> Int.Hash_set.t

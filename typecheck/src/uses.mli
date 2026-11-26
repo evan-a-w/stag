@@ -9,6 +9,16 @@ val instance
   -> on_use:(Quoted_use.t -> ty:'a -> unit)
   -> 'a
 
+(** The uses of the code of [scc] outside any [let]: a toplevel's are
+    generalized with its component, if it is; other code's are left to
+    [Scc_finish.settle]. *)
+val of_code : Program_env.t -> Scc_frame.t -> Local_uses.t
+
+(** The code of [scope] is checked: the schemes of its locals that generalized
+    uses are reopened, so the uses and the code sharing their variables are
+    refined as they are, once the toplevels used are known. *)
+val code_checked : Fresh.t -> Scope.t -> unit
+
 val quoted_use
   :  Fresh.t
   -> Scope.t
@@ -17,7 +27,8 @@ val quoted_use
   -> Type.ty
 
 (** An instance of [entry]'s scheme, at [loc]. A toplevel's may await others
-    (see [Awaiting]): the instance's uses of them are uses by this code. *)
+    (see [Awaiting]), and a local's be generalized with uses of them (see
+    [Local_uses]): the instance's uses of them are uses by this code. *)
 val instantiate_entry
   :  Fresh.t
   -> Scope.t

@@ -1479,6 +1479,16 @@ let generalize fresh ~rank tys =
     add_instance_bounds fresh mapper pending)
 ;;
 
+let generalizes ~rank ty =
+  let any = ref false in
+  let found _ = any := true in
+  iter_generalizable
+    ~rank
+    [ ty ]
+    { ty = found; row = found; presence = found; mode = found };
+  !any
+;;
+
 let reachable_ids ~rank tys =
   let ids = Int.Hash_set.create () in
   let add (var : _ Type.Var.t) = Hash_set.add ids var.id in

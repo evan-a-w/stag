@@ -10,6 +10,9 @@ open! Import
     too. *)
 type t =
   { schemes : (string * Type.ty) list (** Each member's name and type. *)
+  ; locals : Type.ty list
+  (** The types of the locals of the members' code generalized with uses (see
+      [Local_uses]), which share variables with them: refined with them. *)
   ; mutable uses : Quoted_use.t list
   }
 [@@deriving sexp_of]

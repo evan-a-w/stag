@@ -13,6 +13,7 @@ type t =
   ; mutable lowlink : int
   ; mutable pending : Toplevel_binding.t list
   ; mutable quoting : Quoted_use.t list
+  ; mutable reopened : Local_uses.Generalized.t list
   }
 
 let create id kind =
@@ -22,6 +23,7 @@ let create id kind =
   ; lowlink = id
   ; pending = []
   ; quoting = []
+  ; reopened = []
   }
 ;;
 
@@ -35,10 +37,12 @@ let use_rank t =
 
 let add_pending t toplevel = t.pending <- toplevel :: t.pending
 let add_quoting t use = t.quoting <- use :: t.quoting
+let add_reopened t generalized = t.reopened <- generalized :: t.reopened
 
 let clear t =
   t.pending <- [];
-  t.quoting <- []
+  t.quoting <- [];
+  t.reopened <- []
 ;;
 
 let depends_on t ~lowlink = t.lowlink <- Int.min t.lowlink lowlink
@@ -50,6 +54,7 @@ let absorb t ~child =
     Component.merge child.component ~into:t.component;
     t.pending <- child.pending @ t.pending;
     t.quoting <- child.quoting @ t.quoting;
+    t.reopened <- child.reopened @ t.reopened;
     clear child)
 ;;
 

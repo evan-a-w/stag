@@ -11,7 +11,9 @@ val settle : Fresh.t -> Program_env.t -> Toplevel_binding.t list -> unit
     types before they are generalized. Those in instances of schemes awaiting
     them are of instances of their schemes: they are not generalized, and left
     to [settle]. The others are generalized with the schemes if they are (see
-    [Awaiting]), and otherwise left to [settle]. *)
+    [Awaiting]), and otherwise left to [settle]. [reopened], the locals of its
+    code that generalized such uses (see [Uses.code_checked]), are generalized
+    with the schemes too, and refined with them. *)
 val finish_scc
   :  Fresh.t
   -> Program_env.t
@@ -19,4 +21,5 @@ val finish_scc
   -> layouts:Var_layout.Frame.t
   -> component:Component.t
   -> quoting:Quoted_use.t list
+  -> reopened:Local_uses.Generalized.t list
   -> unit

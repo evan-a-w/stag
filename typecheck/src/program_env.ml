@@ -7,6 +7,7 @@ module Report = struct
     (** Of the code it is in, if its checking may be abandoned. *)
     ; once : string option
     (** Only the first error reported with this key is shown. *)
+    ; fallback : bool (** Shown only if no other error of [component] is. *)
     }
 end
 
@@ -38,21 +39,22 @@ let allocation_id t =
   Typed.Allocation.Id.of_int t.allocation_ids
 ;;
 
-let report ?component ?once t error =
+let report ?component ?once ?(fallback = false) t error =
   t.reported <- t.reported + 1;
-  t.reports <- { Report.error; component; once } :: t.reports
+  t.reports <- { Report.error; component; once; fallback } :: t.reports
 ;;
 
-let report_by t (reporter : Reporter.t) ?once error =
+let report_by ?fallback t (reporter : Reporter.t) ?once error =
   let component = reporter.component in
   if Typecheck_error.is_already_reported error
-  then report t error ~component
-  else report t ?once ~component (Reporter.wrap_error reporter error)
+  then report ?fallback t error ~component
+  else report ?fallback t ?once ~component (Reporter.wrap_error reporter error)
 ;;
 
 let report_use t (use : Quoted_use.t) error =
   let error = Quoted_use.error use error in
   report_by
+    ~fallback:use.reporter.expansion
     t
     use.reporter
     ~once:
@@ -66,11 +68,24 @@ let report_use t (use : Quoted_use.t) error =
 ;;
 
 let errors t =
+  let reports =
+    List.rev t.reports
+    |> List.filter ~f:(fun { Report.component; _ } ->
+      not (Option.exists component ~f:Component.is_abandoned))
+  in
+  let explained =
+    List.filter_map reports ~f:(fun { Report.error; component; fallback; _ } ->
+      if fallback || Typecheck_error.is_already_reported error
+      then None
+      else component)
+  in
   let shown = String.Hash_set.create () in
-  List.rev t.reports
-  |> List.filter ~f:(fun { Report.error; component; once } ->
+  reports
+  |> List.filter ~f:(fun { Report.error; component; once; fallback } ->
     (not (Typecheck_error.is_already_reported error))
-    && (not (Option.exists component ~f:Component.is_abandoned))
+    && ((not fallback)
+        || Option.for_all component ~f:(fun component ->
+          not (List.exists explained ~f:(Component.same component))))
     && Option.for_all once ~f:(fun key ->
       Hash_set.strict_add shown key |> Hash_set.Ok_or_duplicate.is_ok))
   |> List.rev_map ~f:(fun { Report.error; _ } -> error)

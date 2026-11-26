@@ -10,44 +10,75 @@ let instance (toplevel : Toplevel_binding.t) ~scheme ~instantiate ~on_use =
   ty
 ;;
 
-(* [use], by code of [scope]'s frame, of a toplevel being checked: in a quote of
-   the code, or in an instance of a scheme awaiting it. Its type is of the
-   frame's [use_rank]: what code in it generalizes doesn't generalize the use,
-   which is unified with the toplevel's type once it is known. *)
-let add_quoted_use (scope : Scope.t) (use : Quoted_use.t) =
-  Unify.lower_ty ~rank:(Scc_frame.use_rank scope.scc) use.ty;
-  match scope.scc.kind with
-  | Toplevel -> Scc_frame.add_quoting scope.scc use
-  | Code _ ->
-    let awaited = Program_env.toplevel scope.program use.awaited.name in
-    Toplevel_binding.add_pending_use awaited use
+let of_code (program : Program_env.t) (scc : Scc_frame.t) =
+  Local_uses.create
+    ~rank:(Scc_frame.use_rank scc)
+    ~dispatch:(fun (use : Quoted_use.t) ->
+      match scc.kind with
+      | Toplevel -> Scc_frame.add_quoting scc use
+      | Code _ ->
+        Toplevel_binding.add_pending_use
+          (Program_env.toplevel program use.awaited.name)
+          use)
+;;
+
+let code_checked t (scope : Scope.t) =
+  List.iter
+    (Local_uses.take_generalized scope.uses)
+    ~f:(fun ({ Local_uses.Generalized.scheme; templates } as generalized) ->
+      (match scope.scc.kind with
+       | Toplevel -> Scc_frame.add_reopened scope.scc generalized
+       | Code _ -> ());
+      match
+        Scheme.reopen
+          t
+          ~rank:(Scc_frame.use_rank scope.scc)
+          (scheme
+           :: List.map
+                (Nonempty_list.to_list templates)
+                ~f:(fun (use : Quoted_use.t) -> use.ty))
+      with
+      | Ok () -> ()
+      | Error error ->
+        (* Each instance is wrong as its template is. *)
+        Nonempty_list.iter templates ~f:Quoted_use.fail;
+        Program_env.report_use scope.program (Nonempty_list.hd templates) error)
 ;;
 
 let quoted_use t (scope : Scope.t) (toplevel : Toplevel_binding.t) ~loc =
   let ty = Scope.join_ty t scope in
-  add_quoted_use
-    scope
-    { awaited = toplevel.ident
-    ; ty
-    ; loc
-    ; via = []
-    ; reporter = Scope.reporter scope
-    };
+  Local_uses.add
+    scope.uses
+    (Quoted_use.create
+       ~awaited:toplevel.ident
+       ~ty
+       ~loc
+       ~reporter:(Scope.reporter scope));
   ty
 ;;
 
 let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
   let instantiate = Scope.instantiate ~at:loc t scope in
   match entry.binder with
-  | Local _ -> instantiate entry.scheme
+  | Local ident ->
+    let ty = instantiate entry.scheme in
+    List.iter (Local_uses.templates scope.uses ident) ~f:(fun use ->
+      Local_uses.add
+        scope.uses
+        (Quoted_use.local_instance
+           use
+           ~ty:(instantiate use.ty)
+           ~loc
+           ~reporter:(Scope.reporter scope)));
+    ty
   | Toplevel ident ->
     instance
       (Program_env.toplevel scope.program ident.name)
       ~scheme:entry.scheme
       ~instantiate
       ~on_use:(fun use ~ty ->
-        add_quoted_use
-          scope
+        Local_uses.add
+          scope.uses
           (Quoted_use.instance
              use
              ~toplevel:ident.name
