@@ -128,7 +128,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
     then raise_s [%message "refine: a use not awaited" (use : Quoted_use.t)]);
   if not (List.is_empty finished)
   then (
-    let schemes = List.map awaiting.schemes ~f:snd in
+    let schemes = List.map awaiting.schemes ~f:snd @ awaiting.locals in
     (match
        Scheme.reopen
          t
@@ -302,6 +302,10 @@ let finish_scc
             "finish_scc: member not checked" (member : Toplevel_binding.t)])
   in
   let others_tys = List.map others ~f:(fun (use : Quoted_use.t) -> use.ty) in
+  let reopened_tys =
+    List.map reopened ~f:(fun (local : Local_uses.Generalized.t) ->
+      local.scheme)
+  in
   (* What generalizing does to the join variables and layouts, or, if [tys] are
      not generalized, so fixed, its equivalent. Before placing allocations, as
      they may add constraints. *)
@@ -319,15 +323,10 @@ let finish_scc
            (Typecheck_error.unification_error ~loc:member.expr.loc error))));
   List.iter others ~f:(fun (use : Quoted_use.t) ->
     List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
-  (match members with
-   | [] -> ()
-   | first :: _ ->
-     List.iter (List.concat_map reopened ~f:settle_joins) ~f:(fun error ->
-       Program_env.report
-         program
-         (Module_scope.within
-            first.module_
-            (Typecheck_error.unification_error ~loc:first.expr.loc error))));
+  List.iter reopened ~f:(fun (local : Local_uses.Generalized.t) ->
+    List.iter
+      (settle_joins local.scheme)
+      ~f:(Program_env.report_use program (Nonempty_list.hd local.templates)));
   (* The layouts of what its types reach but it doesn't generalize are decided
      where they are bound. *)
   let except =
@@ -336,7 +335,7 @@ let finish_scc
     else
       Some
         (Hash_set.mem
-           (Scheme.reachable_ids ~rank:0 (tys @ others_tys @ reopened)))
+           (Scheme.reachable_ids ~rank:0 (tys @ others_tys @ reopened_tys)))
   in
   (match members with
    | [] -> ()
@@ -366,7 +365,7 @@ let finish_scc
   let awaiting =
     if generalize
     then (
-      Scheme.generalize t ~rank:0 (tys @ others_tys @ reopened);
+      Scheme.generalize t ~rank:0 (tys @ others_tys @ reopened_tys);
       match others with
       | [] -> None
       | _ :: _ ->
@@ -377,6 +376,7 @@ let finish_scc
                 tys
                 ~f:(fun (member : Toplevel_binding.t) ty ->
                   member.ident.name, ty)
+          ; locals = reopened_tys
           ; uses = others
           }
         in
@@ -385,6 +385,7 @@ let finish_scc
         Some awaiting)
     else (
       List.iter others ~f:pend;
+      List.iter reopened_tys ~f:(Unify.lower_ty ~rank:0);
       None)
   in
   if failed then Component.fail component;

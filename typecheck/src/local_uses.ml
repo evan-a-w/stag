@@ -3,7 +3,7 @@ open! Import
 module Generalized = struct
   type t =
     { scheme : Type.ty
-    ; templates : Quoted_use.t list
+    ; templates : Quoted_use.t Nonempty_list.t
     }
 end
 
@@ -63,16 +63,18 @@ let leave t ~rank ~ident ~ty ~generalize =
         List.partition_tf uses ~f:(fun (use : Quoted_use.t) ->
           Scheme.generalizes ~rank use.ty)
       in
+      (* Before [generalize] runs the generalization watchers: the others'
+         variables are then the enclosing code's, which generalizing leaves be,
+         whatever the watchers relate them to. *)
       List.iter others ~f:lower;
       generalize
         (ty :: List.map templates ~f:(fun (use : Quoted_use.t) -> use.ty));
       templates
   in
-  if not (List.is_empty templates)
-  then (
+  Option.iter (Nonempty_list.of_list templates) ~f:(fun nonempty ->
     Hashtbl.set t.code.templates ~key:ident ~data:templates;
     t.code.generalized
-    <- { Generalized.scheme = ty; templates } :: t.code.generalized);
+    <- { Generalized.scheme = ty; templates = nonempty } :: t.code.generalized);
   List.iter uses ~f:(add enclosing)
 ;;
 

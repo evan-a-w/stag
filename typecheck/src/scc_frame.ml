@@ -13,7 +13,7 @@ type t =
   ; mutable lowlink : int
   ; mutable pending : Toplevel_binding.t list
   ; mutable quoting : Quoted_use.t list
-  ; mutable reopened : Type.ty list
+  ; mutable reopened : Local_uses.Generalized.t list
   }
 
 let create id kind =
@@ -37,7 +37,7 @@ let use_rank t =
 
 let add_pending t toplevel = t.pending <- toplevel :: t.pending
 let add_quoting t use = t.quoting <- use :: t.quoting
-let add_reopened t ty = t.reopened <- ty :: t.reopened
+let add_reopened t generalized = t.reopened <- generalized :: t.reopened
 
 let clear t =
   t.pending <- [];

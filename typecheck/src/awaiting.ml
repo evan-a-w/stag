@@ -2,6 +2,7 @@ open! Import
 
 type t =
   { schemes : (string * Type.ty) list
+  ; locals : Type.ty list
   ; mutable uses : Quoted_use.t list
   }
 

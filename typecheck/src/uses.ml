@@ -25,23 +25,24 @@ let of_code (program : Program_env.t) (scc : Scc_frame.t) =
 let code_checked t (scope : Scope.t) =
   List.iter
     (Local_uses.take_generalized scope.uses)
-    ~f:(fun { Local_uses.Generalized.scheme; templates } ->
+    ~f:(fun ({ Local_uses.Generalized.scheme; templates } as generalized) ->
       (match scope.scc.kind with
-       | Toplevel -> Scc_frame.add_reopened scope.scc scheme
+       | Toplevel -> Scc_frame.add_reopened scope.scc generalized
        | Code _ -> ());
       match
         Scheme.reopen
           t
           ~rank:(Scc_frame.use_rank scope.scc)
-          (scheme :: List.map templates ~f:(fun (use : Quoted_use.t) -> use.ty))
+          (scheme
+           :: List.map
+                (Nonempty_list.to_list templates)
+                ~f:(fun (use : Quoted_use.t) -> use.ty))
       with
       | Ok () -> ()
       | Error error ->
-        (match templates with
-         | use :: _ ->
-           Quoted_use.fail use;
-           Program_env.report_use scope.program use error
-         | [] -> ()))
+        (* Each instance is wrong as its template is. *)
+        Nonempty_list.iter templates ~f:Quoted_use.fail;
+        Program_env.report_use scope.program (Nonempty_list.hd templates) error)
 ;;
 
 let quoted_use t (scope : Scope.t) (toplevel : Toplevel_binding.t) ~loc =
@@ -85,6 +86,10 @@ let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
              ~loc
              ~via:[]
              ~reporter:(Scope.reporter scope)))
+;;
+
+let instantiate_captured t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
+  Scope.instantiate ~at:loc t scope entry.scheme
 ;;
 
 let use_entry

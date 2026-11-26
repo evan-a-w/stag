@@ -39,7 +39,7 @@ val templates : t -> Typed.Ident.t -> Quoted_use.t list
 module Generalized : sig
   type t =
     { scheme : Type.ty
-    ; templates : Quoted_use.t list
+    ; templates : Quoted_use.t Nonempty_list.t
     }
 end
 

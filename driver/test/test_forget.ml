@@ -742,6 +742,10 @@ let h (u : unit) = %s
          instances, and even if it has none. *)
     ; {|let f = fun (v : unit) -> c .< "s" >. in (f (), f ())|}
     ; {|let f = fun (v : unit) -> c .< "s" >. in 0|}
+      (* Spliced at once: the capture of [f] is not a use of its own, the
+         expansion's is, as it is of [c] used directly. *)
+    ; {|.~(.< c .< "s" >. >.)|}
+    ; {|let f = c in .~(.< f .< "s" >. >.)|}
     ];
   [%expect
     {|
@@ -754,6 +758,10 @@ let h (u : unit) = %s
       t.stag:4:45-46: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
     let f = fun (v : unit) -> c .< "s" >. in 0
       t.stag:4:45-46: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    .~(.< c .< "s" >. >.)
+      t.stag:4:25-26: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    let f = c in .~(.< f .< "s" >. >.)
+      t.stag:4:38-39: In this instance of c, a use in its quote is wrong: This expression has type int but an expression was expected of type string
     |}]
 ;;
 

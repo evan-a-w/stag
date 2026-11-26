@@ -36,6 +36,17 @@ val instantiate_entry
   -> loc:Loc.t
   -> Type.ty
 
+(** An instance of [entry]'s scheme alone, for code spliced here at once that
+    may use it: the expansion's uses of it are checked in its place, with
+    instances of their own of the uses its scheme awaits or was generalized
+    with. *)
+val instantiate_captured
+  :  Fresh.t
+  -> Scope.t
+  -> Env.Entry.t
+  -> loc:Loc.t
+  -> Type.ty
+
 val use_entry
   :  ?by_symbol:bool
   -> ?embedding:((unit -> unit) -> unit)
