@@ -121,7 +121,7 @@ comes before it.
   >   print_endline "  the error";
   >   match 2 with 1 -> ()
   > EOF
-  $ stag test err_output.stag 2>&1
+  $ stag test -w -non-exhaustive err_output.stag 2>&1
   File "err_output.stag", line 6, characters 2-22:
   6 |   match 2 with 1 -> ()
         ^^^^^^^^^^^^^^^^^^^^

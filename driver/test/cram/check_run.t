@@ -125,6 +125,7 @@ Runtime errors are located, and output before them is printed first.
   > let b = a; f 2
   > EOF
   $ stag run match.stag 2>&1
+  $ stag run -w -non-exhaustive match.stag 2>&1
   first
   File "match.stag", lines 2-3, characters 10-11:
   2 | let f x = match x with

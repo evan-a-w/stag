@@ -1,0 +1,157 @@
+open! Import
+open Source_helpers
+
+(* The warnings and errors of [source], in source order, after the warnings
+   are set by the specs [w]. *)
+let check ?(w = []) source =
+  let stamps = Stamp_counter.create () in
+  let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
+  Interpreter.set_limits interpreter limits;
+  let warnings =
+    List.fold w ~init:Warning.Settings.default ~f:(fun settings spec ->
+      Warning.Settings.apply
+        settings
+        (Result.ok_or_failwith (Warning.Spec.of_string spec)))
+  in
+  let typecheck = Typecheck.create ~stamps ~interpreter ~warnings () in
+  let warnings, errors =
+    match Typecheck.typecheck typecheck ~program:(program source) with
+    | Ok checked -> checked.warnings, []
+    | Error { errors; partial } -> partial.warnings, errors
+  in
+  let line kind (error : Typecheck_error.t) =
+    error.loc, sprintf "%s: %s" kind (Typecheck_error.message error)
+  in
+  match
+    List.map warnings ~f:(line "Warning") @ List.map errors ~f:(line "Error")
+    |> List.stable_sort ~compare:(fun (a, _) (b, _) -> Loc.compare a b)
+  with
+  | [] -> print_endline "ok"
+  | lines ->
+    List.iter lines ~f:(fun (loc, line) ->
+      print_endline (Loc.to_string loc ^ ": " ^ line))
+;;
+
+let%expect_test "nominal variants, nested" =
+  check
+    {|
+type t = A | B of u | C of int * u
+and u = X | Y of bool
+let f v = match v with A -> 0 | B X -> 1 | C (_, X) -> 2
+let g v = match v with A -> 0 | B _ -> 1 | C (0, _) -> 2
+let h v = match v with A -> 0 | B (Y true) -> 1 | B X -> 1 | C _ -> 2
+let ok v = match v with A | B _ -> 0 | C (_, (X | Y _)) -> 1
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "unused arms" =
+  check
+    {|
+type t = A | B
+let f v = match v with A -> 0 | B -> 1 | A -> 2
+let g v = match v with _ -> 0 | B -> 1
+let h v = match v with (A, _) -> 0 | (_, A) -> 1 | (A, A) -> 2 | _ -> 3
+let i v = match v with A | B | A -> 0
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "literals, tuples, records, deref" =
+  check
+    {|
+type r = {x : int; y : bool}
+let lit v = match v with 0 -> "zero" | 1 -> "one"
+let str v = match v with "a" -> 0
+let tup v = match v with (true, _) -> 0 | (_, false) -> 1
+let rec_ v = match v with {x = 0; y = _} -> 0 | {x = _; y = true} -> 1
+let deref v = match v with *None -> 0
+let ok v = match v with (true, _) | (false, _) -> 0
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "polymorphic variants: closed rows need every tag" =
+  check
+    {|
+let f v = match v with `A -> 0 | `B n -> n
+let g (v : [`A | `B of int]) = match v with `A -> 0
+let h (v : [`A | `B of bool]) = match v with `A -> 0 | `B true -> 1
+let i v = match (v : [> `A]) with `A -> 0
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "exception arms" =
+  check
+    {|
+let f g = match g () with v -> v | exception Failure _ -> 0
+let h g = match g () with v -> v | exception _ -> 0 | exception Failure _ -> 1
+let k g = match g () with v -> v | exception Failure _ -> 0 | exception Failure "x" -> 1
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "warning attributes and specs" =
+  check
+    {|
+type t = A | B
+let a v = (match v with A -> 0 | B -> 1 | A -> 2) [@warning "-unused-arm"]
+let b v = (match v with A -> 0) [@warning "+non-exhaustive"]
+let c v = (match v with A -> 0 | B -> 1 | _ -> 2) [@warning "@unused-arm"]
+let d v = match v with A -> 0
+[@@warning "-non-exhaustive"]
+[@@@warning "-all"]
+let e v = match v with A -> 0 | _ -> 1 | B -> 2
+[@@@warning "+all"]
+let f v = match v with A -> 0 | _ -> 1 | B -> 2
+module M = struct
+  [@@@warning "-unused-arm"]
+  let g v = match v with A -> 0 | _ -> 1 | B -> 2
+end
+let h v = match v with A -> 0 | _ -> 1 | B -> 2
+|};
+  [%expect {| |}];
+  check
+    ~w:[ "-non-exhaustive"; "@unused-arm" ]
+    {|
+type t = A | B
+let a v = match v with A -> 0
+let b v = match v with A -> 0 | B -> 1 | A -> 2
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "bad attributes" =
+  check
+    {|
+let a v = v [@warning "-nonsense"]
+let b v = v [@frobnicate]
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "module-qualified constructors print relative to the match" =
+  check
+    {|
+module M = struct
+  type t = A | B of int
+  let inside v = match v with A -> 0
+end
+let outside v = match v with M.A -> 0
+let opt v = match v with Some 0 -> 0 | None -> 1
+let lst v = match v with [] -> 0 | [_] -> 1
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "matches in quotes and splices" =
+  check
+    {|
+type t = A | B
+let q = .< fun v -> match v with A -> 0 >.
+let r = .~(.< fun v -> match v with A -> 0 >.)
+let ok = .< fun v -> match v with A -> 0 | B -> 1 >.
+|};
+  [%expect {| |}]
+;;

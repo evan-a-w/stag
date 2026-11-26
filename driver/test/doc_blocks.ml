@@ -92,6 +92,7 @@ module Claim = struct
         }
     | Prints of string
     | Error of string
+    | Warning of string
   [@@deriving sexp_of]
 end
 
@@ -140,10 +141,11 @@ let claim comment : Claim.t list =
        || String.is_prefix comment ~prefix:"exception "
     then [ Item comment ]
     else (
-      match after "prints:", after "Error:" with
-      | Some s, _ -> [ Prints (String.strip s) ]
-      | None, Some s -> [ Error (String.strip s) ]
-      | None, None -> [])
+      match after "prints:", after "Error:", after "Warning:" with
+      | Some s, _, _ -> [ Prints (String.strip s) ]
+      | None, Some s, _ -> [ Error (String.strip s) ]
+      | None, None, Some s -> [ Warning (String.strip s) ]
+      | None, None, None -> [])
 ;;
 
 let claims code = List.concat_map (comments code) ~f:claim

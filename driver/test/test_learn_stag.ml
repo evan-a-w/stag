@@ -23,9 +23,11 @@ module Transcript = struct
     ; values : string list
     ; output : string
     ; errors : string
+    ; warnings : string
     }
 
-  let empty = { signature = []; values = []; output = ""; errors = "" }
+  let empty =
+    { signature = []; values = []; output = ""; errors = ""; warnings = "" }
 
   let holds t (claim : Claim.t) =
     let contains text pattern =
@@ -42,6 +44,7 @@ module Transcript = struct
         || String.is_suffix line ~suffix:("." ^ claimed))
     | Prints s -> contains t.output s
     | Error s -> contains t.errors s
+    | Warning s -> contains t.warnings s
   ;;
 end
 
@@ -149,6 +152,12 @@ let run_program (block : Doc_blocks.Block.t) =
     ; values = values driver checked.signature
     ; output = compile_time_output ^ Buffer.contents output
     ; errors
+    ; warnings =
+        diagnostics_to_string
+          ~contents:block.code
+          (List.map
+             checked.warnings
+             ~f:(Diagnostic.of_typecheck_error ~warning:true))
     }
 ;;
 
@@ -217,6 +226,7 @@ let run_project (block : Doc_blocks.Block.t) =
             ; values = t.values
             ; output = t.output ^ Buffer.contents output
             ; errors = t.errors ^ errors
+            ; warnings = t.warnings
             }))
 ;;
 
@@ -229,6 +239,7 @@ let run (block : Doc_blocks.Block.t) =
   in
   List.iter transcript.values ~f:print_endline;
   print_section "output" transcript.output;
+  print_section "warnings" transcript.warnings;
   (match block.kind, String.is_empty transcript.errors with
    | Error, true -> print_endline "!! EXPECTED AN ERROR"
    | (Program | Project), false -> print_endline "!! UNEXPECTED ERROR"
@@ -240,7 +251,7 @@ let run (block : Doc_blocks.Block.t) =
      when not
             (List.exists claims ~f:(function
               | Error _ -> true
-              | Item _ | Value _ | Prints _ -> false)) ->
+              | Item _ | Value _ | Prints _ | Warning _ -> false)) ->
      print_endline "!! AN ERROR BLOCK MUST CLAIM ITS ERROR"
    | _ -> ());
   List.iter claims ~f:(fun claim ->

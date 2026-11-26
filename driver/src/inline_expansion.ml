@@ -27,5 +27,5 @@ let edit ({ loc; expansion; status } : Expansion.t) ~contents =
 ;;
 
 let diagnostic ({ loc; _ } : Expansion.t) =
-  Diagnostic.create ~warning:true ~loc "This inline expansion is out of date"
+  Diagnostic.create ~loc "This inline expansion is out of date"
 ;;

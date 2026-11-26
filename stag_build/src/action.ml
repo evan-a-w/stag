@@ -35,7 +35,9 @@ let warn project diagnostic =
     "%s%!"
     (Diagnostic.to_string_hum
        ~contents:(contents project)
-       (Diagnostic.relocate diagnostic ~f:(relative project)))
+       { (Diagnostic.relocate diagnostic ~f:(relative project)) with
+         warning = true
+       })
 ;;
 
 let error message =

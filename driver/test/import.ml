@@ -34,3 +34,4 @@ module Source_edit = Stag_driver.Source_edit
 module Env = Stag_typecheck.Env
 module Binding = Stag_typecheck.Binding
 module Mode = Stag_mode
+module Warning = Stag_syntax.Warning

@@ -55,7 +55,7 @@ let report_all files diagnostics =
 
 let warn_stale files driver =
   List.iter (Inline_expansion.stale driver) ~f:(fun expansion ->
-    report files (Inline_expansion.diagnostic expansion))
+    report files { (Inline_expansion.diagnostic expansion) with warning = true })
 ;;
 
 (* The driver of the program, and the prelude it sees. *)

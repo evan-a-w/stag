@@ -36,7 +36,8 @@ module Claim : sig
   (** A comment [(* val x : t = v *)] claims the signature item [val x : t] and
       the value [x = v] ([= v] is optional), [(* type ... *)] and
       [(* exception ... *)] a signature item, [(* prints: s *)] output
-      containing [s], and [(* Error: s *)] an error message containing [s]. *)
+      containing [s], [(* Error: s *)] an error message containing [s], and
+      [(* Warning: s *)] a warning's. *)
   type t =
     | Item of string
     | Value of
@@ -45,6 +46,7 @@ module Claim : sig
         }
     | Prints of string
     | Error of string
+    | Warning of string
   [@@deriving sexp_of]
 end
 

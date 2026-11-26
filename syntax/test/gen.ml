@@ -437,7 +437,9 @@ and toplevel t : Toplevel.t =
      | 10 -> Let_mut (name t, annot t, expr t)
      | 11 when t.size > 0 ->
        t.size <- t.size - 1;
-       Attributed (toplevel t, attribute t)
+       (match toplevel t with
+        | { txt = Attribute _; _ } as floating -> floating
+        | toplevel -> Attributed (toplevel, attribute t))
      | 12 -> Attribute (attribute t)
      | _ -> Let (name t, [], Annot.none, expr t))
 

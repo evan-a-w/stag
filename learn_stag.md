@@ -162,11 +162,26 @@ let either v = match v with `L n | `R n -> n
 (* val either : [`L of 'a | `R of 'a] -> 'a *)
 ```
 
-There is no exhaustiveness check: a value no arm matches fails at run time.
+A match must be exhaustive: the error names a value no arm matches. An arm
+that can never match is a warning.
 
 ```stag-error
-let f n = match n with 0 -> "zero"
-let boom = f 1                      (* Error: Match failure *)
+type shape = Circle of int | Rect of int * int | Empty
+let f s = match s with Circle _ -> 0 | Rect (0, _) -> 1
+(* Error: This match is not exhaustive [non-exhaustive]: it does not cover `Empty` *)
+```
+
+```stag
+let g n = match n with 0 -> "zero" | _ -> "other" | 1 -> "one"
+(* Warning: This case is unused [unused-arm] *)
+
+(* Warnings are set as in OCaml, by name: [@warning "..."] after an
+   expression, [@@warning "..."] after a declaration, [@@@warning "..."] for
+   the rest of the module. "-" turns one off, "+" makes it a warning, "@" an
+   error; `stag check -w SPEC` sets the defaults. *)
+let h n = (match n with 0 -> "zero" | _ -> "other" | 1 -> "one") [@warning "-unused-arm"]
+let partial n = match n with 0 -> "zero"
+[@@warning "+non-exhaustive"]
 ```
 
 Both alternatives of an or-pattern must bind the same variables.
