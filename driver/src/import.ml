@@ -11,6 +11,7 @@ module Printer = Stag_syntax.Printer
 module Formatter = Stag_syntax.Formatter
 module Source_file = Stag_syntax.Source_file
 module Syntax = Stag_syntax.Syntax
+module Warning = Stag_syntax.Warning
 module Typed = Stag_ir.Typed
 module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
 module Interpreter = Stag_eval.Interpreter

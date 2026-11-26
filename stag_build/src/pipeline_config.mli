@@ -34,10 +34,15 @@ end
 type t =
   { prelude : Prelude_choice.t
   ; limits : Limits.t (** Of each phase: compile time, evaluation, each test. *)
+  ; warnings : Warning.Settings.t
   }
 
-(** Of a program of files at [paths], as [Prelude_choice.of_paths]. *)
-val create : limits:Limits.t -> string list -> t
+(** Of a program of files at [paths], as [Prelude_choice.of_paths], with
+    [Warning.Settings.default] unless given [warnings]. *)
+val create : ?warnings:Warning.Settings.t -> limits:Limits.t -> string list -> t
+
+(** [-w SPEC], any number of times, applied in order to the default settings. *)
+val warnings_param : Warning.Settings.t Command.Param.t
 
 (** [-fuel], [-max-depth] and [-time-limit], [default] (unlimited by default)
     where not given. *)

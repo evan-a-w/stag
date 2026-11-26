@@ -25,6 +25,7 @@ let create_typecheck
   ?(interpreter = Stag_treewalk.interpreter)
   ?compile_time_c_calls
   ?record_references
+  ?warnings
   ~limits
   ~output
   ?prelude
@@ -39,6 +40,7 @@ let create_typecheck
       ~interpreter
       ?compile_time_c_calls
       ?record_references
+      ?warnings
       ?prelude
       ()
   , interpreter )
@@ -47,6 +49,7 @@ let create_typecheck
 let check
   ?interpreter
   ?compile_time_c_calls
+  ?warnings
   ?(limits = Limits.unlimited)
   ?output
   ?prelude
@@ -56,6 +59,7 @@ let check
     create_typecheck
       ?interpreter
       ?compile_time_c_calls
+      ?warnings
       ~limits
       ~output
       ?prelude
@@ -159,6 +163,7 @@ let check_modules
   ?interpreter
   ?compile_time_c_calls
   ?record_references
+  ?warnings
   ?(limits = Limits.unlimited)
   ?output
   ?prelude
@@ -169,6 +174,7 @@ let check_modules
       ?interpreter
       ?compile_time_c_calls
       ?record_references
+      ?warnings
       ~limits
       ~output
       ?prelude
@@ -197,6 +203,7 @@ let eval ?(limits = Limits.unlimited) t =
 let check_files
   ?interpreter
   ?compile_time_c_calls
+  ?warnings
   ?limits
   ?output
   ?prelude
@@ -214,6 +221,7 @@ let check_files
        check_modules
          ?interpreter
          ?compile_time_c_calls
+         ?warnings
          ?limits
          ?output
          ?prelude

@@ -52,6 +52,9 @@ module Settings : sig
 
   val default : t
 
+  (** Every warning [Off]. *)
+  val off : t
+
   (** Later items of the spec win. *)
   val apply : t -> Spec.t -> t
 

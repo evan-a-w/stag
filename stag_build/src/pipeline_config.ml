@@ -47,9 +47,29 @@ end
 type t =
   { prelude : Prelude_choice.t
   ; limits : Limits.t
+  ; warnings : Warning.Settings.t
   }
 
-let create ~limits paths = { prelude = Prelude_choice.of_paths paths; limits }
+let create ?(warnings = Warning.Settings.default) ~limits paths =
+  { prelude = Prelude_choice.of_paths paths; limits; warnings }
+;;
+
+let warnings_param =
+  let%map_open.Command specs =
+    flag
+      "w"
+      (listed
+         (Command.Arg_type.create (fun spec ->
+            match Warning.Spec.of_string spec with
+            | Ok spec -> spec
+            | Error message -> failwith message)))
+      ~doc:
+        "SPEC enable (+name), disable (-name) or make errors of (@name) \
+         warnings, as [@warning \"SPEC\"] does; names are non-exhaustive, \
+         unused-arm and all"
+  in
+  List.fold specs ~init:Warning.Settings.default ~f:Warning.Settings.apply
+;;
 
 let limits_param ?(default = Limits.unlimited) () =
   let limit name ~arg ~doc ~of_string ~to_string default =

@@ -115,7 +115,8 @@ let of_program
         None
     | Ok
         ( (prelude : Pipeline_config.Loaded_prelude.t)
-        , { Pipeline.Checked.groups; checked; diagnostics; driver = _ } ) ->
+        , { Pipeline.Checked.groups; checked; diagnostics; warnings; driver = _ } ) ->
+      let diagnostics = Diagnostic.sort (diagnostics @ warnings) in
       let program = Option.both groups checked in
       (match prelude, stdlib with
        | Parsed prelude, _ ->
@@ -156,13 +157,14 @@ let in_stdlib ~limits ~contents checkout path =
       ~diagnostics:[ error ]
       None
   | Ok prelude ->
-    let { Pipeline.Checked.groups; checked; diagnostics; driver = _ } =
+    let { Pipeline.Checked.groups; checked; diagnostics; warnings; driver = _ } =
       Pipeline.check_prelude
         ~record_references:true
         ~limits
         ~output:ignore
         prelude
     in
+    let diagnostics = Diagnostic.sort (diagnostics @ warnings) in
     of_checked
       ~of_prelude:true
       ~path

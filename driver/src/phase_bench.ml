@@ -5,7 +5,7 @@ let to_error diagnostics =
     (String.concat
        (List.map
           diagnostics
-          ~f:(Diagnostic.to_string_hum ?contents:None ?warning:None)))
+          ~f:(Diagnostic.to_string_hum ?contents:None)))
 ;;
 
 let benches ?(prefix = "") ?compile_time_c_calls ~prelude parse =

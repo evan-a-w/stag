@@ -9,6 +9,7 @@ type t =
   ; compile_time_c_calls : Compile_time_c_calls.t
   ; prelude : Syntax.Toplevel.t list Lazy.t
   ; record_references : bool
+  ; warnings : Warning.Settings.t
   }
 
 let create
@@ -17,6 +18,7 @@ let create
   ?(const_toplevels = false)
   ?(compile_time_c_calls = Compile_time_c_calls.none)
   ?(record_references = false)
+  ?(warnings = Warning.Settings.default)
   ?prelude
   ()
   =
@@ -32,6 +34,7 @@ let create
        | Some prelude -> Lazy.from_val prelude
        | None -> Prelude.toplevels)
   ; record_references
+  ; warnings
   }
 ;;
 
@@ -2672,6 +2675,7 @@ module Checked = struct
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
     ; references : (Loc.t * Name_reference.t) list option
+    ; warnings : Typecheck_error.t list
     }
 end
 
@@ -3179,7 +3183,7 @@ let invalid_prelude error =
 
 (* The prelude, outside the program's root module, sees the builtin types as the
    program does. *)
-let add_prelude (program : Program_env.t) toplevels =
+let add_prelude (program : Program_env.t) toplevels ~warnings =
   let builtins =
     Module_scope.create_root
       ~types:builtin_names
@@ -3193,6 +3197,7 @@ let add_prelude (program : Program_env.t) toplevels =
     Module_scope.create_root
       ~enclosing:builtins
       ~path:[ Prelude_path.root ]
+      ~warnings
       ~types:[]
       ~declare:(declare program ~in_prelude:true)
       ~force:no_splices
@@ -3298,9 +3303,10 @@ let program_env
 ;;
 
 (* The program's root module, within the prelude. *)
-let root t program_env ~enclosing =
+let root t program_env ~enclosing ~warnings =
   Module_scope.create_root
     ~enclosing
+    ~warnings
     ~types:builtin_names
     ~declare:(declare program_env ~in_prelude:false)
     ~force:(generate t program_env)
@@ -3332,8 +3338,10 @@ let sorted_errors errors ~root =
 ;;
 
 let prelude_and_root t program_env =
-  let prelude = add_prelude program_env (force t.prelude) in
-  prelude, root t.fresh program_env ~enclosing:prelude
+  let prelude =
+    add_prelude program_env (force t.prelude) ~warnings:Warning.Settings.off
+  in
+  prelude, root t.fresh program_env ~enclosing:prelude ~warnings:t.warnings
 ;;
 
 let prelude_signature ({ fresh; stamps; interpreter; _ } as t) =
@@ -3401,6 +3409,7 @@ let check_module t (program_env : Program_env.t) module_
     ; program
     ; expansions = expansions module_
     ; references = Type_env.references program_env.type_env
+    ; warnings = sorted_errors (Program_env.warnings program_env) ~root:module_
     }
   in
   match errors with
@@ -3433,6 +3442,7 @@ let check_prelude
   ; const_toplevels
   ; compile_time_c_calls
   ; record_references
+  ; warnings
   }
   =
   let program_env =
@@ -3445,6 +3455,6 @@ let check_prelude
       ~record_references
       interpreter
   in
-  let prelude = add_prelude program_env (force prelude) in
+  let prelude = add_prelude program_env (force prelude) ~warnings in
   check_module fresh program_env prelude
 ;;

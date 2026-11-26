@@ -200,7 +200,7 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
   Types.Diagnostic.create
     ~message:(`String message)
     ~range
-    ~severity:Error
+    ~severity:(if diagnostic.warning then Warning else Error)
     ~source:"stag"
     ~relatedInformation:
       (List.map located ~f:(fun note ->

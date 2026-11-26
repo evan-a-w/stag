@@ -15,13 +15,16 @@ type t
     (default false, as for the interpreter), every toplevel must be [const].
     Externals may be called at compile time as [compile_time_c_calls] says, by
     default only the prelude's. With [record_references] (default false),
-    [Checked.references] are recorded. *)
+    [Checked.references] are recorded. Warnings are reported as [warnings] say
+    ([Warning.Settings.default] by default), changed by [warning] attributes;
+    the prelude's only by [check_prelude]. *)
 val create
   :  stamps:Stamp_counter.t
   -> interpreter:Interpreter.t
   -> ?const_toplevels:bool
   -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?record_references:bool
+  -> ?warnings:Warning.Settings.t
   -> ?prelude:Syntax.Toplevel.t list
   -> unit
   -> t
@@ -37,6 +40,9 @@ module Checked : sig
     ; references : (Loc.t * Name_reference.t) list option
     (** The names of types, constructors and fields in the source, by location,
         and what they resolved to, if [create]d to record them. *)
+    ; warnings : Typecheck_error.t list
+    (** Each once, by location. Those [create]'s [warnings] make errors are
+        among [Failed.errors] instead. *)
     }
 end
 

@@ -24,6 +24,7 @@ type t
 val check
   :  ?interpreter:(module Interpreter_intf.S)
   -> ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?warnings:Warning.Settings.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
@@ -37,6 +38,7 @@ val check
 val check_files
   :  ?interpreter:(module Interpreter_intf.S)
   -> ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?warnings:Warning.Settings.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
@@ -59,6 +61,7 @@ val check_modules
   :  ?interpreter:(module Interpreter_intf.S)
   -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?record_references:bool
+  -> ?warnings:Warning.Settings.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list

@@ -132,6 +132,8 @@ module Settings = struct
         | Unused_arm -> Warn ))
   ;;
 
+  let off = List.map Name.all ~f:(fun name -> name, Level.Off)
+
   let apply t spec =
     List.fold spec ~init:t ~f:(fun t ({ level; target } : Spec.Item.t) ->
       match target with

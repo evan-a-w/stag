@@ -20,5 +20,6 @@ module Limits = Stag_common.Limits
 module Prelude = Stag_eval.Prelude
 module Signature = Stag_types.Signature
 module Syntax = Stag_syntax.Syntax
+module Warning = Stag_syntax.Warning
 module Typecheck = Stag_typecheck.Typecheck
 module Prelude_path = Stag_types.Prelude_path
