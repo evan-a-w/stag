@@ -1014,8 +1014,8 @@ let%expect_test "slack and misplaced syntax" =
   ty "<int>{x : int; ..'r}";
   [%expect
     {|
-    t.stag:1:4-7: lets are always recursive; remove `rec`
-    t.stag:1:4-7: lets are always recursive; remove `rec`
+    t.stag:1:4-7: lets are recursive unless `nonrec`; remove `rec`
+    t.stag:1:4-7: lets are recursive unless `nonrec`; remove `rec`
     t.stag:1:1-3: substitutions `.{...}` are only written after a splice `.~e`
     (Splice (expr (Var f ()))
      (subs (((x ((Lit (Int 1)))) (y ((Tuple ((Lit (Int 2)) (Lit (Int 3))))))))))

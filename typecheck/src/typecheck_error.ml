@@ -630,9 +630,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
        then
          sprintf
            ". Lets are recursive, so this %s is the one being defined, not the \
-            %s outside it: write `let nonrec %s` to use the outer %s, or \
+            %s outside it: write `let nonrec %s` to use the outer one, or \
             rename one of them"
-           name
            name
            name
            name

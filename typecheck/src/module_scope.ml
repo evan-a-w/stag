@@ -71,7 +71,7 @@ and t =
   { module_ : module_
   ; position : Position.t
   ; hidden : Member.t option
-      (* Not visible from here, but from the enclosing module: of [nonrec]. *)
+  (* Not visible from here, but from the enclosing module: of [nonrec]. *)
   }
 
 and entry =
@@ -671,10 +671,10 @@ let find_scope t member =
     then outward t ~blocked
     else (
       match%bind.Result lookup t member with
-    | Visible -> Ok { Found.scope = Some t; blocked }
-    | Hidden _ -> outward t ~blocked
-    | Absent { blocked = here } ->
-      outward t ~blocked:(Option.first_some blocked here))
+      | Visible -> Ok { Found.scope = Some t; blocked }
+      | Hidden _ -> outward t ~blocked
+      | Absent { blocked = here } ->
+        outward t ~blocked:(Option.first_some blocked here))
   and outward (t : t) ~blocked =
     match t.module_.enclosing with
     | Some t -> search t ~blocked
@@ -864,7 +864,9 @@ and find_written
     | [] -> Member namespace, name
     | _ :: _ -> Module, name
   in
-  match%bind.Result lookup { module_; position = End; hidden = None } member with
+  match%bind.Result
+    lookup { module_; position = End; hidden = None } member
+  with
   | Visible ->
     (match rest with
      | [] -> Ok (join (module_.path @ [ name ]))

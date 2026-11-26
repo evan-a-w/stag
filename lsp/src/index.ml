@@ -555,8 +555,7 @@ let create
     | Let (_, _, _, e)
     | Let_nonrec (_, _, _, e)
     | Let_mut (_, _, e)
-    | Expect_test { body = e; _ } ->
-      Syntax_at.expr syntax e
+    | Expect_test { body = e; _ } -> Syntax_at.expr syntax e
     | Bench { param; body; name = _ } ->
       Option.iter param ~f:(fun { args; name } ->
         Hashtbl.set bench_params ~key:(Span.of_loc toplevel.loc) ~data:name;

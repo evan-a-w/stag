@@ -395,8 +395,7 @@ and toplevel t : Toplevel.t =
   loc
     (match int t 12 with
      | 0 -> Toplevel.Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
-     | 11 ->
-       Let_nonrec (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
+     | 11 -> Let_nonrec (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
      | 1 | 2 -> Type (type_decl t)
      | 3 -> Expect_test { name = loc (string t); body = expr t }
      | 4 when t.size > 0 ->

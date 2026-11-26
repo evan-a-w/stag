@@ -217,7 +217,9 @@ module Make (B : Builder) = struct
       | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
       | Mode m -> con "Stag.Type_expr.Arg.Mode" [ mode_expr m ]
 
-    and type_decl ({ name = decl_name; params; kind; nonrec_ = _ } : Type_decl.t) =
+    and type_decl
+      ({ name = decl_name; params; kind; nonrec_ = _ } : Type_decl.t)
+      =
       B.record
         [ "name", name decl_name
         ; "params", list type_param params

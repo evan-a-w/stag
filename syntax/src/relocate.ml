@@ -407,7 +407,8 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
 
 and type_decl
   ({ name = n; params; kind; nonrec_ } : Type_decl.t)
-  ({ name = n'; params = params'; kind = kind'; nonrec_ = nonrec' } : Type_decl.t)
+  ({ name = n'; params = params'; kind = kind'; nonrec_ = nonrec' } :
+    Type_decl.t)
   =
   let* () = Option.some_if (Bool.equal nonrec_ nonrec') () in
   let* n = name n n' in

@@ -182,7 +182,11 @@ let builtins =
   List.map
     [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
     ~f:(fun name ->
-      { Type_decl.name = Located.create name; params = []; kind = Abstract; nonrec_ = false })
+      { Type_decl.name = Located.create name
+      ; params = []
+      ; kind = Abstract
+      ; nonrec_ = false
+      })
   @ [ { Type_decl.name = Located.create "ptr"
       ; params =
           [ Located.create (Type_decl.Param.Ty "a")

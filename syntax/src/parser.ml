@@ -1113,8 +1113,10 @@ let rec expr ?(seq = true) t : Expr.t =
     else first
 
 and binding_name t =
-  if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
-  if is t Nonrec then fail (loc t) "`nonrec` goes directly after `let`";
+  if is t Rec
+  then fail (loc t) "lets are recursive unless `nonrec`; remove `rec`";
+  if is t Nonrec
+  then fail (loc t) "`nonrec` is written once, directly after `let`";
   match peek t with
   | Underscore ->
     let loc = loc t in

@@ -772,7 +772,8 @@ module Of_value = struct
              Let_mut
                (arg 0 (name Binder ~loc), arg 1 (annot ~loc), arg 2 (expr ~loc))
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
-           | "Type_nonrec", 1 -> Type { (arg 0 (type_decl ~loc)) with nonrec_ = true }
+           | "Type_nonrec", 1 ->
+             Type { (arg 0 (type_decl ~loc)) with nonrec_ = true }
            | "Exception", 2 ->
              Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))
            | "External", 1 ->

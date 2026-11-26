@@ -1266,10 +1266,11 @@ and let_type
            then f ()
            else
              Env.with_bindings
-             scope.locals
-             [ name, Scope.entry scope ~defining:true ~ident ~scheme:fn.ty ~mode
-             ]
-             ~f
+               scope.locals
+               [ ( name
+                 , Scope.entry scope ~defining:true ~ident ~scheme:fn.ty ~mode )
+               ]
+               ~f
          in
          (* A closure may refer to itself, but a value referring to itself is
             not known yet, as a [let rec]'s isn't. *)
@@ -2978,7 +2979,8 @@ let declare
       args
       ~malformed:true
       ~wrap_error
-  | Let (name, args, annot, expr), _ | Let_nonrec (name, args, annot, expr), _ ->
+  | Let (name, args, annot, expr), _ | Let_nonrec (name, args, annot, expr), _
+    ->
     let kind : Toplevel_binding.Kind.t =
       match Nonempty_list.of_list args with
       | None -> Value

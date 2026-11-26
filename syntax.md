@@ -37,15 +37,16 @@ node, for good errors.
   `(* c *).x` start root paths, and `r.x`, `M.x`, `(e).x`, `"s".x` do not.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
-- Keywords: `let rec in match with fun exception external type of module
+- Keywords: `let rec nonrec in match with fun exception external type of module
   struct end forget`, `true false`, and `stack_ exclave_ region_` (see
   [Modes](#modes)), so these are not identifiers anywhere, even qualified
   (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
   `external`: it is the `external` mode after `@`, unless it starts a
   declaration (`external name :`).
-  `rec` is reserved, as lets are always recursive. So a value may not use
-  itself while it is computed, checked as toplevels are: `let n = Int.add n 1`
-  is an error, even where it shadows another `n`. A function it only builds
+  `rec` is reserved, as lets are recursive unless written `let nonrec`. So a
+  value may not use itself while it is computed, checked as toplevels are:
+  `let n = Int.add n 1` is an error, even where it shadows another `n`
+  (`let nonrec n = Int.add n 1` uses the outer one). A function it only builds
   may refer to it (`let f = fun x -> f x`), one it calls may not. Code spliced
   in it may too (`let f = .~body`, with `body` a quote of a function using
   `f`): what the code does with it is checked where the code is spliced. An
@@ -89,7 +90,8 @@ arguments, `C of (int * int)` one, a tuple. Weak variables
 ## Expressions
 
 ```ocaml
-let f x (y : int) : t = e in body   (* lets are always recursive: no `rec` *)
+let f x (y : int) : t = e in body   (* lets are recursive: no `rec` *)
+let nonrec x = e in body            (* x is not bound in e: the outer x is *)
 let mut x = e in body   let mut x : t = e in body  (* mutable variable, see below *)
 x <- e   M.x <- e                   (* assignment, of type unit *)
 e1; e2                              (* Stag.Expr.Seq: runs as let _ = e1 in e2 *)
@@ -388,8 +390,8 @@ and can't be handled.
 
 `let mut x = e` binds a variable that `x <- e'` assigns. It binds only a
 variable, optionally annotated (`let mut x : t = e`), with no parameters. It is
-the one `let` that is not recursive: in `let mut x = x + 1 in ...` the `x` on
-the right is the outer one. Its type is never generalized (`let mut l = []`
+never recursive (and takes no `nonrec`): in `let mut x = x + 1 in ...` the `x`
+on the right is the outer one. Its type is never generalized (`let mut l = []`
 has a weak type, fixed by its uses). Only a variable bound by `let mut` can be
 assigned; `<-` takes a path (`x`, `M.x`). Fields are assigned through a
 pointer (see [Stores](#stores)): records have no mutable fields.
@@ -565,6 +567,7 @@ modes and modalities only where the parser allows them, so the annotation's
 
 ```ocaml
 let f x y = e                          (* toplevels are order independent *)
+let nonrec x = e                       (* x in e is the outer x, as in a local *)
 let mut counter = 0                    (* mutable global *)
 type nat = Z | S of nat
 type list['a] = Nil | Cons of 'a * list['a]
@@ -572,6 +575,7 @@ type with_x[{..'r}] = {`x : int; ..'r} (* alias *)
 type point = {x : int; y : int}        (* nominal record *)
 type void = |                          (* empty variant *)
 type t                                 (* abstract *)
+type nonrec t = list[t]                (* the t on the right is the outer t *)
 module M = struct ... end
 module M = .~e                         (* declaration splices, see below *)
 include .~e
