@@ -265,17 +265,36 @@ let%expect_test "a keyword table built at compile time" =
 let keywords = .~(
   let table @ portable = Core.Map.of_list Core.String.compare [("let", 1); ("in", 2); ("match", 3)] in
   .< table >.)
+(* Lifted into the code as a constant. *)
+let static_keywords @ const static = keywords
 let is_keyword (s : string) = Core.Map.mem Core.String.compare keywords s
 let checks = (is_keyword "match", is_keyword "x")
 |};
   [%expect
     {|
-    val keywords : Core.Map.t[string, int, portable]
+    val keywords : Core.Map.t[string, int, 'm0]
+    val static_keywords : Core.Map.t[string, int, 'm0]
     val is_keyword : string -> bool
     val checks : bool * bool
     -- evaluated at compile time
     -- evaluated
     (keywords
+     (Core.Map.Node
+      (Box
+       (Core.Map.node
+        (left
+         (Core.Map.Node
+          (Box
+           (Core.Map.node (left (Core.Map.Empty)) (key (String in)) (value 2)
+            (right (Core.Map.Empty)) (height 1)))))
+        (key (String let)) (value 1)
+        (right
+         (Core.Map.Node
+          (Box
+           (Core.Map.node (left (Core.Map.Empty)) (key (String match)) (value 3)
+            (right (Core.Map.Empty)) (height 1)))))
+        (height 2)))))
+    (static_keywords
      (Core.Map.Node
       (Box
        (Core.Map.node
@@ -327,6 +346,11 @@ let as_ext : Core.Lru.t[string, string, external] = gcs
 let gcs : Core.Lru.t[string, string, gc] = Core.Lru.create 2 Core.String.compare
 let fill (u : unit) = Core.Lru.add gcs "a" (ext "x")
 |}
+      (* Keys are GC values: a cache takes no C string as a key. *)
+    ; {|
+let gcs : Core.Lru.t[string, string, gc] = Core.Lru.create 2 Core.String.compare
+let fill (u : unit) = Core.Lru.add gcs (ext "k") "x"
+|}
     ; {|
 let exts : Core.Lru.t[string, string, external] = Core.Lru.create 2 Core.String.compare
 let kept : ptr[string] = Ptr.make ""
@@ -341,6 +365,7 @@ let read (u : unit) =
     This expression has type Core.Lru.t[string, string, gc] but an expression was expected of type Core.Lru.t[string, string, external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
     This is external, because it is annotated external (at t.stag:2:31-39), then e is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:43-52), then it is passed to a function (at t.stag:5:22-52), but must be at most gc, because the types are unified, then Ptr.make holds it, then a function is used at a type with other modes, then it is passed to a function (at <core>/lru.stag:100:15-68), then v is used (at <core>/lru.stag:100:42-43), then v is passed to the function (at <core>/lru.stag:95:2-106:17), then a function is used at a type with other modes
+    This is external, because it is annotated external (at t.stag:2:31-39), then e is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:39-48), then it is passed to a function (at t.stag:5:22-48), but must be at most gc, because a function type fixes it, as a function is used at a type with other modes, then it is passed to a function (at <core>/map.stag:175:18-27), then k is used (at <core>/map.stag:175:26-27), then k is passed to the function (at <core>/map.stag:172:2-181:33), then a function is used at a type with other modes, then it is passed to a function (at <core>/lru.stag:95:8-38), then k is used (at <core>/lru.stag:95:37-38), then k is passed to the function (at <core>/lru.stag:95:2-106:17), then a function is used at a type with other modes
     This is external, because the types are unified, then it is read from a pointer's cell, which may hold it (at <core>/lru.stag:90:9-15), then it is dereferenced (at <core>/lru.stag:90:9-15), then its field is read (at <core>/lru.stag:90:9-21), then the function returns it (at <core>/lru.stag:86:2-90:21), then a function is used at a type with other modes, then the function returns it (at t.stag:7:8-30), then s is used (at t.stag:8:24-25), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:8:24-25)
     |}]
 ;;

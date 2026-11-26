@@ -26,10 +26,14 @@ val assuming
 
 val lower_rank : t -> rank:int -> unit
 
-(** The lower bound [t] would have on [axis] if the variables [raised] (by [id])
-    were raised to their upper bounds, but generic ones: what [t] is at least
-    however they turn out. *)
-val lower_assuming : t -> 'a Axis.t -> raised:(int -> bool) -> 'a
+(** The lower bound [t] would have on [axis] if the variables (by [id]), but
+    generic ones, were raised to the points [raised] gives: what [t] is at least
+    however they turn out, by the constraints added. *)
+val lower_assuming : t -> 'a Axis.t -> raised:(int -> 'a option) -> 'a
+
+(** The layouts, not known, on which constraints [t] may get on [axis] from
+    below wait. *)
+val waits_on : t -> _ Axis.t -> Graph.Layout.t list
 
 (** [None] once generic. *)
 val rank : t -> int option
@@ -67,6 +71,28 @@ module Node : sig
   val at_most : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
 
   val at_least : t -> int -> Reason.t -> (unit, Mode_error.t) Result.t
+
+  module Guarded : sig
+    type node := t
+
+    type kind =
+      | Edge of node * Morphism.t * node (** [lo <= m(hi)] *)
+      | Upper of node * int
+      | Lower of node * int
+
+    (** [kind], once any of [guards] has pointers: [holds] if one has. *)
+    type t =
+      { kind : kind
+      ; guards : Graph.Layout.t list
+      ; holds : bool
+      }
+
+    (** What the constraints not added, as the layouts guarding them aren't
+        known, imply between the nodes given, or of their bounds. A generic
+        node's scheme keeps them, its instances adding them: those whose guard
+        has pointers since [hold]. *)
+    val among : node list -> t list
+  end
 end
 
 val node : t -> _ Axis.t -> Node.t
@@ -156,8 +182,9 @@ val default_to_upper : t -> unit
     inconsistent anyway). *)
 val generalize : t list -> rank:int -> unit
 
-(** Generic and unconstrained: a placeholder each instance copies afresh. *)
-val create_generic : Id_source.t -> t
+(** Generic and unconstrained but for [at_most]: a placeholder each instance
+    copies afresh. *)
+val create_generic : ?at_most:Const.t * Reason.t -> Id_source.t -> t
 
 (** Makes a generic variable one of rank [rank] again, with its constraints, to
     refine a scheme in place before generalizing it anew. Not allowed under

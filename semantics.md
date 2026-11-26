@@ -182,7 +182,7 @@ allocation's. They cannot be one axis, because of
 mode crossing by kind: pointer-free data (ints) crosses provenance and
 locality entirely, and crosses `portable` (it can be lifted into code), but
 never `const`, as a runtime int is not known at compile time. Crossing is
-applied when the type is known where the constraint arises. A raised
+decided once the type is known (see below). A raised
 exception's payload is at least `gc` outright, as it is allocated whatever
 its stage.
 
@@ -243,7 +243,14 @@ declarations of C functions: an external's modes are trusted as written, not
 forced to `external`.
 
 In compiled code, a value crossing from compile time into a quote must be
-`const` (lifted, as static data) or a runtime toplevel, referred to by its
+`portable`, so deeply immutable, and at most `gc`, and is then lifted, as
+static data: at its use it is `const static global`, whatever it was bound as
+(an application's result included). A value that may refer to `external`
+memory is not lifted (an error), as the static copy can't own what it points
+to, and `const external` isn't a mode. Likewise a `portable` toplevel used by
+code run at compile time (a splice) is a compile-time copy of it, computed
+for that run, not the run-time value: they are equal, as it is deeply
+immutable. Otherwise it is a runtime toplevel, referred to by its
 symbol (the symbol is `static`, whatever the toplevel holds, so mutable
 globals keep their identity).
 
@@ -426,9 +433,30 @@ variable's lower bound reaches a given point, here unifying the types. Their
 generalisation (bounds kept between generic and outer variables) is the same
 as for modes.
 
-Mode crossing by kind is applied when the type is known at the constraint;
-constraints on values of a type variable later found to be `int` are not
-retracted (as OxCaml; annotations recover precision). A crossing is a
+Mode crossing by kind is decided once the type is known. A type variable
+that a crossing depends on gets a layout, a two-point solver variable
+(`pointer_free ≤ has_pointers`), kept by a watcher on the variable that runs
+when unification binds it: to a type with pointers raises it, to a
+pointer-free one fixes it, to another type ties it to the layouts of that
+type's variables. A constraint on a value of a type variable is added as if
+the type crossed (with its morphism), and again in full, guarded by the layout:
+dormant until it has pointers. The solver only grows, so what is read in
+between stays true, and the result doesn't depend on the order constraints
+and bindings come in. At generalisation, a layout still unknown is raised
+(the variable is taken to have pointers), unless annotated
+`'a : pointer_free`, which instead requires every instance to be pointer-free;
+so schemes keep guarded constraints only for layouts of an enclosing scope.
+An instance of a scheme records where it is used, and a pointer-free bound
+failing through it is reported there. Layouts are kept in frames, one per
+scope being checked (a variable belongs to the innermost scope that was being
+checked when it was made, by its id, as ids only grow): as a scope ends, the
+layouts of its variables it doesn't generalize or share with an enclosing
+scope are decided, then the checks waiting on them run (a quote's embeddings
+whose type or stage wasn't known), the rest left to the frame around it. At the
+end of a toplevel, what is still unknown is taken to have pointers. When a
+layout has pointers, the constraints it guards are added in order; once one
+fails, the rest are dropped (they follow from the same binding).
+A crossing is a
 morphism on the edge, e.g. `a ≤ r(b)` with `r` the right adjoint of
 `x ↦ x ⊓ portable` on stage; on provenance and locality the edge is dropped.
 

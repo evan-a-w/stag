@@ -245,7 +245,7 @@ let%expect_test "crossing" =
        (reason "an int"));
   print_result
     (Var.submode
-       ~crossing:{ Crossing.none with locality = true }
+       ~crossing:{ Crossing.none with locality = Always }
        (value ())
        (target ())
        (reason "crosses locality only"));
@@ -425,15 +425,31 @@ let%expect_test "lower bounds assuming some variables at their upper bounds" =
   ok_exn (Var.at_most other Locality Regional (reason "other is regional"));
   Var.generalize [ generic ] ~rank:0;
   let assuming raised =
-    let raised = List.map raised ~f:Var.id in
-    let raised id = List.mem raised id ~equal:Int.equal in
+    let upper get id =
+      List.find raised ~f:(fun var -> Var.id var = id)
+      |> Option.map ~f:(fun var -> get (Var.upper var))
+    in
     print_s
       [%message
         ""
-          ~stage:(Var.lower_assuming result Stage ~raised : Stage.t)
+          ~stage:
+            (Var.lower_assuming
+               result
+               Stage
+               ~raised:(upper (fun (c : Const.t) -> c.stage))
+             : Stage.t)
           ~provenance:
-            (Var.lower_assuming result Provenance ~raised : Provenance.t)
-          ~locality:(Var.lower_assuming result Locality ~raised : Locality.t)]
+            (Var.lower_assuming
+               result
+               Provenance
+               ~raised:(upper (fun (c : Const.t) -> c.provenance))
+             : Provenance.t)
+          ~locality:
+            (Var.lower_assuming
+               result
+               Locality
+               ~raised:(upper (fun (c : Const.t) -> c.locality))
+             : Locality.t)]
   in
   assuming [];
   assuming [ param ];

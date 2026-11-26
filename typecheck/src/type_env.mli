@@ -130,11 +130,13 @@ val is_empty_variant : t -> string -> (bool, Typecheck_error.t) Result.t
 
 (** The type and row variables of the annotations of one toplevel definition:
     each name stands for the same variable throughout. *)
+type env := t
+
 module Annotation_vars : sig
   type t
 
   (** Variables are created at [rank] on first use. *)
-  val create : Fresh.t -> rank:Type.rank -> t
+  val create : env -> rank:Type.rank -> t
 
   (** The mode a mode variable stands for, an error if the name is also a type
       or row variable. *)
@@ -217,3 +219,11 @@ val record_member_reference : t -> string -> loc:Loc.t -> unit
 
 (** By location of the name, if [create]d to record them. *)
 val references : t -> (Loc.t * Name_reference.t) list option
+
+(** Whether [ty] is [pointer_free], isn't whatever its unknown variables become,
+    or that depends on whether theirs have pointers. An entry of unknown
+    presence with pointers depends on whether it is present. *)
+val layout_of : t -> Type.ty -> Var_layout.Layout_of.t
+
+(** The layouts of the variables of its types. *)
+val layouts : t -> Var_layout.t

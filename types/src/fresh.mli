@@ -8,6 +8,10 @@ type t
 
 val create : unit -> t
 val id : t -> Type.id
+
+(** What [id] gives next, without taking it. *)
+val next_id : t -> Type.id
+
 val set_value_parameters : t -> Value_layout.parameters -> unit
 val value_parameters : t -> Value_layout.parameters
 val set_variances : t -> Variance.of_con -> unit

@@ -119,7 +119,7 @@ let pick (b : bool) =
 let use (s @ local) = pick true s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:5:42-48), then it is bound by an annotated let (at t.stag:5:42-48), then s is used (at t.stag:5:51-52), then s is passed to the function (at t.stag:5:13-72), then a function is used at a type with other modes |}];
+    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:5:42-48), then it is bound by an annotated let (at t.stag:5:42-48), then s is used (at t.stag:5:51-52), then s is passed to the function (at t.stag:5:13-72), then a function is used at a type with other modes |}];
   check
     {|
 let pick (b : bool) =
@@ -129,7 +129,7 @@ let pick (b : bool) =
 let use (s @ local) = pick true s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:4:41-47), then it is bound by an annotated let (at t.stag:4:41-47), then s is used (at t.stag:4:50-51), then s is passed to the function (at t.stag:4:12-71), then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:4:41-47), then it is bound by an annotated let (at t.stag:4:41-47), then s is used (at t.stag:4:50-51), then s is passed to the function (at t.stag:4:12-71), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "_ can't be constrained or declared" =
@@ -168,7 +168,7 @@ let matched (b : box['a]) = match b with *x -> x
 let bad (s @ local) = let b = Box.make s in let r @ global = b.* in r
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:2:13-18), then s is passed to the function (at t.stag:2:22-69), then s is used (at t.stag:2:39-40), then it is passed to a function (at t.stag:2:30-40), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes, then the function returns it (at t.stag:2:30-40), then b is used (at t.stag:2:61-62), then it is dereferenced (at t.stag:2:61-64), then it is bound by an annotated let (at t.stag:2:52-58), but must be at most global, because it is annotated global (at t.stag:2:52-58) |}]
+    {| This is regional, because it is annotated local (at t.stag:2:13-18), then s is passed to the function (at t.stag:2:22-69), then s is used (at t.stag:2:39-40), then it is passed to a function (at t.stag:2:30-40), but must be at most global, because it is annotated global (at t.stag:2:52-58), then it is bound by an annotated let (at t.stag:2:52-58), then it is dereferenced (at t.stag:2:61-64), then b is used (at t.stag:2:61-62), then the function returns it (at t.stag:2:30-40), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "a box can't be stored to" =
@@ -447,8 +447,8 @@ let f2 b x = match b with | true -> x | false -> (fun (s @ local) -> String.leng
 |};
   [%expect
     {|
-    val f : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
-    val f2 : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
+    val f : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
+    val f2 : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
     |}]
 ;;
 
@@ -529,9 +529,9 @@ let use_inside (s @ local) = inside 0 (fun (t @ local) -> 1) s
 |};
   [%expect
     {|
-    val before : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and stage('m4) <= stage('m5) and 'm6 <= 'm3 and gc <= 'm1
+    val before : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
     val after : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
-    val inside : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and stage('m4) <= stage('m5) and 'm6 <= 'm3 and gc <= 'm1
+    val inside : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm4 <= 'm7 and 'm6 <= 'm3 and gc <= 'm1
     val use_before : string @ 'm0 -> int @ _ with local <= 'm0
     val use_after : string @ 'm0 -> int @ _ with local <= 'm0
     val use_inside : string @ 'm0 -> int @ _ with local <= 'm0
@@ -543,7 +543,7 @@ let after (n : int) x = let r = match n with | 0 -> x | _ -> (fun (s @ local) ->
 let use_after (s @ local) = after 0 (fun (t : string) -> let g @ global = t in 1) s
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:19-24), then s is passed to the function (at t.stag:3:28-83), then s is used (at t.stag:3:82-83), then it is passed to a function (at t.stag:3:28-83), but must be at most global, because it is annotated global (at t.stag:3:65-71), then it is bound by an annotated let (at t.stag:3:65-71), then t is used (at t.stag:3:74-75), then t is passed to the function (at t.stag:3:36-81), then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:3:19-24), then s is passed to the function (at t.stag:3:28-83), then s is used (at t.stag:3:82-83), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:28-83), but must be at most global, because it is annotated global (at t.stag:3:65-71), then it is bound by an annotated let (at t.stag:3:65-71), then t is used (at t.stag:3:74-75), then t is passed to the function (at t.stag:3:36-81), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "joins by variance: contravariant and invariant parts" =
@@ -768,5 +768,83 @@ let%expect_test "a quote's use of a toplevel being checked is by variance" =
     val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and release(locality('m1)) <= locality('m4) and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and release(locality('m1)) <= locality('m4) and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
+    |}]
+;;
+
+let%expect_test "a mode parameter on a declared arrow" =
+  (* An argument's is contravariant, a result's covariant. *)
+  check
+    (ext
+     ^ {|
+type takes['p : mode] = { f : string @ 'p -> int }
+type gives['p : mode] = { g : unit -> string @ 'p }
+let takes_ok (x : takes[external]) : takes[gc] = x
+let gives_ok (x : gives[gc]) : gives[external] = x
+let length = { f = fun (s @ external) -> String.length s }
+let used : takes[external] = length
+let n = length.f (ext "a")
+|}
+    );
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    type takes['m0 : mode] = { f : string @ 'm0 -> int }
+    type gives['m0 : mode] = { g : unit -> string @ 'm0 }
+    val takes_ok : takes[external] @ 'm0 -> takes[gc] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val gives_ok : gives[gc] @ 'm0 -> gives[external] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val length : takes[_]
+    val used : takes[external]
+    val n : int
+    |}];
+  check
+    {|
+type takes['p : mode] = { f : string @ 'p -> int }
+let takes_bad (x : takes[gc]) : takes[external] = x
+|};
+  [%expect
+    {|
+    This expression has type takes[gc] but an expression was expected of type takes[external]
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
+    |}];
+  check
+    {|
+type gives['p : mode] = { g : unit -> string @ 'p }
+let gives_bad (x : gives[external]) : gives[gc] = x
+|};
+  [%expect
+    {|
+    This expression has type gives[external] but an expression was expected of type gives[gc]
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
+    |}];
+  (* What the field's function is given must fit its argument's mode. *)
+  check
+    (ext
+     ^ {|
+type takes['p : mode] = { f : string @ 'p -> int }
+let call (x : takes[gc]) = x.f (ext "a")
+|}
+    );
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:31-40), then it is passed to a function (at t.stag:5:27-40), but must be at most gc, because the types are unified, then a function is used at a type with other modes |}];
+  (* A mode parameter has no locality: the arrow's is the default, global. *)
+  check
+    {|
+type takes['p : mode] = { f : string @ 'p -> int }
+let call (x : takes[gc]) (s @ local) = x.f s
+|};
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:3:30-35), then s is passed to the function (at t.stag:3:39-44), then s is used (at t.stag:3:43-44), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:3:39-44), but must be at most global, because it is a mode parameter on an arrow in a declaration, which is global (at t.stag:2:11-20), then a function is used at a type with other modes |}];
+  round_trip
+    {|
+type cmp['k, 'p : mode] = { compare : 'k @ 'p -> 'k @ 'p -> int }
+type alias['p : mode] = string @ 'p -> string @ 'p
+let apply (c : cmp[string, external]) (f : alias[gc]) = c.compare (f "a") "b"
+|}
+    ~show:`Signature;
+  [%expect
+    {|
+    type cmp['a, 'm0 : mode] = { compare : 'a @ 'm0 -> 'a @ 'm0 -> int }
+    type alias['m0 : mode] = string @ 'm0 -> string @ 'm0
+    val apply : cmp[string, external] @ 'm0 -> ((string -> string) @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     |}]
 ;;

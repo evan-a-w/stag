@@ -289,7 +289,10 @@ let%expect_test "splices leave the locks of their quote" =
     |}]
 ;;
 
-let%expect_test "values computed at compile time are portable, not const" =
+let%expect_test "values computed at compile time are lifted as constants" =
+  (* A portable value of the compile time is deeply immutable, so the code holds
+     a copy of it: a constant, [const static], so generalized. Code run at run
+     time ([applied]) is not. *)
   modes {|
 let embeds = .~(let k x = x in .<k>.)
 let quoted = .<embeds>.
@@ -315,17 +318,22 @@ let d = .~(let k = Int.add 1 2 in let v = fun y -> Int.add y k in .<let w = fun 
   modes {|
 let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
 |};
+  (* Only the copy in the code is a constant, not the binding. *)
+  modes
+    {|
+let bound = .~(let t @ portable = (1, "a") in let u @ const = t in .<t>.)
+|};
   [%expect
     {|
-    val embeds : '_a -> '_a
-    val quoted : <'_a -> '_a>{..'b}
-    This is portable, because k was computed at compile time (at t.stag:2:33-34), then k is used (at t.stag:2:33-34), but must be at most const, because embeds is a toplevel (at t.stag:2:13-37)
+    val embeds : 'a -> 'a
+    val quoted : <'a -> 'a>{..'b}
     This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:4:19-34), but must be at most const, because applied is a toplevel (at t.stag:4:14-37)
-    This is portable, because v was computed at compile time (at t.stag:2:71-72), then v is embedded in a quote (at t.stag:2:71-72), then the code is built (at t.stag:2:69-74), but must be at most const, because c is a toplevel (at t.stag:2:8-78)
-    This is portable, because v was computed at compile time (at t.stag:3:85-86), then v is captured by a closure (at t.stag:3:85-86), then the closure is made (at t.stag:3:76-88), then w is bound (at t.stag:3:68-93), but must be at most const, because d is a toplevel (at t.stag:3:8-96)
-    This is portable, because v was computed at compile time (at t.stag:4:77-78), then v is captured by a closure (at t.stag:4:77-78), then the closure is made (at t.stag:4:68-80), but must be at most const, because e is a toplevel (at t.stag:4:8-83)
+    val c : <int -> int>{..'a}
+    val d : int -> int
+    val e : int -> int
     val d : int -> int
     The quote can't embed v, as it isn't portable. Write [forget v in ...] to make v a free variable of the quote
+    This is portable, because it is annotated portable (at t.stag:2:23-31), then t is used (at t.stag:2:62-63), then it is bound by an annotated let (at t.stag:2:54-59), but must be at most const, because it is annotated const (at t.stag:2:54-59)
     |}]
 ;;
 
@@ -535,7 +543,7 @@ let q = .< fun a -> let p = fun u -> .~(.<1>.) in (p 1, p true) >.
 let q = .< fun a -> let h @ const = fun u -> .~(.<1>.) in h >.
 |};
   [%expect
-    {| This is nonportable, because h is being defined (at t.stag:2:20-59), then h is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), then it is bound by an annotated let (at t.stag:2:28-33), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
+    {| This is nonportable, because h is captured by a closure in its own definition (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), then it is bound by an annotated let (at t.stag:2:28-33), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
 ;;
 
 let%expect_test "data holding a toplevel function being checked is const" =
@@ -623,4 +631,44 @@ let r = .~(let mut x = 1 in x <- 2; .< x >.)
 |};
   [%expect
     {| The mutable variable x is bound at compile time (level -1) but used at runtime (level 0): a [let mut] local can only be used by the code that binds it, not in a quote or at compile time |}]
+;;
+
+let%expect_test "only values in the GC heap are lifted" =
+  modes
+    {|
+let e = .~(let s @ portable external = "a" in .<s>.)
+let g = .~(let s @ portable gc = "a" in .<s>.)
+|};
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:19-36), but must be at most gc, because s is lifted into the code's static data (at t.stag:2:48-49) |}]
+;;
+
+let%expect_test "a splice's constraints are all known before it runs" =
+  modes
+    {|
+let d = .~(let k = id (fun p -> let y = (p, "s") in .< y >.) in print_endline "ran d"; k (Ptr.make 0))
+|};
+  [%expect
+    {| The quote can't embed y, as it may not be portable. Bind it as (y @ portable) to embed it, or write [forget y in ...] to make y a free variable of the quote |}]
+;;
+
+let%expect_test "mode arguments are at least their parameter's floor" =
+  modes
+    {|
+type c['p : mode] = { k : unit -> int @ 'p }
+let z (r : c[const]) = r
+|};
+  modes
+    {|
+type c['p : mode] = { k : unit -> int @ 'p }
+let z (r : c[portable]) = r
+let w (r : c['m]) = r
+|};
+  [%expect
+    {|
+    This mode is invalid: this mode argument of c must be at least portable
+    type c['m0 : mode] = { k : unit -> int @ 'm0 }
+    val z : c[portable] -> c[portable]
+    val w : c['m0] -> c['m0]
+    |}]
 ;;

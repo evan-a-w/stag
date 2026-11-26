@@ -173,16 +173,20 @@ end
 
 module Constraint = struct
   type t =
-    { lower : Term.t
-    ; upper : Term.t
-    }
+    | Submode of
+        { lower : Term.t
+        ; upper : Term.t
+        }
+    | Pointer_free of string
   [@@deriving sexp_of, compare, equal]
 
-  let to_string { lower; upper } =
-    Term.to_string lower ^ " <= " ^ Term.to_string upper
+  let to_string = function
+    | Pointer_free var -> var ^ " : pointer_free"
+    | Submode { lower; upper } ->
+      Term.to_string lower ^ " <= " ^ Term.to_string upper
   ;;
 
-  let check { lower; upper } =
+  let check_submode ~(lower : Term.t) ~(upper : Term.t) =
     match lower, upper with
     | Mode { txt = Atoms _; _ }, Mode { txt = Atoms _; _ } ->
       Error
@@ -218,5 +222,10 @@ module Constraint = struct
              "the sides of `<=` are on different axes, %s and %s"
              (Axis.to_string lower_axis)
              (Axis.to_string upper_axis))
+  ;;
+
+  let check = function
+    | Pointer_free _ -> Ok ()
+    | Submode { lower; upper } -> check_submode ~lower ~upper
   ;;
 end

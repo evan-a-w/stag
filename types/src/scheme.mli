@@ -3,9 +3,10 @@ open! Import
 (** Instantiation and generalization of type schemes, whose quantified variables
     are [Generic]. *)
 
-(** Replaces [Generic] variables by fresh ones at [rank]. The types one partial
-    application [instantiate fresh ~rank] is applied to share their instances. *)
-val instantiate : Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
+(** Replaces [Generic] variables by fresh ones at [rank], for a use [at] a
+    location if given. The types one partial application
+    [instantiate fresh ~rank] is applied to share their instances. *)
+val instantiate : ?at:Loc.t -> Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
 
 (** Marks unbound variables of [tys] with rank greater than [rank] as [Generic],
     in place, along with those reached through their bounds and equalities.
@@ -42,7 +43,8 @@ val reopen
     generalize, with the same arguments: before it, and before anything that
     depends on the constraints they may add. *)
 val generalize_watchers
-  :  rank:Type.rank
+  :  Fresh.t
+  -> rank:Type.rank
   -> Type.ty list
   -> Unification_error.t list
 
@@ -50,3 +52,6 @@ val generalize_watchers
     have its structure ([Unify.fix_join]), reaching them as [generalize] would:
     for a weak toplevel, whose type is then fixed without being generalized. *)
 val fix_joins : Fresh.t -> Type.ty list -> Unification_error.t list
+
+(** The ids of the variables [generalize] would generalize. *)
+val reachable_ids : rank:Type.rank -> Type.ty list -> Int.Hash_set.t

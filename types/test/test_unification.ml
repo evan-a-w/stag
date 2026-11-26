@@ -2004,3 +2004,113 @@ let%expect_test "joins settle through each other, the binding unification \
     (Ok ())
     |}]
 ;;
+
+let%expect_test "a link rolled back with an enclosing failure leaves the edges \
+                 and classes of both variables apart"
+  =
+  let fresh = Fresh.create () in
+  let join () = TVar (Unify.join_var fresh ~rank:1) in
+  let sub ~lower ~upper =
+    print_s
+      [%sexp
+        (Unify.sub_ty fresh ~lower ~upper
+         : (unit, Unification_error.t) Result.t)]
+  in
+  let b = join () in
+  let c = join () in
+  let d = join () in
+  let e = join () in
+  sub ~lower:b ~upper:d;
+  sub ~lower:c ~upper:e;
+  (* As a watcher's bind failing after linking [b] to [c]. *)
+  let rolled_back =
+    Mode.Private.Undo.atomically (fun () ->
+      match Unify.unify_ty fresh ~ty1:b ~ty2:c with
+      | Ok () -> Error "later failure"
+      | Error error ->
+        Error (Sexp.to_string [%sexp (error : Unification_error.t)]))
+  in
+  print_s [%sexp (rolled_back : (unit, string) Result.t)];
+  let show () = print_endline (Type.to_string_hum (TTuple [ b; c; d; e ])) in
+  show ();
+  (* Each settles only its own edge. *)
+  unify_ty fresh ~ty1:b ~ty2:int;
+  show ();
+  unify_ty fresh ~ty1:c ~ty2:bool;
+  show ();
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Error "later failure")
+    '_a * '_b * '_c * '_d
+    (Ok ())
+    int * '_a * int * '_b
+    (Ok ())
+    int * bool * int * bool
+    |}]
+;;
+
+let%expect_test "a link rolled back leaves the classes apart: fixing a join \
+                 makes only its own class equal"
+  =
+  let ok_exn result =
+    Result.map_error result ~f:(fun error ->
+      Error.create_s [%sexp (error : Unification_error.t)])
+    |> Or_error.ok_exn
+  in
+  let fresh = Fresh.create () in
+  let join () = Unify.join_var fresh ~rank:1 in
+  let b = join () in
+  let c = join () in
+  let d = join () in
+  let e = join () in
+  let sub ~lower ~upper =
+    Unify.sub_ty fresh ~lower:(TVar lower) ~upper:(TVar upper) |> ok_exn
+  in
+  let show () =
+    print_endline
+      (Type.to_string_hum (TTuple [ TVar b; TVar c; TVar d; TVar e ]))
+  in
+  sub ~lower:b ~upper:d;
+  sub ~lower:c ~upper:e;
+  let (_ : (unit, unit) Result.t) =
+    Mode.Private.Undo.atomically (fun () ->
+      Unify.unify_ty fresh ~ty1:(TVar b) ~ty2:(TVar c) |> ok_exn;
+      Error ())
+  in
+  Unify.fix_join fresh b |> ok_exn;
+  show ();
+  Unify.fix_join fresh c |> ok_exn;
+  show ();
+  [%expect {|
+    '_a * '_b * '_a * '_c
+    '_a * '_b * '_a * '_b
+    |}]
+;;
+
+let%expect_test "a link kept merges the classes: fixing a join makes both equal"
+  =
+  let fresh = Fresh.create () in
+  let join () = Unify.join_var fresh ~rank:1 in
+  let b = join () in
+  let c = join () in
+  let d = join () in
+  let e = join () in
+  let check result =
+    print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
+  in
+  check (Unify.sub_ty fresh ~lower:(TVar b) ~upper:(TVar d));
+  check (Unify.sub_ty fresh ~lower:(TVar c) ~upper:(TVar e));
+  check (Unify.unify_ty fresh ~ty1:(TVar b) ~ty2:(TVar c));
+  check (Unify.fix_join fresh d);
+  print_endline (Type.to_string_hum (TTuple [ TVar b; TVar c; TVar d; TVar e ]));
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    '_a * '_a * '_a * '_a
+    |}]
+;;

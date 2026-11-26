@@ -44,6 +44,19 @@ module Ctx = struct
 
   let fresh t = Mode.Var.create t.modes ~rank:t.rank
   let add t ~loc result = ignore (t.holds ~loc result : bool)
+
+  (* Adds [f]'s constraints with the crossing of [ty] (of none without it).
+     While [ty] isn't known, what crossing leaves out is added once it is found
+     to have pointers. *)
+  let add_crossing ?ty t ~loc f =
+    add
+      t
+      ~loc
+      (f
+         (match ty with
+          | None -> Mode.Crossing.none
+          | Some ty -> t.crossing ty))
+  ;;
 end
 
 let reason ~loc why = Mode.Reason.create ~loc why
@@ -99,11 +112,25 @@ module Expected = struct
   ;;
 end
 
-let joins ?crossing ?locality ctx (expected : Expected.t) mode ~loc ~why =
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.submode ?crossing ?locality mode expected.mode (reason ~loc why))
+(* With [ty]'s crossing, adjusted by [cross], or else the [crossing] given. *)
+let joins
+  ?ty
+  ?(cross = Fn.id)
+  ?crossing
+  ?locality
+  ctx
+  (expected : Expected.t)
+  mode
+  ~loc
+  ~why
+  =
+  let submode crossing =
+    Mode.Var.submode ~crossing ?locality mode expected.mode (reason ~loc why)
+  in
+  match crossing with
+  | Some crossing -> Ctx.add ctx ~loc (submode crossing)
+  | None ->
+    Ctx.add_crossing ?ty ctx ~loc (fun crossing -> submode (cross crossing))
 ;;
 
 (* What the value reaches, but not what it is allocated with. *)
@@ -116,7 +143,7 @@ let evaluated ctx expected mode ~loc ~why =
     ctx
     expected
     mode
-    ~crossing:{ Mode.Crossing.none with provenance = true }
+    ~crossing:{ Mode.Crossing.none with provenance = Always }
     ~locality:Mode.Locality_map.ignore
     ~loc
     ~why
@@ -142,13 +169,17 @@ let stage_at_least ctx stage ~loc ~why =
   mode
 ;;
 
-let locality_at_most ctx mode ~ty locality ~loc ~why =
-  Mode.Var.at_most
-    ~crossing:(ctx.Ctx.crossing ty)
-    mode
-    Locality
-    locality
-    (reason ~loc why)
+(* A fresh mode of a constant of the code: [const static global]. *)
+let constant ctx ~loc ~why =
+  let mode = Ctx.fresh ctx in
+  Mode.Error.ok_exn
+    (Mode.Var.at_most_const mode Mode.Const.min (reason ~loc why));
+  mode
+;;
+
+let locality_at_most ~report_loc ctx mode ~ty locality ~loc ~why =
+  Ctx.add_crossing ~ty ctx ~loc:report_loc (fun crossing ->
+    Mode.Var.at_most ~crossing mode Locality locality (reason ~loc why))
 ;;
 
 let arrow_mode = Ctx.fresh
@@ -216,44 +247,37 @@ let annotated_use ctx (expected : Expected.t) ~annot ~var ~loc f =
     let used = { (Expected.same_value ctx expected) with region } in
     let result = f used in
     Result.iter result ~f:(fun (used_expr : Typed.Expr.t) ->
-      let crossing = ctx.crossing used_expr.ty in
-      joins ctx expected used.mode ~crossing ~loc ~why:"it is used";
+      joins ctx expected used.mode ~ty:used_expr.ty ~loc ~why:"it is used";
       annotate ctx used.mode annot ~var;
       match expected.region with
       | Returns result | Ends result ->
         annotate ctx given_to annot ~var;
-        Ctx.add
-          ctx
-          ~loc
-          (Mode.Var.submode
-             ~crossing
-             given_to
-             result
-             (reason ~loc "it is given to the caller"))
+        Ctx.add_crossing ~ty:used_expr.ty ctx ~loc (fun crossing ->
+          Mode.Var.submode
+            ~crossing
+            given_to
+            result
+            (reason ~loc "it is given to the caller"))
       | Nontail | Quoted -> ());
     result
 ;;
 
 (* [value] fits [modality]: it may be stored in a part with it. *)
 let fits ?ty ctx value (modality : Modality.t) ~loc ~why =
-  let crossing = Option.map ty ~f:ctx.Ctx.crossing in
   let reason = reason ~loc why in
   List.iter modality ~f:(fun (step : Modality.Step.t) ->
-    Ctx.add
-      ctx
-      ~loc
-      (match step with
-       | Meet const -> Mode.Var.at_most_const ?crossing value const reason
-       | Param mode | Cell mode ->
-         Mode_arg.on_axes
-           { f =
-               (fun axis ~get ->
-                 match mode with
-                 | Fixed const ->
-                   Mode.Var.at_most ?crossing value axis (get const) reason
-                 | Var var ->
-                   Mode.Var.submode_on ?crossing value var axis reason)
-           }))
+    Ctx.add_crossing ?ty ctx ~loc (fun crossing ->
+      match step with
+      | Meet const -> Mode.Var.at_most_const ~crossing value const reason
+      | Param mode | Cell mode ->
+        Mode_arg.on_axes
+          { f =
+              (fun axis ~get ->
+                match mode with
+                | Fixed const ->
+                  Mode.Var.at_most ~crossing value axis (get const) reason
+                | Var var -> Mode.Var.submode_on ~crossing value var axis reason)
+          }))
 ;;
 
 (* At least what a part of a block of mode [block] is, through [step]. *)
@@ -342,14 +366,12 @@ let project ctx expected ~loc ~why f =
 ;;
 
 let initializes ?ty ctx ~value ~held ~name ~loc =
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.submode
-       ?crossing:(Option.map ty ~f:ctx.Ctx.crossing)
-       value
-       held
-       (reason ~loc (sprintf "it initializes %s" name)))
+  Ctx.add_crossing ?ty ctx ~loc (fun crossing ->
+    Mode.Var.submode
+      ~crossing
+      value
+      held
+      (reason ~loc (sprintf "it initializes %s" name)))
 ;;
 
 module Binding = struct
@@ -363,8 +385,10 @@ module Binding = struct
     | Some { txt; loc } ->
       let bound = Ctx.fresh ctx in
       let reason = reason ~loc "it is bound by an annotated let" in
-      Ctx.add ctx ~loc (Mode.Var.submode mode bound reason);
+      (* Annotated first, so a value exceeding it is the one error, the binding
+         keeping its annotated mode for its uses. *)
       annotate ~exact:true ctx bound annot ~var;
+      Ctx.add ctx ~loc (Mode.Var.submode mode bound reason);
       let named =
         match txt with
         | Atoms atoms ->
@@ -418,21 +442,14 @@ module Binding = struct
   ;;
 
   let embedded ctx ~name ~loc =
-    let mode =
-      stage_at_least
-        ctx
-        Portable
-        ~loc
-        ~why:(sprintf "%s was computed at compile time" name)
-    in
-    let reason = reason ~loc (sprintf "%s was computed at compile time" name) in
-    Ctx.add
-      ctx
-      ~loc
-      (Mode.Var.at_most mode Locality Global reason
-       |> Result.bind ~f:(fun () ->
-         Mode.Var.at_most mode Provenance Static reason));
-    of_mode mode
+    of_mode
+      (constant
+         ctx
+         ~loc
+         ~why:
+           (sprintf
+              "%s was computed at compile time, and lifted into the code"
+              name))
   ;;
 
   let being_checked ctx ~name ~loc =
@@ -547,7 +564,7 @@ module Alloc = struct
         ctx
         expected
         inner.mode
-        ~crossing:(ctx.crossing result.ty)
+        ~ty:result.ty
         ~loc
         ~why:"it is part of the value";
       Ok result)
@@ -625,7 +642,7 @@ module Function = struct
   let body' ?ty ctx ~res_mode ~what ~region f =
     let expected = { (Expected.fresh ctx) with region; returned = true } in
     let (body : Typed.Expr.t) = f expected in
-    let crossing = ctx.Ctx.crossing (Option.value ty ~default:body.ty) in
+    let ty = Option.value ty ~default:body.ty in
     let loc = body.loc in
     Ctx.add
       ctx
@@ -637,29 +654,25 @@ module Function = struct
          (reason
             ~loc
             "it is the result of a function, computed when it is called"));
-    Ctx.add
-      ctx
-      ~loc
-      (Mode.Var.at_most
-         ~crossing
-         expected.mode
-         Locality
-         Regional
-         (reason
-            ~loc
-            (sprintf
-               "%s returns it, ending its region (return it with [exclave_] \
-                instead)"
-               what)));
-    Ctx.add
-      ctx
-      ~loc
-      (Mode.Var.submode
-         ~crossing
-         ~locality:Mode.Locality_map.release
-         expected.mode
-         res_mode
-         (reason ~loc (sprintf "%s returns it" what)));
+    Ctx.add_crossing ~ty ctx ~loc (fun crossing ->
+      Mode.Var.at_most
+        ~crossing
+        expected.mode
+        Locality
+        Regional
+        (reason
+           ~loc
+           (sprintf
+              "%s returns it, ending its region (return it with [exclave_] \
+               instead)"
+              what)));
+    Ctx.add_crossing ~ty ctx ~loc (fun crossing ->
+      Mode.Var.submode
+        ~crossing
+        ~locality:Mode.Locality_map.release
+        expected.mode
+        res_mode
+        (reason ~loc (sprintf "%s returns it" what)));
     body
   ;;
 
@@ -685,18 +698,16 @@ let exclave ctx (expected : Expected.t) ~loc f =
     let (result : Typed.Expr.t) = f inner in
     (match region with
      | Returns res_mode | Ends res_mode ->
-       Ctx.add
-         ctx
-         ~loc
-         (Mode.Var.submode
-            ~crossing:(ctx.crossing result.ty)
-            inner.mode
-            res_mode
-            (reason
-               ~loc
-               (match region with
-                | Ends _ -> "the [region_] gives it"
-                | Returns _ | Nontail | Quoted -> "the function returns it")))
+       Ctx.add_crossing ~ty:result.ty ctx ~loc (fun crossing ->
+         Mode.Var.submode
+           ~crossing
+           inner.mode
+           res_mode
+           (reason
+              ~loc
+              (match region with
+               | Ends _ -> "the [region_] gives it"
+               | Returns _ | Nontail | Quoted -> "the function returns it")))
      | Nontail | Quoted -> ());
     held
       ctx
@@ -735,38 +746,32 @@ let apply
   let tail_call = Expected.is_tail expected && not allocator in
   if tail_call && not curried
   then
-    Ctx.add
+    locality_at_most
+      ~report_loc:loc
       ctx
-      ~loc
-      (locality_at_most
-         ctx
-         f_expected.mode
-         ~ty:f.ty
-         Regional
-         ~loc:f.loc
-         ~why:tail_reason);
+      f_expected.mode
+      ~ty:f.ty
+      Regional
+      ~loc:f.loc
+      ~why:tail_reason;
   let x_expected = Expected.fresh ctx in
   let (x : Typed.Expr.t) = arg allocation x_expected in
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.submode
-       ~crossing:(ctx.crossing arg_ty)
-       x_expected.mode
-       arg_mode
-       (reason ~loc "it is passed to a function"));
+  Ctx.add_crossing ~ty:arg_ty ctx ~loc (fun crossing ->
+    Mode.Var.submode
+      ~crossing
+      x_expected.mode
+      arg_mode
+      (reason ~loc "it is passed to a function"));
   if tail_call
   then
-    Ctx.add
+    locality_at_most
+      ~report_loc:loc
       ctx
-      ~loc
-      (locality_at_most
-         ctx
-         x_expected.mode
-         ~ty:arg_ty
-         Regional
-         ~loc:x.loc
-         ~why:tail_reason);
+      x_expected.mode
+      ~ty:arg_ty
+      Regional
+      ~loc:x.loc
+      ~why:tail_reason;
   if expected.applied && Expected.is_tail expected
   then
     Ctx.add
@@ -787,23 +792,15 @@ let apply
         closure of a partial application there (a closure's partial applications
         are made in their caller's region). An allocator like [Box.make], or a
         prim given too few arguments, allocates here. *)
-     Ctx.add
-       ctx
-       ~loc
-       (Mode.Var.submode
-          ~crossing:(ctx.crossing res_ty)
-          res_mode
-          function_res
-          (reason ~loc "the function returns it, by a tail call"));
+     Ctx.add_crossing ~ty:res_ty ctx ~loc (fun crossing ->
+       Mode.Var.submode
+         ~crossing
+         res_mode
+         function_res
+         (reason ~loc "the function returns it, by a tail call"));
      held ctx expected res_mode ~loc ~why:"the function returns it"
    | Returns _ | Ends _ | Nontail | Quoted ->
-     joins
-       ctx
-       expected
-       res_mode
-       ~crossing:(ctx.crossing res_ty)
-       ~loc
-       ~why:"the function returns it");
+     joins ctx expected res_mode ~ty:res_ty ~loc ~why:"the function returns it");
   f, x, allocation
 ;;
 
@@ -828,6 +825,17 @@ let locality_map ?(assign = false) (locks : Env.Lock.t list) =
       else Mode.Locality_map.compose map inner)
 ;;
 
+(* Whether a value used inside [crossed] is used at a later stage than it is
+   bound, so is copied into the code. *)
+let lifted (crossed : Env.Lock.t list) =
+  List.sum (module Int) crossed ~f:(fun (lock : Env.Lock.t) ->
+    match lock.kind with
+    | Quote _ -> 1
+    | Splice -> -1
+    | Closure _ | Exclave | Region -> 0)
+  > 0
+;;
+
 let is_closure (lock : Env.Lock.t) =
   match lock.kind with
   | Closure _ -> true
@@ -844,54 +852,48 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
        only store what outlives every region. *)
     if List.exists crossed ~f:is_closure
     then
-      Ctx.add
+      locality_at_most
+        ~report_loc:loc
         ctx
+        value.mode
+        ~ty
+        Global
         ~loc
-        (locality_at_most
-           ctx
-           value.mode
-           ~ty
-           Global
-           ~loc
-           ~why:
-             (sprintf
-                "it is assigned to %s from a closure, which may be called from \
-                 a shorter region"
-                name));
+        ~why:
+          (sprintf
+             "it is assigned to %s from a closure, which may be called from a \
+              shorter region"
+             name);
     (* What is local to a [region_] is gone once it ends. *)
     List.iteri crossed ~f:(fun index (lock : Env.Lock.t) ->
       match lock.kind with
       | Region ->
         let ended = Ctx.fresh ctx in
-        Ctx.add
-          ctx
-          ~loc
-          (Mode.Var.submode
-             ~crossing:(ctx.crossing ty)
-             ~locality:(locality_map ~assign:true (List.take crossed index))
-             value.mode
-             ended
-             (reason ~loc (sprintf "it is assigned to %s" name))
-           |> Result.bind ~f:(fun () ->
-             Mode.Var.at_most
-               ended
-               Locality
-               Regional
-               (reason
-                  ~loc
-                  (sprintf
-                     "%s outlives the [region_], which it is assigned in"
-                     name))))
+        Ctx.add_crossing ~ty ctx ~loc (fun crossing ->
+          Mode.Var.submode
+            ~crossing
+            ~locality:(locality_map ~assign:true (List.take crossed index))
+            value.mode
+            ended
+            (reason ~loc (sprintf "it is assigned to %s" name))
+          |> Result.bind ~f:(fun () ->
+            Mode.Var.at_most
+              ended
+              Locality
+              Regional
+              (reason
+                 ~loc
+                 (sprintf
+                    "%s outlives the [region_], which it is assigned in"
+                    name))))
       | Closure _ | Quote _ | Splice | Exclave -> ());
-    Ctx.add
-      ctx
-      ~loc
-      (Mode.Var.submode
-         ~crossing:(ctx.crossing ty)
-         ~locality:(locality_map ~assign:true crossed)
-         value.mode
-         held
-         (reason ~loc (sprintf "it is assigned to %s" name))));
+    Ctx.add_crossing ~ty ctx ~loc (fun crossing ->
+      Mode.Var.submode
+        ~crossing
+        ~locality:(locality_map ~assign:true crossed)
+        value.mode
+        held
+        (reason ~loc (sprintf "it is assigned to %s" name))));
   result
 ;;
 
@@ -902,16 +904,14 @@ let store ctx expected ~loc ~target ~value =
   let sub = Expected.fresh ctx in
   let (value : Typed.Expr.t) = value sub ~ty:target.ty in
   evaluated ctx expected sub.mode ~loc ~why:"it is stored";
-  Ctx.add
+  locality_at_most
+    ~report_loc:loc
     ctx
-    ~loc
-    (locality_at_most
-       ctx
-       sub.mode
-       ~ty:target.ty
-       Global
-       ~loc:value.loc
-       ~why:"it is stored through a pointer, which may outlive any region");
+    sub.mode
+    ~ty:target.ty
+    Global
+    ~loc:value.loc
+    ~why:"it is stored through a pointer, which may outlive any region";
   fits
     ~ty:target.ty
     ctx
@@ -923,6 +923,7 @@ let store ctx expected ~loc ~target ~value =
 ;;
 
 let use
+  ?(embedding = fun add -> add ())
   ctx
   expected
   (entry : Env.Entry.t)
@@ -937,7 +938,9 @@ let use
   let mode = (entry.mode :> Mode.Var.t) in
   let mutable_ = Option.is_some held in
   let by_symbol = by_symbol || (toplevel && mutable_) in
-  let crossing = ctx.Ctx.crossing entry.scheme in
+  let ty = entry.scheme in
+  (* What a mutable's own mode is checked with: its cell crosses nothing. *)
+  let own_ty = if mutable_ then None else Some ty in
   let crossed = Env.Entry.crossed entry ~locks in
   List.iteri crossed ~f:(fun index lock ->
     match lock.kind with
@@ -948,27 +951,24 @@ let use
          gone. *)
       let inside = List.take crossed index in
       let outside = List.drop crossed (index + 1) in
-      let ended ?crossing value ~why =
-        let ended = Ctx.fresh ctx in
-        Ctx.add
-          ctx
-          ~loc
-          (Mode.Var.submode
-             ?crossing
-             ~locality:(locality_map outside)
-             value
-             ended
-             (reason why)
-           |> Result.bind ~f:(fun () ->
-             Mode.Var.at_most
-               ended
-               Locality
-               Regional
-               (Mode.Reason.create ~loc "the [exclave_] has ended its region"))
-          )
+      let ended ?ty value ~why =
+        Ctx.add_crossing ?ty ctx ~loc (fun crossing ->
+          let ended = Ctx.fresh ctx in
+          Mode.Var.submode
+            ~crossing
+            ~locality:(locality_map outside)
+            value
+            ended
+            (reason why)
+          |> Result.bind ~f:(fun () ->
+            Mode.Var.at_most
+              ended
+              Locality
+              Regional
+              (Mode.Reason.create ~loc "the [exclave_] has ended its region")))
       in
       ended
-        ~crossing
+        ~ty
         (Option.value held ~default:mode)
         ~why:"%s is used in an [exclave_]";
       (* A closure in it capturing a mutable holds its cell, which must then
@@ -980,23 +980,19 @@ let use
           ~why:
             "%s is captured by a closure in an [exclave_], which holds its cell"
     | Closure closure ->
-      Ctx.add
-        ctx
-        ~loc
-        (Mode.Var.submode
-           ?crossing:(if mutable_ then None else Some crossing)
-           mode
-           closure
-           (reason "%s is captured by a closure"));
+      Ctx.add_crossing ?ty:own_ty ctx ~loc (fun crossing ->
+        Mode.Var.submode
+          ~crossing
+          mode
+          closure
+          (reason "%s is captured by a closure"));
       Option.iter held ~f:(fun held ->
-        Ctx.add
-          ctx
-          ~loc
-          (Mode.Var.submode
-             ~crossing
-             held
-             closure
-             (reason "%s holds it, and is captured by a closure")));
+        Ctx.add_crossing ~ty ctx ~loc (fun crossing ->
+          Mode.Var.submode
+            ~crossing
+            held
+            closure
+            (reason "%s holds it, and is captured by a closure")));
       (* A closure capturing itself is as portable as anything else it captures. *)
       if entry.defining && Mode.Var.id closure <> Mode.Var.id mode
       then
@@ -1011,25 +1007,22 @@ let use
     | Region -> ()
     | Quote _ when by_symbol -> ()
     | Quote code ->
-      Ctx.add
-        ctx
-        ~loc
-        (Mode.Var.at_most
-           ?crossing:(if mutable_ then None else Some crossing)
-           mode
-           Stage
-           Portable
-           (reason "%s is used in a quote"));
+      embedding (fun () ->
+        Ctx.add_crossing ?ty:own_ty ctx ~loc (fun crossing ->
+          Mode.Var.at_most
+            ~crossing
+            mode
+            Stage
+            Portable
+            (reason "%s is used in a quote")));
       if not toplevel
       then
-        Ctx.add
-          ctx
-          ~loc
-          (Mode.Var.submode
-             ?crossing:(if mutable_ then None else Some crossing)
-             mode
-             code
-             (reason "%s is embedded in a quote")));
+        Ctx.add_crossing ?ty:own_ty ctx ~loc (fun crossing ->
+          Mode.Var.submode
+            ~crossing
+            mode
+            code
+            (reason "%s is embedded in a quote")));
   let locality =
     if toplevel then Mode.Locality_map.id else locality_map crossed
   in
@@ -1037,7 +1030,7 @@ let use
   match held with
   | Some held ->
     runs ctx expected Nonportable ~loc ~why:(sprintf "%s is mutable" name);
-    joins ctx expected held ~crossing ~locality ~loc ~why
+    joins ctx expected held ~ty ~locality ~loc ~why
   | None when entry.defining ->
     runs
       ctx
@@ -1049,7 +1042,9 @@ let use
       ctx
       expected
       mode
-      ~crossing:{ crossing with stage = true; provenance = true }
+      ~ty
+      ~cross:(fun crossing ->
+        { crossing with stage = Always; provenance = Always })
       ~locality
       ~loc
       ~why
@@ -1060,8 +1055,25 @@ let use
       Nonportable
       ~loc
       ~why:(sprintf "%s is read where the code runs" name);
-    joins ctx expected mode ~crossing ~locality ~loc ~why
-  | None -> joins ctx expected mode ~crossing ~locality ~loc ~why
+    joins ctx expected mode ~ty ~locality ~loc ~why
+  | None when lifted crossed ->
+    (* A constant of the code: what it holds is portable, so deeply immutable,
+       and copied into the code's static data, which can't refer outside the GC
+       heap. *)
+    Ctx.add_crossing ?ty:own_ty ctx ~loc (fun crossing ->
+      Mode.Var.at_most
+        ~crossing
+        mode
+        Provenance
+        Gc
+        (reason "%s is lifted into the code's static data"));
+    joins
+      ctx
+      expected
+      (constant ctx ~loc ~why:(sprintf "%s is lifted into the code" name))
+      ~loc
+      ~why
+  | None -> joins ctx expected mode ~ty ~locality ~loc ~why
 ;;
 
 let use_free ctx expected ~locks ~loc ~why =
@@ -1133,16 +1145,14 @@ module Toplevel = struct
        :: (t.binding :> Mode.Var.t)
        :: (Option.to_list t.held :> Mode.Var.t list))
       ~f:(fun mode ->
-        Ctx.add
+        locality_at_most
+          ~report_loc:loc
           ctx
+          mode
+          ~ty
+          Global
           ~loc
-          (locality_at_most
-             ctx
-             mode
-             ~ty
-             Global
-             ~loc
-             ~why:(sprintf "%s is a toplevel" name)))
+          ~why:(sprintf "%s is a toplevel" name))
   ;;
 end
 
@@ -1198,7 +1208,7 @@ let prim ctx ~args =
             (Mode.Var.at_least res Stage Portable made
              :: Mode.Var.allocated res made
              :: List.map taken ~f:(fun (arg, ty) ->
-               Mode.Var.submode ~crossing:(ctx.Ctx.crossing ty) arg res held))
+               Mode.Var.submode ~crossing:(ctx.crossing ty) arg res held))
           |> Result.iter_error ~f:(fun error ->
             raise_s [%message "prim" (error : Mode.Error.t)]);
           Var res)

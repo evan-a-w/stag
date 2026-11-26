@@ -51,7 +51,7 @@ let enqueue_kept ~pending ~seen_kept kept =
   then Queue.enqueue pending (Pending.Kept kept)
 ;;
 
-let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
+let instantiator ?at fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
   : Type.Mapper.t
   =
   let tys = Int.Table.create () in
@@ -67,7 +67,7 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
        | None ->
          let (var' : _ Type.Var.t) = create () in
          var'.in_record <- var.in_record;
-         var'.watchers <- Watcher.instantiate var.watchers @ var'.watchers;
+         var'.watchers <- Watcher.instantiate ?at var.watchers @ var'.watchers;
          let instance = wrap var' in
          Hashtbl.set table ~key:var.id ~data:instance;
          bounds var var';
@@ -163,10 +163,10 @@ let rec add_instance_bounds fresh (mapper : Type.Mapper.t) pending =
     add_instance_bounds fresh mapper pending
 ;;
 
-let instantiate fresh ~rank =
+let instantiate ?at fresh ~rank =
   let pending = Queue.create () in
   let mapper =
-    instantiator fresh ~rank ~pending ~seen_kept:(Int.Hash_set.create ())
+    instantiator ?at fresh ~rank ~pending ~seen_kept:(Int.Hash_set.create ())
   in
   fun ty ->
     let ty = Type.map_ty mapper ty in
@@ -239,8 +239,24 @@ let iter_generalizable ~rank tys (visitor : Visitor.t) =
   | Error _ -> .
 ;;
 
-let generalize_watchers ~rank tys =
+let fix_joins_into fresh ~rank tys errors =
+  iter_generalizable
+    ~rank
+    tys
+    { ty =
+        (fun var ->
+          Result.iter_error (Unify.fix_join fresh var) ~f:(Queue.enqueue errors))
+    ; row = ignore
+    ; presence = ignore
+    ; mode = ignore
+    }
+;;
+
+(* The joins first: what a variable is made equal to decides its layout, which
+   generalizing it alone would decide has pointers. *)
+let generalize_watchers fresh ~rank tys =
   let errors = Queue.create () in
+  fix_joins_into fresh ~rank tys errors;
   iter_generalizable
     ~rank
     tys
@@ -257,16 +273,7 @@ let generalize_watchers ~rank tys =
 
 let fix_joins fresh tys =
   let errors = Queue.create () in
-  iter_generalizable
-    ~rank:Int.min_value
-    tys
-    { ty =
-        (fun var ->
-          Result.iter_error (Unify.fix_join fresh var) ~f:(Queue.enqueue errors))
-    ; row = ignore
-    ; presence = ignore
-    ; mode = ignore
-    };
+  fix_joins_into fresh ~rank:Int.min_value tys errors;
   Queue.to_list errors
 ;;
 
@@ -1470,4 +1477,14 @@ let generalize fresh ~rank tys =
     List.iter with_equalities ~f:(fun var ->
       ignore (mapper.presence var : Type.presence));
     add_instance_bounds fresh mapper pending)
+;;
+
+let reachable_ids ~rank tys =
+  let ids = Int.Hash_set.create () in
+  let add (var : _ Type.Var.t) = Hash_set.add ids var.id in
+  iter_generalizable
+    ~rank
+    tys
+    { ty = add; row = add; presence = add; mode = ignore };
+  ids
 ;;

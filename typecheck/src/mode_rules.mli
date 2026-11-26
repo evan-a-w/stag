@@ -333,9 +333,11 @@ val store
     capture them: they cross a quote lock if [portable], and otherwise if
     [by_symbol] (mutable, or not embeddable), when what the code reads is not
     known until it runs. A mutable's value is the one it holds, but closures
-    capture its cell. *)
+    capture its cell. [embedding] is given the requirement that what a quote
+    embeds be [portable], to add once it is known that it may be embedded. *)
 val use
-  :  Ctx.t
+  :  ?embedding:((unit -> unit) -> unit)
+  -> Ctx.t
   -> Expected.t
   -> Env.Entry.t
   -> locks:Env.Lock.t list

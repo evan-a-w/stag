@@ -496,6 +496,9 @@ take none. A declaration's mode parameters are declared `'p : mode`, and are
 on stage and provenance only (a locality atom in a mode argument is an
 error); a type argument of several atoms is a mode, and one of one atom or
 a variable is read as a mode or a type by the declaration's parameter. A
+declared arrow's side may name a mode parameter (`{compare : 'k @ 'p -> int}`)
+for its stage and provenance; its locality is `global`, as an unwritten
+side's. No other mode variable is allowed in a declaration. A
 name in an annotation is a mode variable or a type variable, not both.
 
 An annotation's type may end with constraints between mode variables, or
@@ -518,9 +521,14 @@ One between a variable and modes bounds the axes the modes name
 its sides: `meet(t, c)` and `release(t)` on the left of `<=`,
 `static_if_const(t)` and `const_if_static(t)` on the right:
 
+A constraint may instead be a kind, `'a : pointer_free`, on a type variable
+(`..'r` for a row): the type is pointer-free at every instance, so its values
+cross modes (see modes.md, crossing).
+
 ```
 constraint := side <= side                     (every axis, or the atoms' axes)
             | left <= right                    (one axis)
+            | 'a : pointer_free
 side       := mode | 'm
 left       := axis('m) | meet(left, atom) | release(left)
 right      := axis('m) | static_if_const(right) | const_if_static(right)

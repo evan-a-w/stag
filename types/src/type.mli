@@ -146,6 +146,12 @@ module Var : sig
 
   val create : id -> 'a state -> ('a, _) t
 
+  (** Of a type or row variable, once a mode constraint depends on whether its
+      values have pointers (see [Var_layout]). *)
+  val layout_key : Mode.Layout.t Type_equal.Id.t
+
+  val layout : _ t -> Mode.Layout.t option
+
   (** Raises unless the variable is [Unbound]. *)
   val rank_exn : _ t -> rank
 

@@ -1,5 +1,13 @@
 open! Import
 
+module Bound = struct
+  type t =
+    { reason : Reason.t
+    ; instance : Loc.t option
+    }
+  [@@deriving sexp_of]
+end
+
 type t =
   | Mismatch :
       { var : int
@@ -22,6 +30,11 @@ type t =
       ; lower : 'a
       ; upper : 'a
       ; because : Reason.t
+      }
+      -> t
+  | Has_pointers :
+      { because : Reason.t list
+      ; bound : Bound.t
       }
       -> t
 
@@ -53,6 +66,8 @@ let sexp_of_t = function
         (lower : C.t)
         (upper : C.t)
         (because : Reason.t)]
+  | Has_pointers { because; bound } ->
+    [%message "Has pointers" (because : Reason.t list) (bound : Bound.t)]
 ;;
 
 let equal_on (type a) (axis : a Axis.t) (first : a) (second : a) because =
