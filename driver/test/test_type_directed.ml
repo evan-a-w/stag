@@ -768,13 +768,15 @@ let ran = .~(upd spliced)
     (upd <fun>)
     (updated
      (Code
-      (Record_update
-       (Record (record N.r)
-        (fields
-         ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
-          (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool))))
-        : N.r)
-       ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 7) : int))) : N.r)))
+      (Record_update (record N.r)
+       (expr
+        (Record (record N.r)
+         (fields
+          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
+           (((type_name N.r) (name N.y) (index 1)) (Lit (Bool true) : bool))))
+         : N.r))
+       (fields ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 7) : int)))) :
+       N.r)))
     (ran (N.r (x 7) (y true)))
     |}]
 ;;

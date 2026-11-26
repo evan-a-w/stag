@@ -545,7 +545,7 @@ and expr_type
   match Source.Expr.view expr with
   | Lit l -> node (Lit l) (Syntax.Lit.ty l)
   | Error ->
-    scope.program.syntax_errors <- true;
+    Program_env.mark_syntax_errors scope.program;
     node (Error []) Type.error
   | Expect expected ->
     (* Only where it runs as part of the test: not at compile time nor in code. *)
@@ -1720,8 +1720,10 @@ and record_update_type
           ~at
           ~expr
           ?expected:
-            (Option.map known_expected ~f:(fun known ->
-               Scope.instantiate t scope (Members.declared_record known))))
+            (Option.bind known_expected ~f:(fun (known : _ Members.Known.t) ->
+               List.hd known.members
+               |> Option.map ~f:(fun (member : Type_env.Field.t) ->
+                 Scope.instantiate t scope member.record))))
     in
     (match
        Members.resolve_record_fields
@@ -1733,18 +1735,18 @@ and record_update_type
      with
      | Error error ->
        fail error ~children:(expr :: infer (List.map fields ~f:snd))
-     | Ok (known, fields, (_ : bool)) ->
+     | Ok { known; declared; record_type; fields; complete = _ } ->
        let inst_in = Scope.instantiate t scope in
        let inst_out = Scope.instantiate t scope in
        let unified =
          Scope.unifies
            t
            scope
-           ~ty1:(inst_in (Members.declared_record known))
+           ~ty1:(inst_in declared)
            ~ty2:expr.ty
            ~loc:expr.loc
        in
-       let record = inst_out (Members.declared_record known) in
+       let record = inst_out declared in
        let unified =
          match Members.unify_known t ~expected record ~loc with
          | Ok () -> unified
@@ -1773,8 +1775,7 @@ and record_update_type
              | Param _ | Id | Meet _ -> None)
          in
          match
-           ( Type.canonical_ty (inst_in (Members.declared_record known))
-           , Type.canonical_ty record )
+           Type.canonical_ty (inst_in declared), Type.canonical_ty record
          with
          | TCon (name, args_in), TCon (_, args_out)
            when not (List.is_empty kept) ->
@@ -1804,11 +1805,14 @@ and record_update_type
        let update =
          node
            (Record_update
-              ( expr
-              , List.zip_exn
-                  (List.map fields ~f:(fun (field, _, _) ->
-                     Members.field_ref field))
-                  exprs ))
+              { record = record_type
+              ; expr
+              ; fields =
+                  List.zip_exn
+                    (List.map fields ~f:(fun (field, _, _) ->
+                       Members.field_ref field))
+                    exprs
+              })
            record
        in
        if unified then update else node (Error [ update ]) Type.error)
@@ -2271,12 +2275,7 @@ and substitute_entry
     let kind : Typecheck_error.Kind.t =
       match kind, scope.quote with
       | Not_in_scope _, None ->
-        (match
-           Unusable_in_quotes.find
-             scope.program.unusable_in_quotes
-             ~name
-             ~entry:ty
-         with
+        (match Unusable_in_quotes.find ~entry:ty with
          | Some unusable -> Free_in_spliced_code { name; unusable }
          | None -> kind)
       | _ -> kind
@@ -2937,13 +2936,13 @@ let check_declarations t (program : Program_env.t) module_ =
       match toplevel.txt with
       | Type decl ->
         (match decl.kind with
-         | Malformed _ -> program.syntax_errors <- true
+         | Malformed _ -> Program_env.mark_syntax_errors program
          | Variant _ | Record _ | Alias _ | Abstract | Splice _ -> ());
         Type_env.check
           program.type_env
           (Module_scope.canonical_name module_ decl.name.txt)
         |> report_if_error
-      | Malformed_exception _ -> program.syntax_errors <- true
+      | Malformed_exception _ -> Program_env.mark_syntax_errors program
       | Exception (name, _) ->
         Type_env.check_exception
           program.type_env
@@ -3113,38 +3112,19 @@ let program_env
   ?record_references
   interpreter
   =
-  let rec program_env =
-    lazy
-      { Program_env.type_env =
-          Type_env.create
-            ?record_references
-            t
-            ~report:(fun error -> Program_env.report (force program_env) error)
-            ~evaluate_splice:(fun module_ expr ~loc ->
-              evaluate_type_splice t (force program_env) module_ expr ~loc)
-      ; toplevels = String.Table.create ()
-      ; stamps
-      ; interpreter
-      ; ident_info = Typed.Ident.Map.empty
-      ; sccs = Queue.create ()
-      ; declaration_splices = Queue.create ()
-      ; allocations = Queue.create ()
-      ; allocation_ids = 0
-      ; unusable_in_quotes = Unusable_in_quotes.create ()
-      ; unfinished = Stack.create ()
-      ; reports = []
-      ; reported = 0
-      ; syntax_errors = false
-      ; splice_starts = Stack.create ()
-      ; mutable_idents = Typed.Ident.Hash_set.create ()
-      ; modes
-      ; const_toplevels
-      ; compile_time_c_calls
-      ; parameter_modes = Int.Table.create ()
-      ; checking = Stack.create ()
-      }
-  in
-  force program_env
+  Program_env.create
+    ~type_env:(fun program_env ->
+      Type_env.create
+        ?record_references
+        t
+        ~report:(fun error -> Program_env.report (force program_env) error)
+        ~evaluate_splice:(fun module_ expr ~loc ->
+          evaluate_type_splice t (force program_env) module_ expr ~loc))
+    ~stamps
+    ~modes
+    ~const_toplevels
+    ~compile_time_c_calls
+    interpreter
 ;;
 
 (* The program's root module, within the prelude. *)

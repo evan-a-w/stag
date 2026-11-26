@@ -337,7 +337,11 @@ module Expr : sig
           ; fields : (Field_ref.t * 'e) list
           }
       | Field of 'e * Field_ref.t
-      | Record_update of 'e * (Field_ref.t * 'e) list
+      | Record_update of
+          { record : Record_type.t
+          ; expr : 'e
+          ; fields : (Field_ref.t * 'e) list
+          }
       (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
           updated fields' types contain. *)
       | Store of 'e * 'e

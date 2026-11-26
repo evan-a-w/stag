@@ -50,7 +50,7 @@ let%expect_test "undo" =
   [%expect
     {|
     ((exn (Failure raised)) (r 3))
-    "Assert_failure mode/src/undo.ml:11:2"
+    "Assert_failure mode/src/undo.ml:13:2"
     |}]
 ;;
 
@@ -129,5 +129,47 @@ let%expect_test "permanent and when_settled" =
     (result (Error ()))
     ("rolled back" (r 0) (cached 1))
     ("settled at once" (r 0) (cached 1))
+    |}]
+;;
+
+let%expect_test "permanent sets aside what is scoped to the enclosing groups" =
+  let scope = ref "none" in
+  Undo.register_scoped ~set_aside:(fun () ->
+    let outer = !scope in
+    scope := "none";
+    fun () -> scope := outer);
+  let show where = print_s [%message where ~scope:(!scope : string)] in
+  ignore
+    (Undo.atomically (fun () ->
+       scope := "attempt";
+       Undo.permanent (fun () ->
+         show "in permanent";
+         scope := "permanent's own");
+       show "after permanent";
+       Error ())
+     : (unit, unit) Result.t);
+  [%expect
+    {|
+    ("in permanent" (scope none))
+    ("after permanent" (scope attempt))
+    |}]
+;;
+
+let%expect_test "what is queued until settled all runs, even if one raises" =
+  let result =
+    Or_error.try_with (fun () ->
+      Undo.atomically_exn (fun () ->
+        Undo.when_settled (fun () -> print_endline "first");
+        Undo.when_settled (fun () -> failwith "second raises");
+        Undo.when_settled (fun () -> print_endline "third")))
+  in
+  print_s [%message (result : unit Or_error.t)];
+  Undo.when_settled (fun () -> print_endline "nothing left queued");
+  [%expect
+    {|
+    first
+    third
+    (result (Error (Failure "second raises")))
+    nothing left queued
     |}]
 ;;

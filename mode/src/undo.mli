@@ -22,9 +22,16 @@ val atomically_exn : (unit -> 'a) -> 'a
     (such as a declaration's own variables). *)
 val permanent : (unit -> 'a) -> 'a
 
+(** Registers state that belongs to the enclosing [atomically] groups (such as
+    what an attempt collects), which [permanent] sets aside while it runs:
+    [set_aside ()] resets it, and returns how to restore it. *)
+val register_scoped : set_aside:(unit -> unit -> unit) -> unit
+
 (** Runs [f] now if neither under [atomically] nor in [permanent] under it, or
     else once the outermost [atomically] group finishes, whatever its outcome:
-    for consequences of [permanent] changes on what [atomically] may undo. *)
+    for consequences of [permanent] changes on what [atomically] may undo. All
+    that is queued then runs, even if one raises: the first exception is raised
+    after the rest. *)
 val when_settled : (unit -> unit) -> unit
 
 (** Raises if under [atomically], for changes that can't be undone. *)

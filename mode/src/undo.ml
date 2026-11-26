@@ -6,6 +6,8 @@ let depth = ref 0
 (* The depths of the [atomically] groups that [permanent] sections suspend. *)
 let suspended = ref 0
 let settled_queue = Queue.create ()
+let scoped : (unit -> unit -> unit) list ref = ref []
+let register_scoped ~set_aside = scoped := set_aside :: !scoped
 
 let record undo =
   assert (!depth > 0);
@@ -29,12 +31,23 @@ let rollback ~saved =
 
 let settled () = !depth = 0 && !suspended = 0
 
-let rec drain () =
-  match Queue.dequeue settled_queue with
-  | None -> ()
-  | Some f ->
-    f ();
-    drain ()
+let drain () =
+  let rec drain first_exn =
+    match Queue.dequeue settled_queue with
+    | None ->
+      Option.iter first_exn ~f:(fun (exn, backtrace) ->
+        Exn.raise_with_original_backtrace exn backtrace)
+    | Some f ->
+      drain
+        (match f () with
+         | () -> first_exn
+         | exception exn ->
+           Some
+             (Option.value
+                first_exn
+                ~default:(exn, Backtrace.Exn.most_recent ())))
+  in
+  drain None
 ;;
 
 let finish () =
@@ -64,7 +77,9 @@ let permanent f =
   suspended := !suspended + saved_depth;
   depth := 0;
   log := [];
+  let restores = List.map !scoped ~f:(fun set_aside -> set_aside ()) in
   Exn.protect ~f ~finally:(fun () ->
+    List.iter restores ~f:(fun restore -> restore ());
     suspended := !suspended - saved_depth;
     depth := saved_depth;
     log := saved_log)

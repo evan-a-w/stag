@@ -393,7 +393,11 @@ module Expr = struct
           ; fields : (Field_ref.t * 'e) list
           }
       | Field of 'e * Field_ref.t
-      | Record_update of 'e * (Field_ref.t * 'e) list
+      | Record_update of
+          { record : Record_type.t
+          ; expr : 'e
+          ; fields : (Field_ref.t * 'e) list
+          }
       | Store of 'e * 'e
       | Match of
           { scrutinee : 'e
@@ -557,10 +561,10 @@ module Expr = struct
         | Field (e, field) ->
           let%bindl_fun e = same e in
           M.return (Desc.Field (e, field))
-        | Record_update (e, fields) ->
-          let%bindl_fun e = same e in
+        | Record_update { record; expr; fields } ->
+          let%bindl_fun expr = same expr in
           let%bindl_fun fields = snds Child.same fields in
-          M.return (Desc.Record_update (e, fields))
+          M.return (Desc.Record_update { record; expr; fields })
         | Match { scrutinee; cases = cases'; exception_cases } ->
           let%bindl_fun scrutinee = same scrutinee in
           let%bindl_fun cases' = cases cases' in

@@ -6,7 +6,7 @@ module Report : sig
   type t
 end
 
-type t =
+type t = private
   { type_env : Type_env.t
   ; toplevels : Toplevel_binding.t Lazy.t String.Table.t
   (** By canonical name. The prelude's are made when first used, so that those
@@ -16,7 +16,6 @@ type t =
   ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
   ; sccs : Typed.Scc.t Queue.t
   ; declaration_splices : Typed.Expr.t Queue.t
-  ; unusable_in_quotes : Unusable_in_quotes.t
   ; unfinished : Type.ty Stack.t
   (** The types of the toplevels and binders of components not yet finished.
       Code checked later can reach them, so once their component is finished,
@@ -45,6 +44,17 @@ type t =
   ; mutable allocation_ids : int
   }
 
+(** [type_env] is given the [t] it is in, not to be forced before it is made. *)
+val create
+  :  type_env:(t Lazy.t -> Type_env.t)
+  -> stamps:Stamp_counter.t
+  -> modes:Mode.Id_source.t
+  -> const_toplevels:bool
+  -> compile_time_c_calls:Compile_time_c_calls.t
+  -> Interpreter.t
+  -> t
+
+val mark_syntax_errors : t -> unit
 val allocation_id : t -> Typed.Allocation.Id.t
 
 val report

@@ -3,6 +3,7 @@ module Loc = Stag_common.Loc
 module Located = Stag_common.Located
 module Stamp_counter = Stag_common.Stamp_counter
 module Type = Stag_types.Type
+module Watcher = Stag_types.Watcher
 module Arrow_modes = Stag_types.Arrow_modes
 module Mode_arg = Stag_types.Mode_arg
 module Mode_arg_position = Stag_types.Mode_arg_position

@@ -1021,3 +1021,66 @@ let%expect_test "a scheme's guarded bounds raise kept nodes above, through \
     ((a 1) (b 2) (x (2)))
     |}]
 ;;
+
+let%expect_test "a scheme's guarded bounds include those of nodes generalized \
+                 later"
+  =
+  let ids = Id_source.create () in
+  let layout = Layout.create layouts in
+  let crossing = Crossing.while_pointer_free layout in
+  (* [t]'s scheme keeps [lo <= t unless l], then [lo] is generalized too, with
+     [o <= lo unless l]. Through both, [o]'s bound reaches [t]. *)
+  let o = Var.create ids ~rank:0
+  and lo = Var.create ids ~rank:1
+  and t = Var.create ids ~rank:2 in
+  ok (Var.submode ~crossing lo t (reason "lo is t"));
+  Var.generalize [ t ] ~rank:1;
+  ok (Var.submode ~crossing o lo (reason "o is lo"));
+  Var.generalize [ lo ] ~rank:0;
+  ok (Var.at_least o Locality Regional (reason "o is regional"));
+  ok (Layout.raise layout ~because:[ reason "'a is string" ]);
+  let raised seeds =
+    Var.Node.raised seeds
+    |> Option.map
+         ~f:(List.map ~f:(fun (node, point) -> Var.Node.var_id node, point))
+    |> Option.map ~f:(List.sort ~compare:[%compare: int * int])
+  in
+  print_s
+    [%message
+      ""
+        ~lo:(Var.Node.lower (locality lo) : int)
+        ~t:(Var.Node.lower (locality t) : int)
+        ~raised_t:(raised [ locality t, 0 ] : (int * int) list option)
+        ~raised_lo_t:
+          (raised [ locality lo, 0; locality t, 0 ] : (int * int) list option)];
+  [%expect
+    {| ((lo 1) (t 1) (raised_t (((2 1)))) (raised_lo_t (((1 1) (2 1))))) |}]
+;;
+
+let%expect_test "a scheme's guarded bounds through a diamond of later schemes" =
+  let ids = Id_source.create () in
+  let layout = Layout.create layouts in
+  let crossing = Crossing.while_pointer_free layout in
+  (* [o] reaches [t] through [a] as it is, and through [b] released, each
+     generalized after [t]. *)
+  let o = Var.create ids ~rank:0
+  and a = Var.create ids ~rank:1
+  and b = Var.create ids ~rank:1
+  and t = Var.create ids ~rank:2 in
+  ok (Var.submode ~crossing a t (reason "a is t"));
+  ok (Var.submode ~crossing b t (reason "b is t"));
+  Var.generalize [ t ] ~rank:1;
+  ok (Var.submode ~crossing o a (reason "o is a"));
+  ok
+    (Var.submode ~crossing ~locality:Locality_map.release o b (reason "o is b"));
+  Var.generalize [ a; b ] ~rank:0;
+  ok (Var.at_least o Locality Regional (reason "o is regional"));
+  ok (Layout.raise layout ~because:[ reason "'a is string" ]);
+  print_s
+    [%message
+      ""
+        ~a:(Var.Node.lower (locality a) : int)
+        ~b:(Var.Node.lower (locality b) : int)
+        ~t:(Var.Node.lower (locality t) : int)];
+  [%expect {| ((a 1) (b 2) (t 2)) |}]
+;;

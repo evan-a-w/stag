@@ -15,14 +15,9 @@ type t =
   { mutable next_id : int
   ; mutable cons : Cons.t option
   ; modes : Mode.Id_source.t
-  ; mutable settling :
-      (unit -> (unit, Unification_error.t) Result.t) Queue.t option
   }
 
-let make cons =
-  { next_id = 0; cons; modes = Mode.Id_source.create (); settling = None }
-;;
-
+let make cons = { next_id = 0; cons; modes = Mode.Id_source.create () }
 let create () = make None
 let conservative () = make (Some Cons.conservative)
 let modes t = t.modes
@@ -40,15 +35,28 @@ let cons t =
 
 let next_id t = t.next_id
 
-let settle t f =
-  match t.settling with
+(* What the outermost [settle] runs, of all [t]s: one drain at a time. *)
+let settling : (unit -> (unit, Unification_error.t) Result.t) Queue.t option ref
+  =
+  ref None
+;;
+
+let () =
+  Mode.Private.Undo.register_scoped ~set_aside:(fun () ->
+    let outer = !settling in
+    settling := None;
+    fun () -> settling := outer)
+;;
+
+let settle f =
+  match !settling with
   | Some queue ->
     Queue.enqueue queue f;
     Ok ()
   | None ->
     let queue = Queue.create () in
     Queue.enqueue queue f;
-    t.settling <- Some queue;
+    settling := Some queue;
     let rec drain first_error =
       match Queue.dequeue queue with
       | None -> first_error
@@ -59,7 +67,7 @@ let settle t f =
     in
     Exn.protect
       ~f:(fun () -> drain (Ok ()))
-      ~finally:(fun () -> t.settling <- None)
+      ~finally:(fun () -> settling := None)
 ;;
 
 let id t =

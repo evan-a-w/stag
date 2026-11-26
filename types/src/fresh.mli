@@ -33,13 +33,13 @@ val next_id : t -> Type.Id.t
 val set_cons : t -> Cons.t -> unit
 val cons : t -> Cons.t
 
-(** Runs [f], unless within another [settle]: then once what that one runs is
-    done, so watchers binding variables whose watchers bind others don't nest.
-    All that is queued runs, even after an error, so each adds its constraints:
-    the first error of all goes to the outermost [settle]. *)
+(** Runs [f], unless within another [settle] (of any [t]: an [Undo.permanent]
+    section has its own): then once what that one runs is done, so watchers
+    binding variables whose watchers bind others don't nest. All that is queued
+    runs, even after an error, so each adds its constraints: the first error of
+    all goes to the outermost [settle]. *)
 val settle
-  :  t
-  -> (unit -> (unit, Unification_error.t) Result.t)
+  :  (unit -> (unit, Unification_error.t) Result.t)
   -> (unit, Unification_error.t) Result.t
 
 (** The source of mode variables' ids. *)

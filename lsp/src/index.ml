@@ -372,7 +372,8 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
          ; ty = Some e.ty
          ; target = Syntax_at.declaration syntax path.loc
          })
-   | Record { fields = record; record = _ } | Record_update (_, record) ->
+   | Record { fields = record; record = _ }
+   | Record_update { fields = record; record = _; expr = _ } ->
      typed ();
      fields (Option.value (at syntax.fields) ~default:[]) record
    | Field (_, field) ->

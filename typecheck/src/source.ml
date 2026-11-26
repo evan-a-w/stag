@@ -358,7 +358,7 @@ module Expr = struct
       Record
         (List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr))
     | Field (expr, field) -> Field (sub expr, Ref field)
-    | Record_update (expr, fields') ->
+    | Record_update { expr; fields = fields'; record = _ } ->
       Record_update
         ( sub expr
         , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr)

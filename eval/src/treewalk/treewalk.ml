@@ -869,7 +869,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
       Store_place.store place ~value |> Eval_result.of_or_error
     in
     Eval_result.return Value.Unit
-  | Record_update (expr, fields) ->
+  | Record_update { expr; fields; record = _ } ->
     let%bindl.Local_result { global = value } = eval t ~env ~level expr in
     let%bindl.Local_result { global = values } =
       eval_fields t ~env ~level fields

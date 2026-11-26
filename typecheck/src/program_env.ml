@@ -18,7 +18,6 @@ type t =
   ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
   ; sccs : Typed.Scc.t Queue.t
   ; declaration_splices : Typed.Expr.t Queue.t
-  ; unusable_in_quotes : Unusable_in_quotes.t
   ; unfinished : Type.ty Stack.t
   ; mutable reports : Report.t list
   ; mutable reported : int
@@ -144,3 +143,40 @@ let at_compile_time (program : t) f ~loc ~error =
                (Error.of_exn exn)
                ~tag:[%message "Evaluating at compile time raised"])))
 ;;
+
+let create
+  ~type_env
+  ~stamps
+  ~modes
+  ~const_toplevels
+  ~compile_time_c_calls
+  interpreter
+  =
+  let rec t =
+    lazy
+      { type_env = type_env t
+      ; toplevels = String.Table.create ()
+      ; stamps
+      ; interpreter
+      ; ident_info = Typed.Ident.Map.empty
+      ; sccs = Queue.create ()
+      ; declaration_splices = Queue.create ()
+      ; allocations = Queue.create ()
+      ; allocation_ids = 0
+      ; unfinished = Stack.create ()
+      ; reports = []
+      ; reported = 0
+      ; syntax_errors = false
+      ; splice_starts = Stack.create ()
+      ; mutable_idents = Typed.Ident.Hash_set.create ()
+      ; modes
+      ; const_toplevels
+      ; compile_time_c_calls
+      ; parameter_modes = Int.Table.create ()
+      ; checking = Stack.create ()
+      }
+  in
+  Lazy.force t
+;;
+
+let mark_syntax_errors t = t.syntax_errors <- true

@@ -292,6 +292,13 @@ end
 
 let attempted : Attempted.t option ref = ref None
 
+let () =
+  Undo.register_scoped ~set_aside:(fun () ->
+    let outer = !attempted in
+    attempted := None;
+    fun () -> attempted := outer)
+;;
+
 let fire dormant ~because =
   if dormant.fired
   then Ok ()
@@ -1079,15 +1086,51 @@ let holding t =
 ;;
 
 (* A generic node's constraints are those its scheme keeps, which imply the
-   rest. *)
+   rest. The nodes of edges into it may have schemes of their own, generalized
+   later, so their floors count too: to a fixpoint, as the edges may form
+   cycles. *)
 let scheme_lower t =
-  (* Its scheme holds the edges into it from outer nodes only: one between kept
-     nodes is held by the lower, and [raised] follows it [forward]. *)
-  List.fold (holding t) ~init:t.lower ~f:(fun lower -> function
-    | Lower (_, point) -> Int.max lower point
-    | Edge (lo, morphism, hi) when phys_equal hi t ->
-      Int.max lower (Morphism.left morphism lo.lower)
-    | Edge _ | Upper _ -> lower)
+  let floors = Int.Table.create () in
+  let into = Int.Table.create () in
+  let nodes = Queue.create () in
+  let todo = Stack.singleton t in
+  while not (Stack.is_empty todo) do
+    let node = Stack.pop_exn todo in
+    if not (Hashtbl.mem floors node.id)
+    then (
+      Hashtbl.set floors ~key:node.id ~data:node.lower;
+      Hashtbl.set
+        into
+        ~key:node.id
+        ~data:
+          (List.filter_map (holding node) ~f:(function
+            | Lower (_, point) -> Some (`Point point)
+            | Edge (lo, morphism, hi) when phys_equal hi node ->
+              Stack.push todo lo;
+              Some (`From (lo, morphism))
+            | Edge _ | Upper _ -> None));
+      Queue.enqueue nodes node)
+  done;
+  let floor node = Hashtbl.find_exn floors node.id in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Queue.iter nodes ~f:(fun node ->
+      let lower =
+        List.fold
+          (Hashtbl.find_exn into node.id)
+          ~init:(floor node)
+          ~f:(fun lower -> function
+          | `Point point -> Int.max lower point
+          | `From (lo, morphism) ->
+            Int.max lower (Morphism.left morphism (floor lo)))
+      in
+      if lower > floor node
+      then (
+        Hashtbl.set floors ~key:node.id ~data:lower;
+        changed := true))
+  done;
+  floor t
 ;;
 
 let scheme_upper t =

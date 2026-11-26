@@ -335,7 +335,7 @@ let expr_or_error (expr : Typed.Expr.t) =
     | Field (e, f) ->
       let%bind e = go names e in
       node (Field (e, field_path f))
-    | Record_update (e, fs) ->
+    | Record_update { expr = e; fields = fs; record = _ } ->
       let%bind e = go names e in
       let%bind fs = fields fs ~key:field_path in
       node (Record_update (e, fs))

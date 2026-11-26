@@ -46,19 +46,26 @@ val constructor_types
 
 val is_given : (Type_env.Field.t * _ * _) list -> Type_env.Field.t -> bool
 
-(** The record type of [fields], and each field with its location and its [x]. A
-    missing required field is reported, and [Error] on [complete]. *)
+(** Fields resolved to a record type. *)
+module Resolved : sig
+  type 'a t =
+    { known : Type_env.Field.t Known.t
+    ; declared : Type.ty (** The record type, as declared. *)
+    ; record_type : Typed.Record_type.t
+    ; fields : (Type_env.Field.t * Loc.t * 'a) list
+    (** Each with its location and its [x]. *)
+    ; complete : bool
+    (** A missing required field is reported, and [false] here. *)
+    }
+end
+
 val resolve_record_fields
   :  Scope.t
   -> (Source.Field.t * 'a) list
   -> all_required:bool
   -> expected:Type.ty option
   -> loc:Loc.t
-  -> ( Type_env.Field.t Known.t * (Type_env.Field.t * Loc.t * 'a) list * bool
-       , Typecheck_error.t )
-       Result.t
-
-val declared_record : Type_env.Field.t Known.t -> Type.ty
+  -> ('a Resolved.t, Typecheck_error.t) Result.t
 
 (** Returns the instantiated record type, its declaration, and each field with
     its [x] paired with its type. *)

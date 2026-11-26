@@ -1167,7 +1167,7 @@ and edges fresh ~join (var : Sub_edge.var) =
                  (fun () -> other_state.join <- true);
              Sub_edge.merge_edges state other_state;
              Ok ()
-           | _ -> Fresh.settle fresh (fun () -> settle fresh state))
+           | _ -> Fresh.settle (fun () -> settle fresh state))
          ~instantiate:(fun (_ : Sub_edge.State.t) ~at:_ -> None)
          ~generalize:(fun (_ : Sub_edge.State.t) -> fix fresh var)
        :: var.watchers);

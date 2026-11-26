@@ -240,6 +240,36 @@ let r = .~s
   [%expect {| Unbound value y |}]
 ;;
 
+let%expect_test "the explanation of a free variable of spliced code survives \
+                 let-polymorphism"
+  =
+  show
+    {|
+let cell = Ptr.make .< 1 >.
+let q = .< fun (y : int) -> .~(let c = .< y >. in cell.* <- c; c) >.
+let r = .~(cell.*)
+|};
+  [%expect
+    {| Unbound value y, which the spliced code uses: y is a free variable of the quote that made it, as the y in scope there, inside 1 quote(s) (level 1), is bound in another quote |}];
+  show
+    {|
+let cell = Ptr.make .< 1 >.
+let q = .< fun (y : int) -> .~(let f u = .< y >. in cell.* <- f (); .< y >.) >.
+let r = .~(cell.*)
+|};
+  [%expect
+    {| Unbound value y, which the spliced code uses: y is a free variable of the quote that made it, as the y in scope there, inside 1 quote(s) (level 1), is bound in another quote |}];
+  (* [s]'s [y] has nothing to do with [f]'s. *)
+  show
+    {|
+let cell = Ptr.make .< 1 >.
+let q = .< fun (y : int) -> .~(let f u = .< y >. in cell.* <- f (); .< y >.) >.
+let s = .< y >.
+let r = .~s
+|};
+  [%expect {| Unbound value y |}]
+;;
+
 let%expect_test "a crossing local bound in another quote isn't embedded" =
   show
     {|

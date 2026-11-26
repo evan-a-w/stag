@@ -205,6 +205,16 @@ let is_given fields (member : Type_env.Field.t) =
     field.index = member.index)
 ;;
 
+module Resolved = struct
+  type 'a t =
+    { known : Type_env.Field.t Known.t
+    ; declared : Type.ty
+    ; record_type : Typed.Record_type.t
+    ; fields : (Type_env.Field.t * Loc.t * 'a) list
+    ; complete : bool
+    }
+end
+
 let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc =
   let%bind.Result () =
     if List.is_empty fields
@@ -258,20 +268,30 @@ let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc 
       false
     | Some _ | None -> true
   in
-  Ok (known, fields, complete)
-;;
-
-let declared_record (known : Type_env.Field.t Known.t) =
-  (List.hd_exn known.members).record
+  match fields with
+  | [] -> Typecheck_error.error ~loc Empty_record
+  | (first, (_ : Loc.t), _) :: _ ->
+    Ok
+      { Resolved.known
+      ; declared = first.record
+      ; record_type = first.record_type
+      ; fields
+      ; complete
+      }
 ;;
 
 let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
-  let%bind.Result known, fields, complete =
+  let%bind.Result { Resolved.declared
+                  ; record_type
+                  ; fields
+                  ; complete
+                  ; known = _
+                  }
+    =
     resolve_record_fields scope fields ~all_required ~expected ~loc
   in
   let inst = Scope.instantiate t scope in
-  let record = inst (declared_record known) in
-  let record_type = (List.hd_exn known.members).record_type in
+  let record = inst declared in
   let%map.Result () = unify_known t ~expected record ~loc in
   let fields =
     List.map fields ~f:(fun ((field : Type_env.Field.t), _, x) ->
