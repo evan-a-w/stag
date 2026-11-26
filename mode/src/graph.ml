@@ -548,16 +548,39 @@ module Direction = struct
     | Down
 end
 
+(* The reasons along a path, extended at either end in constant time, as
+   searches extend paths at their end. *)
+module Path = struct
+  type t =
+    | Reasons of Reason.t list
+    | Append of t * t
+
+  let empty = Reasons []
+  let of_list reasons = Reasons reasons
+
+  let append a b =
+    match a, b with
+    | Reasons [], t | t, Reasons [] -> t
+    | _ -> Append (a, b)
+  ;;
+
+  let to_list t =
+    let rec go t acc =
+      match t with
+      | Reasons reasons -> reasons @ acc
+      | Append (a, b) -> go a (go b acc)
+    in
+    go t []
+  ;;
+end
+
 (* The constraints between [start] and the nodes [stop] accepts, through paths
    in nodes [through] accepts: [start <= m(other)] going [Up],
    [other <= m(start)] going [Down]. *)
 let implied start ~(direction : Direction.t) ~stop ~through =
-  let visited = Int.Table.create () in
+  let visited = Hash_set.Poly.create () in
   let found = ref [] in
-  let seen node morphism =
-    let morphisms = Hashtbl.find_multi visited node.id in
-    List.mem morphisms morphism ~equal:(fun a b -> Morphism.compare a b = 0)
-  in
+  let found_keys = Hash_set.Poly.create () in
   let rec visit node morphism path =
     let edges =
       match direction with
@@ -568,23 +591,28 @@ let implied start ~(direction : Direction.t) ~stop ~through =
       let other, morphism, path =
         match direction with
         | Up ->
-          edge.hi, Morphism.compose morphism edge.morphism, path @ edge.reasons
+          ( edge.hi
+          , Morphism.compose morphism edge.morphism
+          , Path.append path (Path.of_list edge.reasons) )
         | Down ->
-          edge.lo, Morphism.compose edge.morphism morphism, edge.reasons @ path
+          ( edge.lo
+          , Morphism.compose edge.morphism morphism
+          , Path.append (Path.of_list edge.reasons) path )
       in
+      let key = other.id, Morphism.code morphism in
       if stop other
       then (
-        if not
-             (List.exists !found ~f:(fun implied ->
-                phys_equal implied.other other
-                && Morphism.compare implied.implied_morphism morphism = 0))
-        then found := { other; implied_morphism = morphism; path } :: !found)
-      else if through other && not (seen other morphism)
-      then (
-        Hashtbl.add_multi visited ~key:other.id ~data:morphism;
-        visit other morphism path))
+        if Hash_set.strict_add found_keys key |> Hash_set.Ok_or_duplicate.is_ok
+        then
+          found
+          := { other; implied_morphism = morphism; path = Path.to_list path }
+             :: !found)
+      else if through other
+              && Hash_set.strict_add visited key
+                 |> Hash_set.Ok_or_duplicate.is_ok
+      then visit other morphism path)
   in
-  visit start (Morphism.identity start.axis) [];
+  visit start (Morphism.identity start.axis) Path.empty;
   List.rev !found
   |> List.filter ~f:(fun implied ->
     not
@@ -689,7 +717,7 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
            | Up -> Edge (x, morphism, other)
            | Down -> Edge (other, morphism, x))
           guards
-          path
+          (lazy (Path.to_list path))
       else if internal other
       then reach other morphism guards path
     in
@@ -707,12 +735,12 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
             add
               (Upper (x, Morphism.right morphism node.upper))
               guards
-              (Why.to_list node.upper_why @ List.rev path)
+              (lazy (Why.to_list node.upper_why @ List.rev (Path.to_list path)))
           | Down ->
             add
               (Lower (x, Morphism.left morphism node.lower))
               guards
-              (Why.to_list node.lower_why @ path));
+              (lazy (Why.to_list node.lower_why @ Path.to_list path)));
         List.iter node.dormant ~f:(fun dormant ->
           match guards_of dormant with
           | None -> ()
@@ -723,24 +751,24 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
                add
                  (Upper (x, Morphism.right morphism point))
                  guards
-                 (dormant.dormant_reasons @ List.rev path)
+                 (lazy (dormant.dormant_reasons @ List.rev (Path.to_list path)))
              | Lower (n, point), Down when phys_equal n node ->
                add
                  (Lower (x, Morphism.left morphism point))
                  guards
-                 (dormant.dormant_reasons @ path)
+                 (lazy (dormant.dormant_reasons @ Path.to_list path))
              | Edge (lo, edge_morphism, hi), Up when phys_equal lo node ->
                step
                  hi
                  (Morphism.compose morphism edge_morphism)
                  guards
-                 (path @ dormant.dormant_reasons)
+                 (Path.append path (Path.of_list dormant.dormant_reasons))
              | Edge (lo, edge_morphism, hi), Down when phys_equal hi node ->
                step
                  lo
                  (Morphism.compose edge_morphism morphism)
                  guards
-                 (dormant.dormant_reasons @ path)
+                 (Path.append (Path.of_list dormant.dormant_reasons) path)
              | (Edge _ | Upper _ | Lower _), _ -> ()));
         match direction with
         | Up ->
@@ -749,16 +777,16 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
               edge.hi
               (Morphism.compose morphism edge.morphism)
               guards
-              (path @ edge.reasons))
+              (Path.append path (Path.of_list edge.reasons)))
         | Down ->
           List.iter node.pred ~f:(fun edge ->
             step
               edge.lo
               (Morphism.compose edge.morphism morphism)
               guards
-              (edge.reasons @ path)))
+              (Path.append (Path.of_list edge.reasons) path)))
     in
-    reach x (Morphism.identity x.axis) [] [];
+    reach x (Morphism.identity x.axis) [] Path.empty;
     (* What paths not guarded reach first, so that guarded ones skip it. *)
     while not (Queue.is_empty unguarded) do
       visit (Queue.dequeue_exn unguarded)
@@ -772,7 +800,7 @@ let guarded_implied x ~is_kept ~is_outer ~internal ~above ~below ~above_of =
   let found =
     Hashtbl.data found
     |> List.map ~f:(fun (kind, guards, path) ->
-      { kind; guards; dormant_reasons = path; fired = false })
+      { kind; guards; dormant_reasons = Lazy.force path; fired = false })
   in
   let implied_by (implied : implied list) other morphism =
     List.exists implied ~f:(fun implied ->
@@ -865,27 +893,27 @@ let generalize nodes ~rank =
     List.iter (find below y) ~f:(fun c ->
       if is_outer c.other
       then Hashtbl.add_multi outer_below ~key:c.other.id ~data:(y, c)));
-  let remove_outer_below c =
-    if is_outer c.other
-    then
-      Hashtbl.change outer_below c.other.id ~f:(fun current ->
-        Option.map current ~f:(fun current ->
-          List.filter current ~f:(fun (_, c') -> not (phys_equal c c'))))
+  (* The constraints dropped so far, by their ends and morphism. *)
+  let dropped = Hash_set.Poly.create () in
+  let key ~src ~dst c = src.id, dst.id, Morphism.code c.implied_morphism in
+  (* The constraints [n <= m(other)] from [n] in the scheme, not dropped. Edges
+     between outer nodes are not used: a later generalization may make one end
+     generic and the other not, so an instance would lose them. *)
+  let out n =
+    let constraints =
+      if is_kept n
+      then List.map (find above n) ~f:(fun c -> c, c.other)
+      else if is_outer n
+      then
+        List.map (Hashtbl.find_multi outer_below n.id) ~f:(fun (y, c) -> c, y)
+      else []
+    in
+    List.filter constraints ~f:(fun (c, other) ->
+      not (Hash_set.mem dropped (key ~src:n ~dst:other c)))
   in
-  (* The constraints [n <= m(other)] from [n] in the scheme, except [excluding].
-     Edges between outer nodes are not used: a later generalization may make one
-     end generic and the other not, so an instance would lose them. *)
   let steps n ~excluding =
-    let keep c = not (phys_equal c excluding) in
-    if is_kept n
-    then
-      List.filter_map (find above n) ~f:(fun c ->
-        Option.some_if (keep c) (c.other, c.implied_morphism))
-    else if is_outer n
-    then
-      List.filter_map (Hashtbl.find_multi outer_below n.id) ~f:(fun (y, c) ->
-        Option.some_if (keep c) (y, c.implied_morphism))
-    else []
+    List.filter_map (out n) ~f:(fun (c, other) ->
+      Option.some_if (not (phys_equal c excluding)) (other, c.implied_morphism))
   in
   (* Whether [src <= m(dst)] follows from the constraints other than
      [excluding]. *)
@@ -903,20 +931,71 @@ let generalize nodes ~rank =
     in
     go src (Morphism.identity src.axis)
   in
+  (* Whether each constraint is implied, decided once for all those for which
+     that doesn't depend on which others are dropped first. *)
+  let verdict =
+    let index = Int.Table.create () in
+    let nodes = Queue.create () in
+    let add node =
+      Hashtbl.find_or_add index node.id ~default:(fun () ->
+        Queue.enqueue nodes node;
+        Queue.length nodes - 1)
+    in
+    List.iter kept ~f:(fun y ->
+      ignore (add y : int);
+      List.iter (find below y) ~f:(fun c -> ignore (add c.other : int)));
+    let outs = Queue.create () in
+    while Queue.length outs < Queue.length nodes do
+      Queue.enqueue
+        outs
+        (Array.of_list_map
+           (out (Queue.get nodes (Queue.length outs)))
+           ~f:(fun (c, other) -> c, add other))
+    done;
+    let outs = Queue.to_array outs in
+    let verdicts =
+      Implied_constraints.create
+        ~succ:
+          (Array.map
+             outs
+             ~f:(Array.map ~f:(fun (c, w) -> w, c.implied_morphism)))
+    in
+    let by_key = Hashtbl.Poly.create () in
+    Array.iteri outs ~f:(fun v constraints ->
+      Array.iteri constraints ~f:(fun i (c, w) ->
+        Hashtbl.set
+          by_key
+          ~key:(key ~src:(Queue.get nodes v) ~dst:(Queue.get nodes w) c)
+          ~data:(Implied_constraints.verdict verdicts ~src:v i)));
+    fun key -> Hashtbl.find_exn by_key key
+  in
   (* Drops, one at a time, the constraints the others imply. Each dropped one is
      implied by those remaining when it is dropped, so by the final ones. *)
-  let reduce table node ~src ~dst =
-    List.iter (find table node) ~f:(fun c ->
-      if derivable ~excluding:c ~src:(src c) ~dst:(dst c) c.implied_morphism
-      then (
-        if phys_equal table below then remove_outer_below c;
-        Hashtbl.update table node.id ~f:(fun current ->
-          List.filter (Option.value current ~default:[]) ~f:(fun c' ->
-            not (phys_equal c c')))))
+  let reduce constraints ~src ~dst =
+    List.iter constraints ~f:(fun c ->
+      let src = src c
+      and dst = dst c in
+      let key = key ~src ~dst c in
+      if match verdict key with
+         | Implied_constraints.Verdict.Implied -> true
+         | Not_implied -> false
+         | Unknown -> derivable ~excluding:c ~src ~dst c.implied_morphism
+      then Hash_set.add dropped key)
   in
   List.iter kept ~f:(fun x ->
-    reduce above x ~src:(fun _ -> x) ~dst:(fun c -> c.other);
-    reduce below x ~src:(fun c -> c.other) ~dst:(fun _ -> x));
+    reduce (find above x) ~src:(fun _ -> x) ~dst:(fun c -> c.other);
+    reduce (find below x) ~src:(fun c -> c.other) ~dst:(fun _ -> x));
+  List.iter kept ~f:(fun x ->
+    let keep table ~src ~dst =
+      Hashtbl.set
+        table
+        ~key:x.id
+        ~data:
+          (List.filter (find table x) ~f:(fun c ->
+             not (Hash_set.mem dropped (key ~src:(src c) ~dst:(dst c) c))))
+    in
+    keep above ~src:(fun _ -> x) ~dst:(fun c -> c.other);
+    keep below ~src:(fun c -> c.other) ~dst:(fun _ -> x));
   let guarded =
     List.map kept ~f:(fun x ->
       ( x

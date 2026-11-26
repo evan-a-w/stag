@@ -48,4 +48,5 @@ module Written_morphism = Written_morphism
 
 module Private : sig
   module Undo = Undo
+  module Implied_constraints = Implied_constraints
 end
