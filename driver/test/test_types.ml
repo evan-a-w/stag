@@ -870,6 +870,7 @@ let%expect_test "recursive local non-functions are not generalized" =
         print_string
           (Signature.to_string_hum [ List.last_exn (checked t).signature ]))
   in
+  (* Using [x]'s value in computing it is an error. *)
   print_local "x";
   print_local "x; Nil";
   print_local "match x with _ -> Nil";
@@ -884,9 +885,9 @@ let%expect_test "recursive local non-functions are not generalized" =
   print_local ".<forget x in .~(.<Nil>.).{x}>.";
   [%expect
     {|
-    val local : '_a * '_a
-    val local : list['_a] * list['_a]
-    val local : list['_a] * list['_a]
+    ((Used_before_defined (name x) (shadows false)) @ t.stag:2:20-21)
+    ((Used_before_defined (name x) (shadows false)) @ t.stag:2:20-21)
+    ((Used_before_defined (name x) (shadows false)) @ t.stag:2:26-27)
     val local : <list['a]>{..'b} * <list['c]>{..'d}
     val local : <'a>{x : 'a; ..'b} * <'c>{x : 'c; ..'d}
     val local : list['a] * list['b]
