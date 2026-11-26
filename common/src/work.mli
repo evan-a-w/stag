@@ -12,8 +12,8 @@ val incr : t -> unit
 
 module Private : sig
   module Counts : sig
-    (** The steps of each counter that took any, and the words allocated on the
-        minor heap, as ["allocated_words"], which also count work done where no
+    (** The steps of each counter that took any, and the words allocated, as
+        ["allocated_words"], which also count work done where no
         counter is. *)
     type t = int String.Map.t [@@deriving sexp_of]
   end

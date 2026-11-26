@@ -17,15 +17,19 @@ let incr t = t.count <- t.count + 1
 
 module Private = struct
   module Counts = struct
+    (* Large blocks are allocated straight on the major heap. *)
+    let allocated_words () =
+      let minor, promoted, major = Stdlib.Gc.counters () in
+      Float.to_int (minor +. major -. promoted)
+    ;;
+
     type t = int String.Map.t [@@deriving sexp_of]
 
     let read () =
       Queue.fold
         all
         ~init:
-          (String.Map.singleton
-             "allocated_words"
-             (Float.to_int (Stdlib.Gc.minor_words ())))
+          (String.Map.singleton "allocated_words" (allocated_words ()))
         ~f:(fun counts t ->
           Map.update counts t.name ~f:(fun count ->
             Option.value count ~default:0 + t.count))
