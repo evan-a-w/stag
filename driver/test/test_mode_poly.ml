@@ -194,9 +194,9 @@ let wrap x = exclave_ stack_ (Ptr.make x)
 |};
   [%expect
     {|
-    let mk_copy : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 = mk
+    let mk_copy : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and local nonportable gc <= 'm1 = mk
     let pass_copy : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with local <= 'm0 and 'm0 <= 'm1 = pass
-    let wrap_copy : 'a @ 'm0 -> ptr['a @@ 'm2] @ 'm1 with 'm0 <= 'm2 and 'm0 <= global and portable <= 'm2 and nonportable gc local <= 'm1 = wrap
+    let wrap_copy : 'a @ 'm0 -> ptr['a @@ 'm2] @ 'm1 with 'm0 <= 'm2 and 'm0 <= global and portable <= 'm2 and local nonportable gc <= 'm1 = wrap
     |}];
   (* Crossing: an [int] is the same value at every mode. *)
   round_trip
@@ -493,14 +493,14 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     {|
     let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1 = ext
     let p_copy : ptr[string] = p
-    let store_copy : string @ 'm0 -> unit @ _ with 'm0 <= gc global = store
+    let store_copy : string @ 'm0 -> unit @ _ with 'm0 <= global gc = store
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= static = keep
     let in_ptr_copy : 'a @ _ -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0 = in_ptr
     let k_copy : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
     let captures_copy : string @ 'm0 -> (int @ _ -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = captures
     let closed_copy : 'a @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
     let ints_copy : ptr[int] @ _ -> unit @ _ = ints
-    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc global and gc <= 'm1 = strings
+    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm2 <= global gc and gc <= 'm1 = strings
     let get_any_copy : ptr['a @@ 'm0] @ _ -> 'a @ 'm1 with 'm0 <= 'm1 = get_any
     let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) = id_cell
     let static_cell_copy : ptr[string @@ static] = static_cell

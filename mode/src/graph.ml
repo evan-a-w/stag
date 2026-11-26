@@ -935,15 +935,11 @@ let reopen node ~rank =
   | Rank _ -> ()
 ;;
 
-let create_generic ?(uppers = []) ~var_id axes ~edges =
+let create_generic ~var_id axes ~edges =
   let nodes = List.map axes ~f:(fun axis -> create ~var_id axis ~rank:0) in
   let node axis =
     List.find_exn nodes ~f:(fun node -> Axis.Any.equal node.axis axis)
   in
-  List.iter uppers ~f:(fun (axis, upper, reason) ->
-    let node = node axis in
-    node.upper <- upper;
-    node.upper_why <- Bound reason);
   let edges = edges node in
   List.iter edges ~f:(fun (lo, morphism, hi, reason) ->
     if Morphism.left morphism lo.lower > hi.lower

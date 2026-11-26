@@ -135,7 +135,7 @@ C functions are declared with `external` (see
 [syntax.md](syntax.md#external-functions)), at ordinary curried types: an
 `external f : a -> b -> r` is C's `r f(a, b)`, and `unit -> r` is `r f(void)`.
 Its modes are trusted as written, unwritten ones a declaration's defaults
-(`nonportable gc global`). The external itself is a code pointer, so its own
+(`global nonportable gc`). The external itself is a code pointer, so its own
 mode is unconstrained: like any toplevel function, it is `static` and `const`.
 Only immediates cross the boundary for now (`int` as `int64_t`, `bool`,
 `char`, and `unit` as `void`): pointers are not supported yet, and signatures
@@ -251,7 +251,7 @@ forced to `external`.
 
 In compiled code, a value crossing from compile time into a quote must be
 `portable`, so deeply immutable, and at most `gc`, and is then lifted, as
-static data: at its use it is `const static global`, whatever it was bound as
+static data: at its use it is `global const static`, whatever it was bound as
 (an application's result included). A value that may refer to `external`
 memory is not lifted (an error), as the static copy can't own what it points
 to, and `const external` isn't a mode. Likewise a `portable` toplevel used by

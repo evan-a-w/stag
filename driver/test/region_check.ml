@@ -394,9 +394,9 @@ let instance_vars ~scheme ~ty =
   let side (s : Arrow_modes.Side.t) (s' : Arrow_modes.Side.t) =
     match s, s' with
     | Var var, Var var' -> Queue.enqueue pairs (var, `Var var')
-    | Var var, Fixed const ->
-      Queue.enqueue pairs (var, `Fixed (Mode.Locality.index const.locality))
-    | Fixed _, _ -> ()
+    | Var var, (Fixed { locality; _ } | Var_at { locality; _ }) ->
+      Queue.enqueue pairs (var, `Fixed (Mode.Locality.index locality))
+    | (Fixed _ | Var_at _), _ -> ()
   in
   let rec walk (scheme : Type.ty) (ty : Type.ty) =
     match scheme, Type.canonical_ty ty with
@@ -477,7 +477,8 @@ let instantiate t (instance : Instance.t) ~owner ~scheme ~ty =
       List.filter_map sides ~f:(fun side ->
         let value =
           match side_of scheme side with
-          | Fixed const -> Mode.Locality.index const.locality
+          | Fixed { locality; _ } | Var_at { locality; _ } ->
+            Mode.Locality.index locality
           | Var var -> snd (bounds pins (Mode.Var.node var Locality))
         in
         if value >= local then Some (key, side) else None)

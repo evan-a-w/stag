@@ -292,7 +292,7 @@ let stage_at_least ctx stage ~loc ~why =
   mode
 ;;
 
-(* A fresh mode of a constant of the code: [const static global]. *)
+(* A fresh mode of a constant of the code: [global const static]. *)
 let constant ctx ~loc ~why =
   let mode = Ctx.fresh ctx in
   Mode.Error.ok_exn
@@ -310,6 +310,20 @@ let fresh_held ctx = Mode_arg.Var (Ctx.fresh ctx)
 
 let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var =
   Option.iter annot ~f:(fun { txt; loc } ->
+    let fix_atom atom =
+      let reason =
+        reason
+          ~loc
+          (sprintf "it is annotated %s" (Syntax.Mode_expr.Atom.to_string atom))
+      in
+      let (T (axis, point)) = Mode_atoms.point atom in
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.at_most mode axis point reason
+         |> Result.bind ~f:(fun () ->
+           if exact then Mode.Var.at_least mode axis point reason else Ok ()))
+    in
     match txt with
     | Var name ->
       Ctx.add
@@ -321,30 +335,29 @@ let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var 
            mode
            (var name ~loc)
            (reason ~loc (sprintf "it is annotated '%s" name)))
+    | Var_at (locality, name) ->
+      fix_atom locality;
+      let annotated = var name ~loc in
+      let reason =
+        reason
+          ~loc
+          (sprintf
+             "it is annotated %s"
+             (Syntax.Mode_expr.to_string { txt; loc }))
+      in
+      List.iter [ Mode.Axis.Any.T Stage; T Provenance ] ~f:(fun (T axis) ->
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode_on mode annotated axis reason
+           |> Result.bind ~f:(fun () ->
+             if exact
+             then Mode.Var.submode_on annotated mode axis reason
+             else Ok ())))
     | Atoms atoms ->
       (match Mode_atoms.invalid atoms with
        | Some why -> ctx.report (Typecheck_error.create ~loc (Invalid_mode why))
-       | None ->
-         List.iter atoms ~f:(fun atom ->
-           let reason =
-             reason
-               ~loc
-               (sprintf
-                  "it is annotated %s"
-                  (Syntax.Mode_expr.Atom.to_string atom))
-           in
-           let fix axis point =
-             Ctx.add
-               ctx
-               ~loc
-               (Mode.Var.at_most mode axis point reason
-                |> Result.bind ~f:(fun () ->
-                  if exact
-                  then Mode.Var.at_least mode axis point reason
-                  else Ok ()))
-           in
-           let (T (axis, point)) = Mode_atoms.point atom in
-           fix axis point)))
+       | None -> List.iter atoms ~f:fix_atom))
 ;;
 
 let annotated ctx annot ~var =
@@ -584,7 +597,7 @@ module Binding = struct
             | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
             | Global | Regional | Local -> Some (T Locality)
             | Static | Gc | External -> Some (T Provenance))
-        | Var _ -> [ T Stage; T Locality; T Provenance ]
+        | Var _ | Var_at _ -> [ T Stage; T Locality; T Provenance ]
       in
       List.iter
         [ Mode.Axis.Any.T Stage; T Provenance; T Locality ]

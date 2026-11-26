@@ -108,7 +108,7 @@ tuples and variants are values, not allocations: what is local in a local
 | match                      | join of the scrutinee and the arms; its pattern variables have the scrutinee's mode (exception cases: nonportable) |
 | splice in a quote          | nonportable (the code's mode is not known)  |
 | toplevel splice            | the mode of its expansion: `.~(.<1>.)` is const |
-| value computed at compile time, used in generated code (lifted) | const static global: a constant of the code |
+| value computed at compile time, used in generated code (lifted) | global const static: a constant of the code |
 | `let x = e1 in e2`         | join of `e1` and `e2`                       |
 | quote `<e>`                | join of the values it captures from outer levels (its free variables are resolved at the splice, so don't count) |
 | by-value tuple, record, constructor | the join of its components, each of which keeps its own mode (see below) |
@@ -127,7 +127,7 @@ A value used at a later stage than it is bound in (a local of a splice used in
 the quote it returns, or what a toplevel splice's code embedded) must be
 `portable`, so is deeply immutable: no cell is portable, and a block is as
 portable as what it holds. The code holds a copy of it, so at the use it is a
-`const static global` constant, even if it is an application's result (the
+`global const static` constant, even if it is an application's result (the
 application ran at compile time). A toplevel spliced from it is then `const`,
 so generalized. The binding itself keeps its mode, and so does the code
 holding it.
@@ -189,12 +189,12 @@ closure's own mode is the mode of the arrow value, like any value's.
   a scheme, with the constraints between them, and copied per instance, so
   `let apply f x = f x` works for portable and nonportable `f` alike.
 - **Annotations.** A side written without a mode is the default,
-  `nonportable gc global`, in an annotation as in a declaration (and for
+  `global nonportable gc`, in an annotation as in a declaration (and for
   builtins), as OxCaml's legacy modes: `(f : int -> int)` makes `f`'s arrow
   the default's, and `'m` keeps a side polymorphic (one variable across a
   definition's annotations; in a declaration a mode variable is an error).
   Axes not written are the default's, so `int @ local -> int` is
-  `int @ nonportable gc local -> int @ nonportable gc global`. An arrow's
+  `int @ local nonportable gc -> int @ global nonportable gc`. An arrow's
   `curry`, never written, is free in an annotation. As in OxCaml, the result
   of a curried arrow written without a mode is as local as the arguments
   before it (`ptr[int] @ local -> int -> int` is
@@ -326,8 +326,11 @@ An arrow's side fixed to a constant (by a declaration, as a record field's
 annotations and declarations alike read unwritten axes as the default.
 A declared arrow's side may instead name one of the declaration's mode
 parameters (`type cmp['k, 'p : mode] = { compare : 'k @ 'p -> 'k @ 'p -> int }`):
-its stage and provenance are the argument's, its locality `global` (the
-parameter is bounded so). The parameter gets the side's variance: an
+its stage and provenance are the argument's, its locality `global`, unless
+written with it (`'k @ local 'p`, as `Core.Lru`'s comparison takes local
+keys of the cache's provenance). In an annotation, `@ local 'm` likewise
+takes `'m`'s stage and provenance with a fixed locality; the variable's own
+locality is then unread there. The parameter gets the side's variance: an
 argument's is contravariant, a result's covariant; as a result is never
 `const`, the parameter is then at least `portable`.
 
@@ -519,7 +522,7 @@ toplevel splice has the mode of its expansion, checked after it is generated.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
 - An arrow written in an annotation without modes has the default modes
-  (`nonportable gc global`), as in a declaration, rather than fresh
+  (`global nonportable gc`), as in a declaration, rather than fresh
   variables: `(f : int -> int)` makes `f` take and return global values.
   Write `'m` to keep a side polymorphic.
 

@@ -190,18 +190,20 @@ let projection positions =
     | Locality -> p.mode_arg
     | Stage | Provenance -> false
   in
-  let point (const : Mode.Const.t) (Mode.Axis.Any.T axis) =
-    let module C = (val Mode.Axis.chain axis) in
-    match axis with
-    | Stage -> C.index const.stage
-    | Provenance -> C.index const.provenance
-    | Locality -> C.index const.locality
+  let on (side : Arrow_modes.Side.t) (Mode.Axis.Any.T axis)
+    : [ `Point of int | `Var of Mode.Var.t ]
+    =
+    match Arrow_modes.Side.on_axis side axis with
+    | Point (point, _) ->
+      let module C = (val Mode.Axis.chain axis) in
+      `Point (C.index point)
+    | Var var -> `Var var
   in
   let node var (Mode.Axis.Any.T axis) = Mode.Var.node var axis in
   let floors =
     List.filter_map positions ~f:(fun p ->
-      match p.side, p.result with
-      | Var var, true -> Some (node var (T Stage), Mode.Stage.index Portable)
+      match Arrow_modes.Side.var p.side, p.result with
+      | Some var, true -> Some (node var (T Stage), Mode.Stage.index Portable)
       | _ -> None)
   in
   let levels seeds =
@@ -212,9 +214,9 @@ let projection positions =
         List.filter_map Mode.Axis.Any.all ~f:(fun axis ->
           Option.some_if
             (not (dead p axis))
-            (match p.side with
-             | Fixed const -> point const axis
-             | Var var ->
+            (match on p.side axis with
+             | `Point point -> point
+             | `Var var ->
                let n = node var axis in
                List.fold
                  raised
@@ -230,18 +232,18 @@ let projection positions =
     ( base
     , List.concat_map positions ~f:(fun p ->
         List.concat_map Mode.Axis.Any.all ~f:(fun axis ->
-          match p.side with
+          match on p.side axis with
           | _ when dead p axis -> []
-          | Fixed const -> [ point const axis ]
-          | Var var ->
+          | `Point point -> [ point ]
+          | `Var var ->
             let n = node var axis in
             [ Mode.Var.Node.upper n ]))
     , List.concat_map positions ~f:(fun p ->
         List.concat_map Mode.Axis.Any.all ~f:(fun axis ->
-          match p.side with
-          | Fixed _ -> []
-          | Var _ when dead p axis -> []
-          | Var var ->
+          match on p.side axis with
+          | `Point _ -> []
+          | `Var _ when dead p axis -> []
+          | `Var var ->
             let n = node var axis in
             let floor =
               List.fold

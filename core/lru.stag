@@ -4,16 +4,18 @@
 
    The bindings are a doubly linked list of pointer cells, most recently used
    first, indexed by a [Map] from keys to cells. ['p] bounds the provenance
-   (and stage) of what the cells hold, as [ptr[t @@ 'p]]'s: a
-   [t[string, string, external]] may hold C strings. A cache is mutable, so
-   unlike a [Map.t] it is invariant in ['p]: a [t[_, _, gc]] is not a
-   [t[_, _, external]], as storing an external value through the latter would
-   break what the former promises. *)
+   (and stage) of what the cells hold, keys and values, as [ptr[t @@ 'p]]'s:
+   a [t[string, string, external]] may hold C strings. The comparison takes
+   keys of the cache's provenance, so one only for GC keys suits a
+   [t[_, _, gc]], and [String.compare], taking any, suits every cache.
+   A cache is mutable, so unlike a [Map.t] it is invariant in ['p]: a
+   [t[_, _, gc]] is not a [t[_, _, external]], as storing an external value
+   through the latter would break what the former promises. *)
 
 type link['k, 'v, 'p : mode] = Nil | Entry of ptr[entry['k, 'v, 'p] @@ 'p]
 
 type entry['k, 'v, 'p : mode] = {
-  key : 'k @@ gc;
+  key : 'k;
   value : 'v;
   prev : link['k, 'v, 'p];
   next : link['k, 'v, 'p];
@@ -21,7 +23,7 @@ type entry['k, 'v, 'p : mode] = {
 
 type t['k, 'v, 'p : mode] = {
   capacity : int;
-  compare : 'k @ local -> 'k @ local -> int;
+  compare : 'k @ local 'p -> ('k @ local 'p -> int) @ local external;
   index : ptr[Map.t['k, ptr[entry['k, 'v, 'p] @@ 'p], 'p] @@ 'p];
   first : ptr[link['k, 'v, 'p] @@ 'p];
   last : ptr[link['k, 'v, 'p] @@ 'p];

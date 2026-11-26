@@ -34,11 +34,19 @@ end
 type desc =
   | Var of string (** [@ 'm], standing for every axis. *)
   | Atoms of Atom.t list (** Non-empty, at most one of each axis. *)
+  | Var_at of Atom.t * string
+  (** [@ local 'm]: a locality, and a variable for the other axes. *)
 [@@deriving sexp_of, compare, equal]
 
 type t = desc Located.t [@@deriving sexp_of, compare, equal]
 
 val to_string : t -> string
+
+(** ['m], or [_] for an unnamed variable. *)
+val var_to_string : string -> string
+
+(** Why a mode with a locality and a variable isn't a side of a constraint. *)
+val var_at_in_constraint : string
 
 (** A side of a [with] clause's [lower <= upper]. *)
 module Term : sig

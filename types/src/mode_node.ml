@@ -27,3 +27,14 @@ let atom (T axis : Mode.Axis.Any.t) index =
   let module C = (val Mode.Axis.chain axis) in
   Sexp.to_string (C.sexp_of_t (C.of_index_exn index)) |> String.lowercase
 ;;
+
+let atoms points =
+  List.stable_sort points ~compare:(fun (a, _) (b, _) ->
+    let written : Mode.Axis.Any.t -> int = function
+      | T Locality -> 0
+      | T Stage -> 1
+      | T Provenance -> 2
+    in
+    Int.compare (written a) (written b))
+  |> List.map ~f:(fun (axis, index) -> atom axis index)
+;;

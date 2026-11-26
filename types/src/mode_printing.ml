@@ -105,7 +105,7 @@ let create () =
   }
 ;;
 
-let count t var ~(side : [ `Arg | `Res | `Mode_arg ]) =
+let count t var ~(side : [ `Arg | `Res | `Res_at | `Mode_arg ]) =
   let id = Mode.Var.id var in
   Hashtbl.set t.vars ~key:id ~data:var;
   (match side with
@@ -113,6 +113,7 @@ let count t var ~(side : [ `Arg | `Res | `Mode_arg ]) =
    | `Res ->
      Hash_set.add t.on_arrows id;
      Hash_set.add t.results id
+   | `Res_at -> Hash_set.add t.results id
    | `Mode_arg -> ());
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);
@@ -534,12 +535,13 @@ let constraints t ~layout_name =
           | Upper _ | Plain _ | Relation _ -> false)
       in
       let atoms =
-        List.map
-          ((n, p)
-           :: List.filter_map same ~f:(function
-             | Lower (n, p) -> Some (n, p)
-             | Upper _ | Plain _ | Relation _ -> None))
-          ~f:(fun ((n : Mode_node.t), p) -> Mode_node.atom n.axis p)
+        Mode_node.atoms
+          (List.map
+             ((n, p)
+              :: List.filter_map same ~f:(function
+                | Lower (n, p) -> Some (n, p)
+                | Upper _ | Plain _ | Relation _ -> None))
+             ~f:(fun ((n : Mode_node.t), p) -> n.axis, p))
       in
       (String.concat ~sep:" " atoms ^ " <= " ^ name t n.var) :: group rest
     | Upper (n, p) :: rest ->
@@ -549,12 +551,13 @@ let constraints t ~layout_name =
           | Lower _ | Plain _ | Relation _ -> false)
       in
       let atoms =
-        List.map
-          ((n, p)
-           :: List.filter_map same ~f:(function
-             | Upper (n, p) -> Some (n, p)
-             | Lower _ | Plain _ | Relation _ -> None))
-          ~f:(fun ((n : Mode_node.t), p) -> Mode_node.atom n.axis p)
+        Mode_node.atoms
+          (List.map
+             ((n, p)
+              :: List.filter_map same ~f:(function
+                | Upper (n, p) -> Some (n, p)
+                | Lower _ | Plain _ | Relation _ -> None))
+             ~f:(fun ((n : Mode_node.t), p) -> n.axis, p))
       in
       (name t n.var ^ " <= " ^ String.concat ~sep:" " atoms) :: group rest
     | Plain (lo, hi) :: rest -> (name t lo ^ " <= " ^ name t hi) :: group rest

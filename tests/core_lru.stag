@@ -213,3 +213,26 @@ let%expect_test "random operations agree with a list" =
     8
     8
     |}]
+
+let ext (s : string) =
+  let e @ external = s in
+  e
+
+let%expect_test "keys may be external, as C strings" =
+  let c : Core.Lru.t[string, int, external] =
+    Core.Lru.create 2 Core.String.compare
+  in
+  Core.Lru.add c (ext "a") 1;
+  Core.Lru.add c (ext "b") 2;
+  Core.Lru.add c (ext "c") 3;
+  print_cache c;
+  print_found (Core.Lru.find c "a");
+  print_found (Core.Lru.find c (ext "b"));
+  Core.Lru.remove c "c";
+  print_cache c;
+  [%expect {|
+    ((c 3) (b 2))
+    ()
+    (2)
+    ((b 2))
+    |}]

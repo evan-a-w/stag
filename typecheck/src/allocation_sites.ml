@@ -52,7 +52,7 @@ let sides start =
   let found = Queue.create () in
   let side ~steps (side : Arrow_modes.Side.t) which =
     match side with
-    | Fixed _ -> ()
+    | Fixed _ | Var_at _ -> ()
     | Var var ->
       let lower = Mode.Var.lower var
       and upper = Mode.Var.upper var in

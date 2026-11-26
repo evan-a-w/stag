@@ -463,37 +463,47 @@ module Vars = struct
     fixed t default ~reason:"its type is written without a mode" ~loc
   ;;
 
-  let param_locality_reason ~loc =
-    Mode.Reason.create
-      ~loc
-      "it is a mode parameter on an arrow in a declaration, which is global"
-  ;;
-
   let mode_side t ({ txt; loc } : Syntax.Mode_expr.t) ~default
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
-    match t, txt with
-    | Annotation vars, Var name ->
-      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
-        Arrow_modes.Side.Var var)
-    | Params params, Var name ->
-      (match Map.find params name with
-       | Some (AMode (Fixed { stage; provenance })) ->
-         Ok (Arrow_modes.Side.Fixed { stage; provenance; locality = Global })
-       | Some (AMode (Var var)) ->
-         (* A mode argument has no locality: the arrow's is the default. *)
-         let%map.Result () =
-           if Mode.Var.is_generic var
-           then Ok ()
-           else
-             Mode.Var.at_most var Locality Global (param_locality_reason ~loc)
-             |> Result.map_error ~f:(fun error ->
-               Typecheck_error.create ~loc (Mode_error error))
-         in
-         Arrow_modes.Side.Var var
-       | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
-       | None -> error ~loc (Mode_variable_in_declaration name))
-    | (Annotation _ | Params _), Atoms atoms ->
+    (* A mode parameter's locality is [global] unless written with it. *)
+    let var_side name (written : Mode.Locality.t option)
+      : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
+      =
+      let locality = Option.value written ~default:Global in
+      let why () =
+        Mode.Reason.create
+          ~loc
+          (match written with
+           | Some locality ->
+             sprintf
+               "its type is written %s"
+               (Mode.Locality.sexp_of_t locality
+                |> Sexp.to_string
+                |> String.lowercase)
+           | None ->
+             "it is a mode parameter on an arrow in a declaration, which is \
+              global")
+      in
+      match t with
+      | Annotation vars ->
+        Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
+          match written with
+          | Some _ -> Arrow_modes.Side.Var_at { var; locality; why = why () }
+          | None -> Var var)
+      | Params params ->
+        (match Map.find params name with
+         | Some (AMode (Fixed { stage; provenance })) ->
+           Ok (Arrow_modes.Side.Fixed { stage; provenance; locality })
+         | Some (AMode (Var var)) -> Ok (Var_at { var; locality; why = why () })
+         | Some (ATy _ | ARow _) ->
+           error ~loc (Type_variable_kind_mismatch name)
+         | None -> error ~loc (Mode_variable_in_declaration name))
+    in
+    match txt with
+    | Var name -> var_side name None
+    | Var_at (atom, name) -> var_side name (Some (Mode_atoms.locality atom))
+    | Atoms atoms ->
       let%map.Result const = Mode_atoms.declared atoms ~default ~loc in
       fixed
         t
@@ -520,6 +530,7 @@ module Vars = struct
        | Some (AMode mode) -> Ok mode
        | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Mode_variable_in_declaration name))
+    | _, Var_at _ -> error ~loc Locality_in_mode_argument
     | _, Atoms atoms ->
       if List.exists atoms ~f:(fun atom ->
            match Syntax.Mode_expr.Atom.axis atom with
@@ -544,7 +555,8 @@ module Vars = struct
   ;;
 
   let rec term_var : Syntax.Mode_expr.Term.t -> string option = function
-    | Mode { txt = Var name; _ } | Axis (_, { txt = Var name; _ }) -> Some name
+    | Mode { txt = Var name | Var_at (_, name); _ }
+    | Axis (_, { txt = Var name | Var_at (_, name); _ }) -> Some name
     | Mode { txt = Atoms _; _ } | Axis (_, { txt = Atoms _; _ }) -> None
     | Meet (t, _) | Release t | Static_if_const t | Const_if_static t ->
       term_var t
@@ -579,6 +591,11 @@ module Vars = struct
     | Release t -> under t Mode.Morphism.release ~left:true
     | Static_if_const t -> under t Mode.Morphism.const_is_static ~left:false
     | Const_if_static t -> under t Mode.Morphism.runtime_is_gc ~left:false
+    | Axis (_, { txt = Var_at _; _ }) ->
+      Error
+        (Typecheck_error.create
+           ~loc
+           (Invalid_mode Syntax.Mode_expr.var_at_in_constraint))
     | Mode _ | Axis (_, { txt = Atoms _; _ }) ->
       Error
         (Typecheck_error.create
@@ -663,6 +680,8 @@ module Vars = struct
          error ~loc (Invalid_mode "a constraint must be on a mode variable"))
     | Annotation vars, Mode lower, Mode upper ->
       (match lower.txt, upper.txt with
+       | Var_at _, _ | _, Var_at _ ->
+         error ~loc (Invalid_mode Syntax.Mode_expr.var_at_in_constraint)
        | Atoms _, Atoms _ ->
          error ~loc (Invalid_mode "a constraint must be on a mode variable")
        | Var lower_name, Var upper_name ->
@@ -746,7 +765,7 @@ let result_floor (side : Arrow_modes.Side.t) ~loc =
   match side with
   | Fixed { stage = Const; _ } -> Error never_const
   | Fixed { stage = Portable | Nonportable; _ } -> Ok ()
-  | Var var ->
+  | Var var | Var_at { var; _ } ->
     Mode.Var.at_least
       var
       Stage
@@ -857,7 +876,8 @@ let rec elaborate'
           (* A named argument adds nothing: its locality isn't known. *)
           let curried =
             match side1 with
-            | Fixed { locality; _ } -> Mode.Locality.join curried locality
+            | Fixed { locality; _ } | Var_at { locality; _ } ->
+              Mode.Locality.join curried locality
             | Var var ->
               let lower = (Mode.Var.lower var).locality in
               if Mode.Locality.equal lower (Mode.Var.upper var).locality
@@ -1178,14 +1198,7 @@ let declare
          match param.txt with
          | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
          | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))
-         | Mode _ ->
-           AMode
-             (Var
-                (Mode.Var.create_generic
-                   ~at_most:
-                     ( { Mode.Const.max with locality = Global }
-                     , Vars.param_locality_reason ~loc:param.loc )
-                   (Fresh.modes t.fresh)))))
+         | Mode _ -> AMode (Var (Mode.Var.create_generic (Fresh.modes t.fresh)))))
   in
   if not lazily then ignore (force params : Type.arg list);
   Hashtbl.set t.declared_types ~key:name ~data:decl.name.loc;
@@ -1316,6 +1329,13 @@ let prepare_kind t (decl : Decl.t) =
         | Atoms atoms ->
           Mode_atoms.declared ~default:Mode.Const.max atoms ~loc:mode.loc
           |> Result.map ~f:Member_modality.of_atoms
+        | Var_at _ ->
+          Error
+            (Typecheck_error.create
+               ~loc:mode.loc
+               (Invalid_mode
+                  "a modality is a mode parameter or modes, not a locality \
+                   with a mode parameter"))
         | Var name ->
           (match
              List.findi decl.decl.params ~f:(fun _ param ->

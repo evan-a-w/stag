@@ -607,12 +607,16 @@ let sum = (Int.add 1 2 : int @ portable)    (* val sum : int = 3 *)
    modes, this is just string -> string). *)
 let same (x : string @ 'm) : string @ 'm = x
 
+(* A locality with a mode variable fixes the locality, the variable giving
+   the stage and provenance: a cache's comparison is ['k @ local 'p -> ...]. *)
+let first_len (f : string @ local 'm -> int) (s : string @ 'm) = f s
+
 (* `with` bounds variables (written results are at least portable). *)
 let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let ok = capped 1                   (* val ok : int = 1 *)
 ```
 
-An arrow written without modes has the default ones, `nonportable gc global`,
+An arrow written without modes has the default ones, `global nonportable gc`,
 as OCaml code would expect: annotating `(f : string -> string)` makes `f` take
 and return global values. Write mode variables to keep it polymorphic.
 
@@ -746,7 +750,7 @@ let embed (x @ portable) = .< x >.
 (* What is lifted into code is copied as static data, so must be in the GC heap: [gc]. *)
 
 let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
-(* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
+(* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and local nonportable gc <= 'm1 *)
 
 let same (x : string @ 'm) : string @ 'm = x
 (* val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0) *)
@@ -760,12 +764,15 @@ let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage(
 
 `Core.Map` (a persistent AVL tree) and `Core.Lru` (a cache of nodes linked by
 pointers, indexed by a map) are written once for every mode. Their last
-parameter is the provenance of the values held: a map of GC strings is also
-one of possibly external strings (it is covariant), but a cache, being
-mutable, is invariant. What they build goes where the caller wants it, as
-their builders return it with `exclave_`, and `int` values cross every axis.
-A pair's components keep their own modes, so `concat` can match `(l, r)`
-without either map's mode constraining the other's.
+parameter is the provenance of the keys and values held: a map of GC
+strings is also one of possibly external strings (it is covariant), but a
+cache, being mutable, is invariant. What they build goes where the caller
+wants it, as their builders return it with `exclave_`, and `int` values
+cross every axis. A comparison takes keys of the map's or cache's
+provenance: `Core.String.compare` takes any, while one only for GC keys
+suits only a GC map or cache. A pair's components keep their own modes, so
+`concat` can match `(l, r)` without either map's mode constraining the
+other's.
 A value used at compile time and lifted into code must be `portable`, and
 at most `gc` (static data can't refer outside the GC heap); the code then
 holds it as a constant (`const static`).

@@ -53,15 +53,28 @@ end
 type desc =
   | Var of string
   | Atoms of Atom.t list
+  | Var_at of Atom.t * string
 [@@deriving sexp_of, compare, equal]
 
 type t = desc Located.t [@@deriving sexp_of, compare, equal]
 
+let var_to_string = function
+  | "_" -> "_"
+  | name -> "'" ^ name
+;;
+
 let to_string (t : t) =
   match t.txt with
-  | Var "_" -> "_"
-  | Var name -> "'" ^ name
+  | Var name -> var_to_string name
   | Atoms atoms -> String.concat ~sep:" " (List.map atoms ~f:Atom.to_string)
+  | Var_at (locality, name) ->
+    Atom.to_string locality ^ " " ^ var_to_string name
+;;
+
+let var_at_in_constraint =
+  "a constraint relates whole variables or axes, as in `'m <= 'n` or \
+   `locality('m) <= locality('n)`: a locality with a variable, as in `local \
+   'm`, is only the mode of a type or binding"
 ;;
 
 module Term = struct
@@ -134,6 +147,8 @@ module Term = struct
               | `Right -> "right"))
     in
     match t with
+    | Mode { txt = Var_at _; _ } | Axis (_, { txt = Var_at _; _ }) ->
+      Error var_at_in_constraint
     | Mode { txt = Var _; _ } ->
       Error "a mode variable here names its axis, as in `stage('m)`"
     | Mode { txt = Atoms _; _ } ->
@@ -188,6 +203,8 @@ module Constraint = struct
 
   let check_submode ~(lower : Term.t) ~(upper : Term.t) =
     match lower, upper with
+    | Mode { txt = Var_at _; _ }, _ | _, Mode { txt = Var_at _; _ } ->
+      Error var_at_in_constraint
     | Mode { txt = Atoms _; _ }, Mode { txt = Atoms _; _ } ->
       Error
         "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= \
@@ -197,6 +214,7 @@ module Constraint = struct
       let side = if phys_equal term lower then `Left else `Right in
       (match Term.axis term ~side, mode.txt with
        | Error message, _ -> Error message
+       | Ok _, Var_at _ -> Error var_at_in_constraint
        | Ok axis, Var _ ->
          Error
            (sprintf

@@ -82,7 +82,7 @@ let%expect_test "the prelude's signature" =
         module Atom : sig
           type t = Const | Portable | Nonportable | Static | Gc | External | Global | Regional | Local
         end
-        type t = Var of string | Atoms of list[Atom.t]
+        type t = Var of string | Atoms of list[Atom.t] | Var_at of Atom.t * string
         module Term : sig
           type t = Mode of Mode_expr.t | Axis of Axis.t * Mode_expr.t | Meet of ptr[t * Atom.t] | Release of ptr[t] | Static_if_const of ptr[t] | Const_if_static of ptr[t]
         end
@@ -270,9 +270,9 @@ let%expect_test "the prelude's signature" =
       end
       module Lru : sig
         type link['a, 'b, 'm0 : mode] = Nil | Entry of ptr[entry['a, 'b, 'm0]]
-        type entry['a, 'b, 'm0 : mode] = { key : 'a @@ gc; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
-        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local -> ('a @ local -> int) @ local; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
-        val create : int -> ('a @ local -> ('a @ local -> int) @ local) -> t['a, 'b, 'm0]
+        type entry['a, 'b, 'm0 : mode] = { key : 'a; value : 'b; prev : link['a, 'b, 'm0]; next : link['a, 'b, 'm0] }
+        type t['a, 'b, 'm0 : mode] = { capacity : int; compare : 'a @ local 'm0 -> ('a @ local 'm0 -> int) @ local external; index : ptr[Map.t['a, ptr[entry['a, 'b, 'm0]], 'm0]]; first : ptr[link['a, 'b, 'm0]]; last : ptr[link['a, 'b, 'm0]]; size : ptr[int] }
+        val create : int -> ('a @ local -> ('a @ local -> int) @ local external) -> t['a, 'b, 'm0]
         val length : t['a, 'b, 'm0] -> int
         module Internal : sig
           val unlink : t['a, 'b, 'm0] -> ptr[entry['a, 'b, 'm1]] -> unit
@@ -289,7 +289,7 @@ let%expect_test "the prelude's signature" =
       end
       module Map : sig
         type t['a, 'b, 'm0 : mode] = Empty | Node of box[node['a, 'b, 'm0]]
-        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a @@ gc; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
+        type node['a, 'b, 'm0 : mode] = { left : t['a, 'b, 'm0]; key : 'a @@ 'm0; value : 'b @@ 'm0; right : t['a, 'b, 'm0]; height : int }
         val empty : t['a, 'b, 'm0]
         val is_empty : t['a, 'b, 'm0] -> bool
         val height : t['a, 'b, 'm0] -> int
@@ -805,7 +805,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 121)
+    ((constructors 122)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Region
        prelude.Stag.Expr.Store prelude.Stag.Mode_expr.Atom.External
@@ -816,11 +816,12 @@ let%expect_test "constructors are made as the typechecker resolves them" =
        prelude.Stag.Mode_expr.Term.Axis
        prelude.Stag.Mode_expr.Term.Const_if_static
        prelude.Stag.Mode_expr.Term.Meet prelude.Stag.Mode_expr.Term.Release
-       prelude.Stag.Mode_expr.Term.Static_if_const prelude.Stag.Pattern.Deref
-       prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_decl.Param.Mode prelude.Stag.Type_expr.Arg.Mode
-       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Mode_expr.Term.Static_if_const prelude.Stag.Mode_expr.Var_at
+       prelude.Stag.Pattern.Deref prelude.Stag.Toplevel.External
+       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_decl.Param.Mode
+       prelude.Stag.Type_expr.Arg.Mode prelude.Stag.Type_ref.Path.Prelude
+       prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;
@@ -1847,5 +1848,26 @@ end >.
         (x : int @ 'm with 'm <= portable) : int @ 'n
           with 'm <= 'n and 'n <= nonportable =
       x
+    |}]
+;;
+
+let%expect_test "unnamed mode variables round trip through values" =
+  let decls =
+    eval_values
+      {|
+let decls = .< struct
+  let f (g : int -> int @ _) = g
+  let h (g : int @ local _ -> int @ global _) = g
+end >.
+|}
+      "Gen.decls"
+  in
+  (match Syntax_value.Program.of_value decls ~loc:Loc.none with
+   | Ok program -> print_string (Printer.program program)
+   | Error error -> print_error error);
+  [%expect
+    {|
+    let f (g : int -> int @ _) = g
+    let h (g : int @ local _ -> int @ global _) = g
     |}]
 ;;

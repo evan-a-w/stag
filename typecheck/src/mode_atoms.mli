@@ -16,3 +16,6 @@ val declared
   -> Syntax.Mode_expr.Atom.t list
   -> loc:Loc.t
   -> (Mode.Const.t, Typecheck_error.t) Result.t
+
+(** The locality written with a mode variable, as [local] in [@ local 'm]. *)
+val locality : Syntax.Mode_expr.Atom.t -> Mode.Locality.t

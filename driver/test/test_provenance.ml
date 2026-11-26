@@ -90,7 +90,7 @@ let ints (q : ptr[int]) = q.* <- 1
   [%expect
     {|
     val p : ptr[string]
-    val store : string @ 'm0 -> unit @ _ with 'm0 <= gc global
+    val store : string @ 'm0 -> unit @ _ with 'm0 <= global gc
     val literal : 'a @ _ -> unit @ _
     val ints : ptr[int] @ _ -> unit @ _
     |}];

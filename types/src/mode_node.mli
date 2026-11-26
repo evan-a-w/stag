@@ -22,3 +22,6 @@ val axis_name : Mode.Axis.Any.t -> string
 
 (** The atom of the point, as [portable]. *)
 val atom : Mode.Axis.Any.t -> int -> string
+
+(** The atoms of the points, locality first, as written: [local portable]. *)
+val atoms : (Mode.Axis.Any.t * int) list -> string list

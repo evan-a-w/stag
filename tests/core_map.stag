@@ -340,3 +340,27 @@ let%expect_test "add and update keep the new key" =
     added
     updated
     |}]
+
+let ext (s : string) =
+  let e @ external = s in
+  e
+
+let%expect_test "keys may be external, as C strings" =
+  let m : Core.Map.t[string, int, external] =
+    Core.Map.of_list Core.String.compare [(ext "b", 2); (ext "a", 1)]
+  in
+  let m2 = Core.Map.add Core.String.compare m (ext "c") 3 in
+  Core.Map.iter
+    (fun k v ->
+       print_endline (Core.String.concat "=" [k; Core.Int.to_string v]))
+    m2;
+  print_int
+    (match Core.Map.find Core.String.compare m2 "b" with
+     | Some v -> v
+     | None -> 0);
+  [%expect {|
+    a=1
+    b=2
+    c=3
+    2
+    |}]
