@@ -652,7 +652,23 @@ let%expect_test "learn_stag.md" =
     Doc.g = <fun>
     Doc.f = <fun>
     Doc.seven = 7
-    === learn_stag.md:509
+    === learn_stag.md:507
+    File "doc.stag", line 509, characters 21-36:
+    509 | let wrap (x : int) = Box.make (lb x)
+                               ^^^^^^^^^^^^^^^
+    Error: This is local, because it is allocated by [stack_] (at doc.stag:508:28-47), then it is part of the value (at doc.stag:508:28-47), then the function returns it (at doc.stag:508:19-47), then a function is used at a type with other modes, then the function returns it (at doc.stag:509:30-36), then it is passed to a function (at doc.stag:509:21-36), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes, then the function returns it (at doc.stag:509:21-36), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at doc.stag:509:21-36)
+    ("!! CLAIM DOES NOT HOLD"
+     (claim
+      (Error
+       "... but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead)")))
+    === learn_stag.md:514
+    module Doc : sig
+      val lb : int -> box[int] @ local
+      val wrap : int -> box[box[int]] @ local
+    end
+    Doc.lb = <fun>
+    Doc.wrap = <fun>
+    === learn_stag.md:525
     module Doc : sig
       val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
       val unbox : box[int] @ _ -> int @ _
@@ -663,7 +679,7 @@ let%expect_test "learn_stag.md" =
     Doc.unbox = <fun>
     Doc.kept = Box.make 1
     Doc.temp = <fun>
-    === learn_stag.md:521
+    === learn_stag.md:537
     module Doc : sig
       val mk : int -> box[int]
       val unbox : box[int] -> int
@@ -672,16 +688,16 @@ let%expect_test "learn_stag.md" =
     Doc.mk = <fun>
     Doc.unbox = <fun>
     Doc.total = 3
-    === learn_stag.md:528
-    File "doc.stag", line 530, characters 23-58:
-    530 | let leaks (u : unit) = region_ (let b @ local = mk 1 in b)
+    === learn_stag.md:544
+    File "doc.stag", line 546, characters 23-58:
+    546 | let leaks (u : unit) = region_ (let b @ local = mk 1 in b)
                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is local, because it is annotated local (at doc.stag:530:40-45), then b is used (at doc.stag:530:56-57), then the [region_] returns it (at doc.stag:530:31-58), then the [region_] gives it (at doc.stag:530:23-58), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at doc.stag:530:23-58)
-    File "doc.stag", line 530, characters 31-58:
-    530 | let leaks (u : unit) = region_ (let b @ local = mk 1 in b)
+    Error: This is local, because it is annotated local (at doc.stag:546:40-45), then b is used (at doc.stag:546:56-57), then the [region_] returns it (at doc.stag:546:31-58), then the [region_] gives it (at doc.stag:546:23-58), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at doc.stag:546:23-58)
+    File "doc.stag", line 546, characters 31-58:
+    546 | let leaks (u : unit) = region_ (let b @ local = mk 1 in b)
                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is local, because it is annotated local (at doc.stag:530:40-45), then b is used (at doc.stag:530:56-57), but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) (at doc.stag:530:31-58)
-    === learn_stag.md:542
+    Error: This is local, because it is annotated local (at doc.stag:546:40-45), then b is used (at doc.stag:546:56-57), but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) (at doc.stag:546:31-58)
+    === learn_stag.md:558
     module Doc : sig
       val embed : 'a -> <'a>{..'b}
       val first : int * int @ local -> int
@@ -698,34 +714,34 @@ let%expect_test "learn_stag.md" =
     Doc.same = <fun>
     Doc.capped = <fun>
     Doc.ok = 1
-    === learn_stag.md:568
-    File "doc.stag", line 570, characters 22-42:
-    570 | let use (x @ local) = apply (fun y -> 0) x
+    === learn_stag.md:584
+    File "doc.stag", line 586, characters 22-42:
+    586 | let use (x @ local) = apply (fun y -> 0) x
                                 ^^^^^^^^^^^^^^^^^^^^
-    Error: This is regional, because it is annotated local (at doc.stag:570:13-18), then x is passed to the function (at doc.stag:570:22-42), then x is used (at doc.stag:570:41-42), then it is passed to a function (at doc.stag:570:22-42), but must be at most global, because its type is written without a mode (at doc.stag:569:15-21), then a function is used at a type with other modes, then it is passed to a function (at doc.stag:569:34-37), then x is used (at doc.stag:569:36-37), then x is passed to the function (at doc.stag:569:34-37), then a function is used at a type with other modes
-    === learn_stag.md:574
+    Error: This is regional, because it is annotated local (at doc.stag:586:13-18), then x is passed to the function (at doc.stag:586:22-42), then x is used (at doc.stag:586:41-42), then it is passed to a function (at doc.stag:586:22-42), but must be at most global, because its type is written without a mode (at doc.stag:585:15-21), then a function is used at a type with other modes, then it is passed to a function (at doc.stag:585:34-37), then x is used (at doc.stag:585:36-37), then x is passed to the function (at doc.stag:585:34-37), then a function is used at a type with other modes
+    === learn_stag.md:590
     module Doc : sig
       val apply : (string -> int) -> string -> int
       val use : string @ local -> int
     end
     Doc.apply = <fun>
     Doc.use = <fun>
-    === learn_stag.md:579
-    File "doc.stag", line 581, characters 10-34:
-    581 | let bad = capped (Int.to_string 3)
+    === learn_stag.md:595
+    File "doc.stag", line 597, characters 10-34:
+    597 | let bad = capped (Int.to_string 3)
                     ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at doc.stag:581:17-34), then it is passed to a function (at doc.stag:581:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:580:37-51), then a function is used at a type with other modes, then the function returns it (at doc.stag:580:63-64), then x is used (at doc.stag:580:63-64), then x is passed to the function (at doc.stag:580:54-64), then a function is used at a type with other modes
-    === learn_stag.md:585
-    File "doc.stag", line 592, characters 20-25:
-    592 | let bad = cell.* <- exact
+    Error: This is nonportable, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at doc.stag:597:17-34), then it is passed to a function (at doc.stag:597:10-34), but must be at most portable, because it is annotated 'n <= portable (at doc.stag:596:37-51), then a function is used at a type with other modes, then the function returns it (at doc.stag:596:63-64), then x is used (at doc.stag:596:63-64), then x is passed to the function (at doc.stag:596:54-64), then a function is used at a type with other modes
+    === learn_stag.md:601
+    File "doc.stag", line 608, characters 20-25:
+    608 | let bad = cell.* <- exact
                               ^^^^^
-    Error: This is external, because it is annotated external (at doc.stag:589:12-20), then Doc.exact is used (at doc.stag:592:20-25), then it is stored into a cell, which holds only what fits its modality (at doc.stag:592:20-25), but must be at most gc, because Doc.cell is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default)
-    === learn_stag.md:596
-    File "doc.stag", line 598, characters 34-60:
-    598 | let store (p : ptr[ptr[int]]) x = p.* <- stack_ (Ptr.make x)
+    Error: This is external, because it is annotated external (at doc.stag:605:12-20), then Doc.exact is used (at doc.stag:608:20-25), then it is stored into a cell, which holds only what fits its modality (at doc.stag:608:20-25), but must be at most gc, because Doc.cell is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default)
+    === learn_stag.md:612
+    File "doc.stag", line 614, characters 34-60:
+    614 | let store (p : ptr[ptr[int]]) x = p.* <- stack_ (Ptr.make x)
                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This is local, because it is allocated by [stack_] (at doc.stag:598:41-60), then it is part of the value (at doc.stag:598:41-60), but must be at most global, because it is stored through a pointer, which may outlive any region (at doc.stag:598:41-60)
-    === learn_stag.md:609
+    Error: This is local, because it is allocated by [stack_] (at doc.stag:614:41-60), then it is part of the value (at doc.stag:614:41-60), but must be at most global, because it is stored through a pointer, which may outlive any region (at doc.stag:614:41-60)
+    === learn_stag.md:625
     module Doc : sig
       type boxed = { inner : ptr[int] @@ global; other : ptr[int] }
       val get_inner : boxed @ local -> ptr[int]
@@ -735,12 +751,12 @@ let%expect_test "learn_stag.md" =
     Doc.get_inner = <fun>
     Doc.cell = Ptr.make "s"
     Doc.put = <fun>
-    === learn_stag.md:619
-    File "doc.stag", line 621, characters 35-36:
-    621 | let put (s @ external) = cell.* <- s
+    === learn_stag.md:635
+    File "doc.stag", line 637, characters 35-36:
+    637 | let put (s @ external) = cell.* <- s
                                              ^
-    Error: This is external, because it is annotated external (at doc.stag:621:13-21), then s is passed to the function (at doc.stag:621:25-36), then s is used (at doc.stag:621:35-36), then it is stored into a cell, which holds only what fits its modality (at doc.stag:621:35-36), but must be at most gc, because Doc.cell is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default)
-    === learn_stag.md:628
+    Error: This is external, because it is annotated external (at doc.stag:637:13-21), then s is passed to the function (at doc.stag:637:25-36), then s is used (at doc.stag:637:35-36), then it is stored into a cell, which holds only what fits its modality (at doc.stag:637:35-36), but must be at most gc, because Doc.cell is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default)
+    === learn_stag.md:644
     module Doc : sig
       type cell['a, 'm0 : mode] = { value : 'a @@ 'm0 }
       val gc_cell : cell[string, gc]
@@ -748,7 +764,7 @@ let%expect_test "learn_stag.md" =
     end
     Doc.gc_cell = {Doc.value = "x"}
     Doc.read_cell = <fun>
-    === learn_stag.md:645
+    === learn_stag.md:661
     module Doc : sig
       val apply : (string -> int) -> int
       val local_ok : int
@@ -760,18 +776,18 @@ let%expect_test "learn_stag.md" =
     Doc.local_ok = 1
     Doc.fs = Cons (Box.make (<fun>, Nil))
     Doc.widen = <fun>
-    === learn_stag.md:654
-    File "doc.stag", line 656, characters 45-51:
-    656 | let bad = apply (fun (s : string) -> let g @ global = s in String.length g)
+    === learn_stag.md:670
+    File "doc.stag", line 672, characters 45-51:
+    672 | let bad = apply (fun (s : string) -> let g @ global = s in String.length g)
                                                        ^^^^^^
-    Error: This is regional, because it is annotated local (at doc.stag:655:24-29), then a function is used at a type with other modes, then s is passed to the function (at doc.stag:656:16-75), then s is used (at doc.stag:656:54-55), then it is bound by an annotated let (at doc.stag:656:45-51), but must be at most global, because it is annotated global (at doc.stag:656:45-51)
-    === learn_stag.md:660
-    File "doc.stag", line 663, characters 16-17:
-    663 | let bad = widen p
+    Error: This is regional, because it is annotated local (at doc.stag:671:24-29), then a function is used at a type with other modes, then s is passed to the function (at doc.stag:672:16-75), then s is used (at doc.stag:672:54-55), then it is bound by an annotated let (at doc.stag:672:45-51), but must be at most global, because it is annotated global (at doc.stag:672:45-51)
+    === learn_stag.md:676
+    File "doc.stag", line 679, characters 16-17:
+    679 | let bad = widen p
                           ^
     Error: This expression has type ptr[string] but an expression was expected of type ptr[string @@ external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
-    === learn_stag.md:679
+    === learn_stag.md:695
     module Doc : sig
       val id : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
       type r = { x : string @@ gc; y : string }
@@ -787,16 +803,41 @@ let%expect_test "learn_stag.md" =
     Doc.mk = <fun>
     Doc.same = <fun>
     Doc.static_if = <fun>
-    === learn_stag.md:706
+    === learn_stag.md:727
+    module Doc : sig
+      val m : Core.Map.t[int, string, portable]
+      val wide : Core.Map.t[int, string, external]
+      val size : unit -> int
+      val three : int
+      val keywords : Core.Map.t[string, int, portable]
+      val is_let : bool
+      val cache : Core.Lru.t[int, string, gc]
+      val used : option[string]
+    end
+    Doc.m = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 1; value = "a"; right = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = "b"; right = Core.Map.Empty; height = 1}); height = 2})
+    Doc.wide = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 1; value = "a"; right = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = "b"; right = Core.Map.Empty; height = 1}); height = 2})
+    Doc.size = <fun>
+    Doc.three = 3
+    Doc.keywords = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = "in"; value = 2; right = Core.Map.Empty; height = 1}); key = "let"; value = 1; right = Core.Map.Empty; height = 2})
+    Doc.is_let = true
+    Doc.cache = {Core.Lru.capacity = 2; compare = <fun>; index = Ptr.make (Core.Map.Node (Box.make {Core.Map.left = Core.Map.Empty; key = 2; value = Ptr.make {Core.Lru.key = 2; value = "b"; prev = Core.Lru.Entry (Ptr.make {Core.Lru.key = 3; value = "c"; prev = Core.Lru.Nil; next = Core.Lru.Entry <cycle>}); next = C...
+    Doc.used = None
+    === learn_stag.md:749
+    File "doc.stag", line 751, characters 54-59:
+    751 | let as_external : Core.Lru.t[int, string, external] = cache
+                                                                ^^^^^
+    Error: This expression has type Core.Lru.t[int, string, gc] but an expression was expected of type Core.Lru.t[int, string, external]
+    Their modes differ: The modes external and gc must be equal, because the types are unified
+    === learn_stag.md:760
     module Doc : sig
       val labs : int -> int
       val a : int
     end
     Doc.labs = <fun>
     Doc.a = 42
-    === learn_stag.md:711
-    File "doc.stag", line 712, characters 18-31:
-    712 | external strlen : string -> int = "strlen"
+    === learn_stag.md:765
+    File "doc.stag", line 766, characters 18-31:
+    766 | external strlen : string -> int = "strlen"
                             ^^^^^^^^^^^^^
     Error: The external strlen has no C signature: string would be passed to C as a pointer, which is not supported yet
     |}]

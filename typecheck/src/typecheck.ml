@@ -3182,9 +3182,7 @@ and expr_type
       | Some _ | None -> true
     in
     let result_matches = ref true in
-    (* What the application allocates, rather than running a function. *)
-    let allocation = ref None in
-    let f, x =
+    let f, x, allocation =
       Mode_rules.apply
         modes
         at
@@ -3212,26 +3210,27 @@ and expr_type
                      ; curry = Var curry
                      } ))
           in
-          (allocation
-           := match f.desc, prim_head f with
-              | _, Some (prim, _, args)
-                when (not applied) && args + 1 < Prim.arity prim ->
-                Some Typed.Allocation.Kind.Partial_application
-              | Var (Prim _), _ -> None
-              | Var var, _ -> value_allocation scope var
-              | _ -> None);
-          f)
-        ~arg:(fun x_at ->
+          let allocation : Typed.Allocation.Kind.t option =
+            match f.desc, prim_head f with
+            | _, Some (prim, _, args)
+              when (not applied) && args + 1 < Prim.arity prim ->
+              Some Partial_application
+            | Var (Prim _), _ -> None
+            | Var var, _ -> value_allocation scope var
+            | _ -> None
+          in
+          f, allocation)
+        ~arg:(fun allocation x_at ->
           result_matches := result_matches_expected ();
           let x_at =
-            match !allocation with
+            match allocation with
             | Some Box -> Mode_rules.Expected.boxed x_at ~whole:at
             | Some _ | None -> x_at
           in
           check_expr t scope ~at:x_at ~expr:x ~ty:a)
     in
     let made =
-      match !allocation, prim_head f with
+      match allocation, prim_head f with
       | Some Partial_application, Some (_, head, args) ->
         Option.bind
           (prim_partial head.ty ~args:(args + 1))

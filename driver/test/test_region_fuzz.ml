@@ -420,9 +420,9 @@ let%expect_test "no allocation is used after its region ends" =
       [%message (seed : int) (outcomes : (string * int) list) (regions : int)]);
   [%expect
     {|
-    ((seed 7) (outcomes ((ran 880) (rejected 620))) (regions 3582))
-    ((seed 8) (outcomes ((ran 868) (rejected 632))) (regions 3911))
-    ((seed 9) (outcomes ((ran 923) (rejected 577))) (regions 4100))
+    ((seed 7) (outcomes ((ran 896) (rejected 604))) (regions 4246))
+    ((seed 8) (outcomes ((ran 884) (rejected 616))) (regions 4545))
+    ((seed 9) (outcomes ((ran 935) (rejected 565))) (regions 4754))
     |}]
 ;;
 
@@ -440,7 +440,7 @@ let%expect_test "with placements that ignore their instance, some are" =
   print_endline (Option.value_exn (Queue.peek failures));
   [%expect
     {|
-    (outcomes ((ran 528) (rejected 620) ("use after free" 352)))
+    (outcomes ((ran 485) (rejected 604) ("use after free" 411)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -473,5 +473,28 @@ let%expect_test "with tail calls not ending their region" =
   in
   print_s [%message (outcomes : (string * int) list)];
   Option.iter (Queue.peek failures) ~f:print_endline;
-  [%expect {| (outcomes ((ran 880) (rejected 620))) |}]
+  [%expect
+    {|
+    (outcomes ((ran 422) (rejected 604) ("use after free" 474)))
+
+    let keep : ptr[box[int]] = Ptr.make (Box.make 0)
+    let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
+    let sum (b : box[int]) = match b with *n -> n
+    let mk2 (a : int) (b : int) = Box.make (Int.add a b)
+    let wrap (x : int) = Box.make x
+    let via (x : int) = wrap x
+    let count (n : int) (x : int) =
+      match Int.equal n 0 with true -> Box.make x | false -> count (Int.sub n 1) (Int.add x 1)
+    let pick (n : int) (b : box[int]) =
+      match Int.equal n 0 with true -> b | false -> pick (Int.sub n 1) b
+    let ev (n : int) = match Int.equal n 0 with true -> Box.make 1 | false -> od (Int.sub n 1)
+    let od (n : int) = match Int.equal n 0 with true -> Box.make 0 | false -> ev (Int.sub n 1)
+    let h (y : int) = Box.make y
+    let k (j : int -> box[int]) = sum (j 1)
+    let m (a : int) (b : int) = Box.make (Int.add a b)
+    let t1 (a : int) (b : int) = ((match `A (m (Int.add a b)) with `A g2 -> g2 (Int.add b b)))
+    let f h k m (x : int) = (Box.make (k (fun (z : int) -> ((t1 (Int.add z x)) 1))))
+    let t (u : unit) = let r @ local = f (fun (y : int) -> exclave_ Box.make y) (fun j -> let b @ local = j 1 in sum b [@nontail]) (fun (a : int) -> exclave_ fun (b : int) -> exclave_ Box.make (Int.add a b)) 1 in sum r [@nontail]
+    a reference, from the result of a call of toplevel t1, of the Box at t.stag:16:28-50, made in the region of a call of toplevel t1, after it ended
+    |}]
 ;;

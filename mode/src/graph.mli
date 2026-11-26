@@ -54,6 +54,18 @@ val generalize : t list -> rank:int -> unit
     added since too. Not allowed under [atomically]. *)
 val reopen : t -> rank:int -> unit
 
+(** New generic nodes, one per axis (found by axis in the result and in
+    [edges]), constrained only by [edges] [(lo, m, hi, reason)] between them,
+    which must not tighten their bounds. Nothing else refers to them yet, so
+    this is allowed under [atomically]: an enclosing one being undone leaves
+    them as they are. *)
+val create_generic
+  :  var_id:int
+  -> Axis.Any.t list
+  -> edges:((Axis.Any.t -> t) -> (t * Morphism.t * t * Reason.t) list)
+  -> Axis.Any.t
+  -> t
+
 module Instance : sig
   type node := t
   type t

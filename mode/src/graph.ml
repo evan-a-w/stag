@@ -375,6 +375,36 @@ let reopen node ~rank =
   | Rank _ -> ()
 ;;
 
+let create_generic ~var_id axes ~edges =
+  let nodes = List.map axes ~f:(fun axis -> create ~var_id axis ~rank:0) in
+  let node axis =
+    List.find_exn nodes ~f:(fun node -> Axis.Any.equal node.axis axis)
+  in
+  let edges = edges node in
+  List.iter edges ~f:(fun (lo, morphism, hi, reason) ->
+    if Morphism.left morphism lo.lower > hi.lower
+       || Morphism.right morphism hi.upper < lo.upper
+    then raise_s [%message "Graph.create_generic: an edge tightens a bound"];
+    let edge = { lo; morphism; hi; reasons = [ reason ] } in
+    lo.succ <- edge :: lo.succ;
+    hi.pred <- edge :: hi.pred);
+  let implied ~f node = List.filter_map edges ~f:(fun edge -> f node edge) in
+  List.iter nodes ~f:(fun node ->
+    let above =
+      implied node ~f:(fun node (lo, implied_morphism, hi, reason) ->
+        Option.some_if
+          (phys_equal lo node)
+          { other = hi; implied_morphism; path = [ reason ] })
+    and below =
+      implied node ~f:(fun node (lo, implied_morphism, hi, reason) ->
+        Option.some_if
+          (phys_equal hi node)
+          { other = lo; implied_morphism; path = [ reason ] })
+    in
+    node.state <- Generic { above; below });
+  node
+;;
+
 module Instance = struct
   type node = t
 

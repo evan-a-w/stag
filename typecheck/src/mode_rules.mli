@@ -285,9 +285,11 @@ val exclave
   -> (Expected.t -> Typed.Expr.t)
   -> Typed.Expr.t option
 
-(** [f x], [f] being of an arrow of those types and modes. With [curried], [f]
-    is itself an application, which a tail call makes at once: then the result
-    it gives further arguments is at most the [curry] of its arrow. *)
+(** [f x], [f] being of an arrow of those types and modes. [callee] says what
+    [f x] allocates in the current region, if it is no call (eg. [Box.make]).
+    With [curried], [f] is itself an application, which a tail call makes at
+    once: then the result it gives further arguments is at most the [curry] of
+    its arrow. *)
 val apply
   :  Ctx.t
   -> Expected.t
@@ -298,9 +300,9 @@ val apply
   -> curry:Mode.Var.t
   -> arg_ty:Type.ty
   -> res_ty:Type.ty
-  -> callee:(Expected.t -> Typed.Expr.t)
-  -> arg:(Expected.t -> Typed.Expr.t)
-  -> Typed.Expr.t * Typed.Expr.t
+  -> callee:(Expected.t -> Typed.Expr.t * 'allocation option)
+  -> arg:('allocation option -> Expected.t -> Typed.Expr.t)
+  -> Typed.Expr.t * Typed.Expr.t * 'allocation option
 
 (** Assigns a [let mut] holding [held] (unless a free variable of the quote),
     across the locks [crossed]. *)

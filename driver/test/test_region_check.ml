@@ -159,7 +159,7 @@ let b (n : int) = match Int.equal n 0 with true -> Box.make n | false -> a (Int.
 let a (n : int) = match Int.equal n 0 with true -> Box.make n | false -> b (Int.sub n 1)
 let c (u : unit) = let x @ local = a 3 in match x with *n -> n
 |};
-  [%expect {| (Returned (value 0) (on_heap 1) (in_regions 0)) |}]
+  [%expect {| (Returned (value 0) (on_heap 0) (in_regions 1)) |}]
 ;;
 
 let%expect_test "a recursive group's argument stored globally" =
@@ -466,4 +466,174 @@ let use (u : unit) = Int.add (local_use ()) (global_use ())
     t.stag:5:27-37 Box in p: heap, caller's region if component 0.res is local
     (Returned (value 2) (on_heap 3) (in_regions 1))
     |}]
+;;
+
+(* What a tail call returns is made in the caller's region of the function
+   making it: [via]'s Box, by [wrap], a search's part of a local argument, and a
+   recursive builder's Box; each wrong if the tail call didn't end the region
+   first. *)
+let%expect_test "tail calls returning allocations" =
+  let source =
+    {|
+let sum (b : box[int]) = match b with *n -> n
+let wrap (x : int) = Box.make x
+let via (x : int) = wrap x
+let count (n : int) (x : int) =
+  match Int.equal n 0 with true -> Box.make x | false -> count (Int.sub n 1) (Int.add x 1)
+let pick (n : int) (b : box[int]) =
+  match Int.equal n 0 with true -> b | false -> pick (Int.sub n 1) b
+let use (u : unit) =
+  let a @ local = via 1 in
+  let c @ local = count 3 1 in
+  let p @ local = pick 2 (stack_ (Box.make 7)) in
+  Int.add (sum a) (Int.add (sum c) (sum p)) [@nontail]
+|}
+  in
+  allocations_of source;
+  run source ~entry:"use";
+  print_s
+    [%sexp
+      (Region_check.run ~tail_calls_end_regions:false source ~entry:"use"
+       : Region_check.Outcome.t)];
+  [%expect
+    {|
+    val sum : box[int] @ _ -> int @ _
+    val wrap : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val via : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val count : int @ 'm0 -> (int @ 'm2 -> box[int] @ 'm3) @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and portable <= 'm2 and gc <= 'm3 and gc <= 'm1
+    val pick : int @ 'm0 -> (box[int] @ 'm2 -> box[int] @ 'm3) @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and portable <= 'm2 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and gc <= 'm1
+    val use : unit @ _ -> int @ _
+    t.stag:3:21-31 Box in wrap: heap, caller's region if res is local
+    t.stag:6:2-90 Partial_application in count: heap, caller's region if res is local
+    t.stag:6:35-45 Box in count: heap, caller's region if res.res is local
+    t.stag:8:2-68 Partial_application in pick: heap, caller's region if res is local
+    t.stag:12:33-45 Box in use: region
+    (Returned (value 12) (on_heap 0) (in_regions 3))
+    (Use_after_free
+     "a reference, from the result of a call of toplevel via, of the Box at t.stag:3:21-31, made in the region of a call of toplevel via, after it ended")
+    |}]
+;;
+
+let%expect_test "tail calls giving functions, and an annotated tail call" =
+  let source =
+    {|
+let sum (b : box[int]) = match b with *n -> n
+let two (a : int) (b : int) = Int.add a b
+let annotated (g : int -> (int -> int) @ local) (x : int) = g x
+let inferred g (x : int) = g x
+let partial (x : int) = two x
+let adder (a : int) = exclave_ fun (b : int) -> Int.add a b
+let lb (x : int) = exclave_ Box.make x
+let at_global (x : int) = (lb x : box[int] @ global)
+let either (x : int) = lb x
+let use (u : unit) =
+  let h1 @ local = annotated two 1 in
+  let h2 @ local = inferred two 2 in
+  let h3 @ local = partial 3 in
+  let h4 @ local = inferred adder 4 in
+  let a @ local = at_global 5 in
+  let b @ local = either 6 in
+  Int.add (Int.add (h1 1) (Int.add (h2 1) (Int.add (h3 1) (h4 1)))) (Int.add (sum a) (sum b)) [@nontail]
+|}
+  in
+  allocations_of source;
+  run source ~entry:"use";
+  [%expect
+    {|
+    val sum : box[int] @ _ -> int @ _
+    val two : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val annotated : (int -> (int -> int) @ local) @ 'm0 -> (int @ _ -> (int -> int) @ 'm2) @ 'm1 with 'm0 <= 'm1 and nonportable gc local <= 'm2 and gc <= 'm1
+    val inferred : (int @ 'm1 -> 'a @ 'm2) @ 'm0 -> (int @ _ -> 'a @ 'm4) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm4 and gc <= 'm3
+    val partial : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
+    val adder : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
+    val lb : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val at_global : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val either : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val use : unit @ _ -> int @ _
+    t.stag:3:30-41 Partial_application in two: heap, caller's region if res is local
+    t.stag:4:60-63 Partial_application in annotated: heap, caller's region if res is local
+    t.stag:5:27-30 Partial_application in inferred: heap, caller's region if res is local
+    t.stag:7:31-59 Closure in adder: heap, caller's region if res is local
+    t.stag:8:28-38 Box in lb: heap, caller's region if res is local
+    (Returned (value 25) (on_heap 1) (in_regions 5))
+    |}]
+;;
+
+(* [Core.Map]'s code, built and searched in a caller's region and in a
+   [region_]: its nodes are made there, and nothing is used after it ends. *)
+let%expect_test "maps built in regions" =
+  let map = In_channel.read_all "../../core/map.stag" in
+  let uses =
+    {|
+let cmp (a : int) (b : int) = Int.sub a b
+let build (n : int) =
+  let go (i : int) (m : M.t[int, int, gc]) =
+    match Int.equal i 0 with true -> m | false -> go (Int.sub i 1) (M.add cmp m i (Int.mul i i))
+  in
+  go n M.empty
+let local_use (u : unit) =
+  let m @ local = M.add cmp (M.add cmp (M.add cmp M.empty 1 10) 2 20) 3 30 in
+  match M.find cmp m 2 with Some v -> v | None -> 0
+let removed (u : unit) =
+  let m @ local = M.remove cmp (M.add cmp (M.add cmp M.empty 1 10) 2 20) 1 in
+  M.cardinal m [@nontail]
+let in_region (u : unit) =
+  region_ (let m = M.add cmp (M.add cmp M.empty 5 50) 6 60 in
+           match M.find cmp m 6 with Some v -> v | None -> 0)
+let built (u : unit) = match M.find cmp (build 5) 4 with Some v -> v | None -> 0
+let sum (l : list[int]) =
+  let go (l : list[int]) (acc : int) =
+    match l with [] -> acc | Cons *(x, rest) -> go rest (Int.add acc x)
+  in
+  go l 0
+let folded (u : unit) =
+  let m @ local = M.add cmp (M.add cmp (M.add cmp M.empty 1 10) 2 20) 3 30 in
+  let l @ local = M.fold (fun k v acc -> Cons (Box.make (Int.add k v, acc))) m [] in
+  sum l [@nontail]
+let updated (u : unit) =
+  let m @ local = M.add cmp (M.add cmp (M.add cmp M.empty 1 10) 2 20) 3 30 in
+  let m2 @ local = M.update cmp m 2 (fun o -> match o with Some v -> Some (Int.add v 1) | None -> None) in
+  let m3 @ local = M.filter (fun k v -> Int.gt k 1) (M.map (fun k v -> Int.mul v 2) m2) in
+  M.fold (fun k v acc -> Int.add acc v) m3 0 [@nontail]
+|}
+  in
+  List.iter
+    [ "local_use"; "removed"; "in_region"; "built"; "folded"; "updated" ]
+    ~f:(fun entry ->
+      run ("module M = struct\n" ^ map ^ "\nend\n" ^ uses) ~entry);
+  [%expect
+    {|
+    (Returned (value 20) (on_heap 0) (in_regions 7))
+    (Returned (value 1) (on_heap 1) (in_regions 3))
+    (Returned (value 60) (on_heap 0) (in_regions 3))
+    (Returned (value 16) (on_heap 16) (in_regions 0))
+    (Returned (value 66) (on_heap 1) (in_regions 11))
+    (Returned (value 102) (on_heap 0) (in_regions 18))
+    |}]
+;;
+
+(* [Core.Lru]'s code, a cache used in a [region_]: its record is made there (its
+   nodes, stored through pointers, are on the heap). *)
+let%expect_test "lru caches in regions" =
+  let map = In_channel.read_all "../../core/map.stag" in
+  let lru = In_channel.read_all "../../core/lru.stag" in
+  let uses =
+    {|
+let cmp (a : int) (b : int) = Int.sub a b
+let in_region (u : unit) =
+  region_ (
+    let c = Lru.create 2 cmp in
+    Lru.add c 1 10; Lru.add c 2 20; Lru.add c 3 30;
+    match Lru.find c 3 with Some v -> v | None -> 0)
+|}
+  in
+  run
+    ("module Map = struct\n"
+     ^ map
+     ^ "\nend\nmodule Lru = struct\n"
+     ^ lru
+     ^ "\nend\n"
+     ^ uses)
+    ~entry:"in_region";
+  [%expect {| (Returned (value 30) (on_heap 11) (in_regions 4)) |}]
 ;;

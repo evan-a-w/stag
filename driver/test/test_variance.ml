@@ -60,7 +60,7 @@ let external_bad = take (fun (u : unit) -> ext "a")
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:43-50), but must be at most gc, because its type is written without a mode (at t.stag:4:22-28), then a function is used at a type with other modes |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it, by a tail call (at t.stag:5:43-50), but must be at most gc, because its type is written without a mode (at t.stag:4:22-28), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "nested arrows compose: an argument's argument is covariant" =
@@ -333,7 +333,7 @@ let compose f g x = f (g x)
     type co['m0 : mode] = { v : string @@ 'm0 }
     val unwrap : co['m1] @ 'm0 -> string @ 'm2 with release(locality('m0)) <= locality('m2) and 'm1 <= 'm2
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val compose : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and meet(locality('m8), regional) <= locality('m5) and gc <= 'm7 and gc <= 'm3
+    val compose : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and meet(locality('m8), regional) <= locality('m5) and gc <= 'm7 and gc <= 'm3
     |}]
 ;;
 
@@ -428,7 +428,7 @@ let c = Ptr.make "a"
     {|
     type co['m0 : mode] = { v : string @@ 'm0 }
     type contra['m0 : mode] = { f : co['m0] -> unit }
-    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val diverge : unit @ 'm0 -> 'a @ _ with portable <= 'm0
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val f1 : contra[external]
     val x : contra[external]
@@ -765,8 +765,8 @@ let%expect_test "a quote's use of a toplevel being checked is by variance" =
     val ident : string @ 'm0 -> int @ _ with local <= 'm0
     val c : unit @ _ -> <int>{..'a} @ _
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and 'm1 <= global and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
+    val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and release(locality('m1)) <= locality('m4) and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and 'm1 <= global and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
+    val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and release(locality('m1)) <= locality('m4) and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
     |}]
 ;;

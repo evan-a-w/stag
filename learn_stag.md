@@ -500,6 +500,22 @@ let f x = let p = stack_ (Ptr.make x) in g p [@nontail]
 let seven = f 7                     (* val seven : int = 7 *)
 ```
 
+`[@nontail]` only helps when the call's result doesn't outlive the region. To
+return a value built from a local result, the call must give it in the
+caller's region, with `exclave_`:
+
+```stag-error
+let lb (x : int) = exclave_ stack_ (Box.make x)
+let wrap (x : int) = Box.make (lb x)
+(* Error: ... but must be at most regional, because the function returns it,
+   ending its region (return it with [exclave_] instead) *)
+```
+
+```stag
+let lb (x : int) = exclave_ stack_ (Box.make x)
+let wrap (x : int) = exclave_ Box.make (lb x)
+```
+
 ### Where allocations go, and regions
 
 An allocation a function returns is made where its caller wants it: on the
@@ -696,6 +712,44 @@ let same (x : string @ 'm) : string @ 'm = x
 
 let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = fun x -> x
 (* val static_if : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and provenance('m1) <= static_if_const(stage('m0)) *)
+```
+
+### Example: a map and a cache
+
+`Core.Map` (a persistent AVL tree) and `Core.Lru` (a cache of nodes linked by
+pointers, indexed by a map) are written once for every mode. Their last
+parameter is the provenance of the values held: a map of GC strings is also
+one of possibly external strings (it is covariant), but a cache, being
+mutable, is invariant. What they build goes where the caller wants it, as
+their builders return it with `exclave_`, and `int` values cross every axis.
+A value used at compile time and lifted into code must be `portable`.
+
+```stag
+let m = Core.Map.of_list Core.Int.compare [(1, "a"); (2, "b")]
+let wide : Core.Map.t[int, string, external] = m
+let size (u : unit) =
+  let local_m @ local = Core.Map.add Core.Int.compare m 3 "c" in
+  Core.Map.cardinal local_m [@nontail]
+let three = size ()                   (* val three : int = 3 *)
+
+let keywords = .~(
+  let table @ portable =
+    Core.Map.of_list Core.String.compare [("let", 1); ("in", 2)] in
+  .< table >.)
+let is_let = Core.Map.mem Core.String.compare keywords "let"  (* val is_let : bool = true *)
+
+let cache : Core.Lru.t[int, string, gc] = Core.Lru.create 2 Core.Int.compare
+let used =
+  Core.Lru.add cache 1 "a";
+  Core.Lru.add cache 2 "b";
+  Core.Lru.add cache 3 "c";
+  Core.Lru.find cache 1               (* val used : option[string] = None *)
+```
+
+```stag-error
+let cache : Core.Lru.t[int, string, gc] = Core.Lru.create 2 Core.Int.compare
+let as_external : Core.Lru.t[int, string, external] = cache
+(* Error: but an expression was expected of type Core.Lru.t[int, string, external] *)
 ```
 
 ## C functions

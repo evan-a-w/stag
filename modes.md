@@ -175,7 +175,6 @@ back as a fresh variable) and their constraints follow the type:
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
   with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5
-  and release(locality('m2)) <= locality('m5) and 'm2 <= regional
   and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1)
   and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
 ```
@@ -591,7 +590,11 @@ Each step is a branch stacked on the previous one.
   freed when it ends (its value is checked as a function's result, and
   `exclave_` ends it early). Chosen over a `with_region (fun () -> e)`
   function: a keyword needs no closure, and reads like `stack_` and
-  `exclave_`.
+  `exclave_`. A tail call's value is returned as an `exclave_`'s is (the
+  callee runs after the region has ended, so its caller's region is the
+  function's caller's): `let apply f x = f x` returns what `f` does, local
+  or not, and a search recursing by tail calls (`Map.find`) returns a local
+  part of a local argument.
 
 ## Later
 

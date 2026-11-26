@@ -199,21 +199,38 @@ let annotated ctx annot ~var =
   mode
 ;;
 
-let annotated_use ctx expected ~annot ~var ~loc f =
+let annotated_use ctx (expected : Expected.t) ~annot ~var ~loc f =
   match annot with
   | None -> f expected
   | Some _ ->
-    let used = Expected.same_value ctx expected in
+    (* A value given in the caller's region (by a tail call or [exclave_]) is
+       related to the result by the region, not by [expected.mode]: the
+       annotation bounds it there too. *)
+    let given_to = Ctx.fresh ctx in
+    let region : Tail.t =
+      match expected.region with
+      | Returns _ -> Returns given_to
+      | Ends _ -> Ends given_to
+      | (Nontail | Quoted) as region -> region
+    in
+    let used = { (Expected.same_value ctx expected) with region } in
     let result = f used in
     Result.iter result ~f:(fun (used_expr : Typed.Expr.t) ->
-      joins
-        ctx
-        expected
-        used.mode
-        ~crossing:(ctx.crossing used_expr.ty)
-        ~loc
-        ~why:"it is used";
-      annotate ctx used.mode annot ~var);
+      let crossing = ctx.crossing used_expr.ty in
+      joins ctx expected used.mode ~crossing ~loc ~why:"it is used";
+      annotate ctx used.mode annot ~var;
+      match expected.region with
+      | Returns result | Ends result ->
+        annotate ctx given_to annot ~var;
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode
+             ~crossing
+             given_to
+             result
+             (reason ~loc "it is given to the caller"))
+      | Nontail | Quoted -> ());
     result
 ;;
 
@@ -712,8 +729,11 @@ let apply
     then { (Expected.fresh ctx) with region = expected.region; applied = true }
     else Expected.fresh ctx
   in
-  let (f : Typed.Expr.t) = callee f_expected in
-  if Expected.is_tail expected && not curried
+  let (f : Typed.Expr.t), allocation = callee f_expected in
+  let allocator = Option.is_some allocation in
+  (* An allocator is no call: its region doesn't end before it runs. *)
+  let tail_call = Expected.is_tail expected && not allocator in
+  if tail_call && not curried
   then
     Ctx.add
       ctx
@@ -726,7 +746,7 @@ let apply
          ~loc:f.loc
          ~why:tail_reason);
   let x_expected = Expected.fresh ctx in
-  let (x : Typed.Expr.t) = arg x_expected in
+  let (x : Typed.Expr.t) = arg allocation x_expected in
   Ctx.add
     ctx
     ~loc
@@ -735,7 +755,7 @@ let apply
        x_expected.mode
        arg_mode
        (reason ~loc "it is passed to a function"));
-  if Expected.is_tail expected
+  if tail_call
   then
     Ctx.add
       ctx
@@ -760,14 +780,31 @@ let apply
             ~loc
             "a tail call gives it further arguments, after the current region \
              has ended (mark the call [@nontail])"));
-  joins
-    ctx
-    expected
-    res_mode
-    ~crossing:(ctx.crossing res_ty)
-    ~loc
-    ~why:"the function returns it";
-  f, x
+  (match expected.region with
+   | Returns function_res when (not expected.applied) && not allocator ->
+     (* A tail call ends the region before the callee runs, so what the callee
+        returns is made in the caller's region, as by [exclave_]. So is the
+        closure of a partial application there (a closure's partial applications
+        are made in their caller's region). An allocator like [Box.make], or a
+        prim given too few arguments, allocates here. *)
+     Ctx.add
+       ctx
+       ~loc
+       (Mode.Var.submode
+          ~crossing:(ctx.crossing res_ty)
+          res_mode
+          function_res
+          (reason ~loc "the function returns it, by a tail call"));
+     held ctx expected res_mode ~loc ~why:"the function returns it"
+   | Returns _ | Ends _ | Nontail | Quoted ->
+     joins
+       ctx
+       expected
+       res_mode
+       ~crossing:(ctx.crossing res_ty)
+       ~loc
+       ~why:"the function returns it");
+  f, x, allocation
 ;;
 
 (* How a value bound outside [locks] relates on locality to its use inside them:
