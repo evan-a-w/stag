@@ -150,6 +150,7 @@ let expr_or_error (expr : Typed.Expr.t) =
       (match p.desc with
        | Any -> Syntax.Pattern.Any
        | Error (_ : Typed.Pattern.t list) -> raise Reached
+       | Or (left, right) -> Or (go left, go right)
        | Var ident -> Var (Names.binder names ident)
        | Lit lit -> Lit lit
        | Tuple ps -> Tuple (List.map ps ~f:go)

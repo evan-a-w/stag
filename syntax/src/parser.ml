@@ -808,6 +808,18 @@ let close_parens t ~open_loc (contents : _ Located.t) ~tuple_items =
 ;;
 
 let rec pattern t : Pattern.t =
+  let rec alternatives (left : Pattern.t) =
+    if is t Bar
+    then (
+      advance t;
+      let right = pattern_tuple t in
+      alternatives
+        (located ~loc:(Loc.merge left.loc right.loc) (Pattern.Or (left, right))))
+    else left
+  in
+  alternatives (pattern_tuple t)
+
+and pattern_tuple t : Pattern.t =
   let first = pattern_construct t in
   if is t Comma
   then (

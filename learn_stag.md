@@ -149,6 +149,17 @@ let safe k =
   | v -> v
   | exception Not_found _ -> -1
 let found = (safe "a", safe "b")    (* val found : int * int = (1, -1) *)
+
+(* Or-patterns: either alternative, binding the same variables. *)
+let corners s =
+  match s with
+  | Circle _ | Empty -> 0
+  | Rect (n, _) | Rect (_, n) -> n  (* the first that matches binds n *)
+let c = corners (Rect (3, 4))       (* val c : int = 3 *)
+let small n = match n with 1 | 2 | 3 -> true | _ -> false
+let s = (small 2, small 7)          (* val s : bool * bool = (true, false) *)
+let either v = match v with `L n | `R n -> n
+(* val either : [`L of 'a | `R of 'a] -> 'a *)
 ```
 
 There is no exhaustiveness check: a value no arm matches fails at run time.
@@ -156,6 +167,13 @@ There is no exhaustiveness check: a value no arm matches fails at run time.
 ```stag-error
 let f n = match n with 0 -> "zero"
 let boom = f 1                      (* Error: Match failure *)
+```
+
+Both alternatives of an or-pattern must bind the same variables.
+
+```stag-error
+let g s = match s with Circle r | Empty -> 0 | Rect _ -> 1
+(* Error: The variable r is bound by only one side of this or-pattern *)
 ```
 
 ## Pointers

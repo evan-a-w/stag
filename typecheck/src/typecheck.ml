@@ -1936,7 +1936,7 @@ and match_type
         scope.locals
         (List.map bindings ~f:(fun (var : Pattern_var.t) ->
            let mode, shape =
-             Mode_rules.Binding.component modes shape var.path ~loc:var.loc
+             Mode_rules.Binding.component modes shape var.paths ~loc:var.loc
            in
            ( var.ident.name
            , Scope.entry scope ~ident:var.ident ~scheme:var.ty ?shape ~mode )))

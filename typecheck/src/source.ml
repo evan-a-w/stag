@@ -56,6 +56,7 @@ module Pattern = struct
           ; rest : Rest.t
           }
       | Exception of t
+      | Or of t * t
   end
 
   let syntax_view ({ txt; loc } : Syntax.Pattern.t) : View.t =
@@ -84,6 +85,7 @@ module Pattern = struct
              | Bind name -> Bind (Name name))
         }
     | Exception pattern -> Exception (sub pattern)
+    | Or (left, right) -> Or (sub left, sub right)
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Pattern.t) : View.t =
@@ -114,6 +116,7 @@ module Pattern = struct
              | Open -> Open
              | Bind ident -> Bind (Ident ident))
         }
+    | Or (left, right) -> Or (sub left, sub right)
   ;;
 
   let view = function
@@ -216,6 +219,18 @@ module Expr = struct
 
   let binding (name, (annot : Syntax.Annot.t)) = Binder.Name name, annot
 
+  (* What a case matches of an exception the scrutinee raises, if it is
+     [exception p] or alternatives each of which is. *)
+  let rec exception_pattern (pattern : Syntax.Pattern.t) =
+    match pattern.txt with
+    | Exception pattern -> Some pattern
+    | Or (left, right) ->
+      let%bind.Option left = exception_pattern left in
+      let%map.Option right = exception_pattern right in
+      { pattern with txt = Syntax.Pattern.Or (left, right) }
+    | _ -> None
+  ;;
+
   let rec syntax_view (expr : Syntax.Expr.t) : View.t =
     let sub expr = Syntax expr in
     let subs = List.map ~f:sub in
@@ -273,9 +288,9 @@ module Expr = struct
     | Match (expr, arms) ->
       let cases, exception_cases =
         List.partition_map arms ~f:(fun ((pattern : Syntax.Pattern.t), body) ->
-          match pattern.txt with
-          | Exception pattern -> Second (Pattern.Syntax pattern, sub body)
-          | _ -> First (Pattern.Syntax pattern, sub body))
+          match exception_pattern pattern with
+          | Some pattern -> Second (Pattern.Syntax pattern, sub body)
+          | None -> First (Pattern.Syntax pattern, sub body))
       in
       Match { scrutinee = sub expr; cases; exception_cases }
     | Poly_record fields' -> Poly_record (fields fields')

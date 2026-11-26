@@ -96,6 +96,11 @@ module Kind = struct
     | Misplaced_exception_pattern
     | Match_without_value_cases
     | Duplicate_pattern_variable of string
+    | Or_pattern_variable_missing of string
+    | Or_pattern_variable_type of
+        { name : string
+        ; error : Unification_error.t
+        }
     | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Assign_to_immutable of string
@@ -577,6 +582,17 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A match must have a case for the value, not only exception cases"
   | Duplicate_pattern_variable name ->
     sprintf "The variable %s is bound several times in this matching" name
+  | Or_pattern_variable_missing name ->
+    sprintf
+      "The variable %s is bound by only one side of this or-pattern, but both \
+       sides must bind the same variables"
+      name
+  | Or_pattern_variable_type { name; error } ->
+    sprintf
+      "The variable %s has different types on the two sides of this \
+       or-pattern: %s"
+      name
+      (unification_message error ~show_type)
   | Duplicate_parameter name ->
     sprintf "The parameter %s is bound several times in this function" name
   | Duplicate_row_entry name ->

@@ -517,6 +517,30 @@ and pattern_desc roots ~prec (p : Pattern.t) =
      | Bind name -> braces ~trailing:false (fields @ [ text (".." ^ name.txt) ]))
   | Exception p ->
     paren_if (prec > 1) (text "exception " ^^ pattern roots ~prec:1 p)
+  | Or _ -> paren_if (prec > 0) (align (alternatives roots p))
+
+(* An or-pattern's alternatives, one per line when broken, each after a [|]. *)
+and alternatives roots (p : Pattern.t) =
+  match or_chain p with
+  | [] -> empty
+  | first :: rest ->
+    let alternative (p : Pattern.t) =
+      match p.txt with
+      | Or _ -> parens (align (alternatives roots p))
+      | _ -> align (pattern roots ~prec:0 p)
+    in
+    group
+      (alternative first
+       ^^ concat
+            (List.map rest ~f:(fun p -> line ^^ text case_bar ^^ alternative p))
+      )
+
+(* [p1 | p2 | ...]: [|] associates left, so a right operand that is itself an
+   or-pattern was parenthesised, and stays one alternative. *)
+and or_chain (p : Pattern.t) =
+  match p.txt with
+  | Or (p, q) -> or_chain p @ [ q ]
+  | _ -> [ p ]
 
 and pattern_doc roots p = pattern roots ~prec:0 p
 
@@ -612,8 +636,13 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
     let last = List.length arms - 1 in
     let arm i (p, body) =
       let after : After.t = if i = last then ctx.after else Bar in
+      let pattern =
+        match (p : Pattern.t).txt with
+        | Or _ -> alternatives roots p
+        | _ -> align (pattern_doc roots p)
+      in
       let doc =
-        align (pattern_doc roots p)
+        pattern
         ^^ text " ->"
         ^^ nest
              2

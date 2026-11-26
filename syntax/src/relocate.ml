@@ -220,6 +220,10 @@ and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
   | Exception p, Exception p' ->
     let+ p = pattern p p' in
     Pattern.Exception p
+  | Or (p, q), Or (p', q') ->
+    let* p = pattern p p' in
+    let+ q = pattern q q' in
+    Pattern.Or (p, q)
   | ( ( Any
       | Var _
       | Lit _
@@ -229,7 +233,8 @@ and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
       | Record _
       | Poly_variant _
       | Poly_record _
-      | Exception _ )
+      | Exception _
+      | Or _ )
     , _ ) -> None
 
 and expr g w = located expr_desc g w

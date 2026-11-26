@@ -124,7 +124,7 @@ module Gen = struct
     match
       if depth <= 0
       then Random.State.int t.random 2
-      else Random.State.int t.random 34
+      else Random.State.int t.random 36
     with
     | 0 -> sprintf "Box.make %s" (pick t ints)
     | 1 -> sprintf "stack_ (Box.make %s)" (pick t ints)
@@ -376,6 +376,48 @@ module Gen = struct
         (rarely t a ~else_:[ b; sprintf "Box.make (sum %s)" a ])
         g
         (int ())
+    | 33 ->
+      (* Alternatives binding the same names to parts that may differ. *)
+      let p = name t "p"
+      and a = name t "a"
+      and b = name t "b" in
+      sprintf
+        "(let %s = ((stack_ (Box.make %s)), %s) in match %s with (%s, %s) | %s \
+         -> %s)"
+        p
+        (int ())
+        (sub ~tail:false ())
+        p
+        a
+        b
+        (if Random.State.bool t.random
+         then sprintf "(%s, %s)" b a
+         else sprintf "(%s, %s)" a b)
+        (rarely
+           t
+           a
+           ~else_:[ b; sprintf "Box.make (Int.add (sum %s) (sum %s))" a b ])
+    | 34 ->
+      (* Alternatives where the first may fail, so either binds at runtime. *)
+      let p = name t "p"
+      and a = name t "a"
+      and b = name t "b" in
+      sprintf
+        "(let %s = (%s, (stack_ (Box.make %s)), %s) in match %s with (0, %s, \
+         %s) | (_, %s, %s) -> %s)"
+        p
+        (pick t [ "0"; "1" ])
+        (int ())
+        (sub ~tail:false ())
+        p
+        a
+        b
+        b
+        a
+        (rarely
+           t
+           a
+           ~else_:[ b; sprintf "Box.make (Int.add (sum %s) (sum %s))" a b ])
     | _ ->
       let n = name t "n" in
       sprintf
@@ -514,9 +556,9 @@ let%expect_test "no allocation is used after its region ends" =
       [%message (seed : int) (outcomes : (string * int) list) (regions : int)]);
   [%expect
     {|
-    ((seed 7) (outcomes ((ran 751) (rejected 749))) (regions 4016))
-    ((seed 8) (outcomes ((ran 816) (rejected 684))) (regions 4636))
-    ((seed 9) (outcomes ((ran 824) (rejected 676))) (regions 4563))
+    ((seed 7) (outcomes ((ran 708) (rejected 792))) (regions 4017))
+    ((seed 8) (outcomes ((ran 733) (rejected 767))) (regions 4255))
+    ((seed 9) (outcomes ((ran 683) (rejected 817))) (regions 3928))
     |}]
 ;;
 
@@ -534,7 +576,7 @@ let%expect_test "with placements that ignore their instance, some are" =
   print_endline (Option.value_exn (Queue.peek failures));
   [%expect
     {|
-    (outcomes ((ran 421) (rejected 749) ("use after free" 330)))
+    (outcomes ((ran 393) (rejected 792) ("use after free" 315)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -551,10 +593,10 @@ let%expect_test "with placements that ignore their instance, some are" =
     let h (y : int) = Box.make y
     let k (j : int -> box[int]) = sum (j 1)
     let m (a : int) (b : int) = Box.make (Int.add a b)
-    let t1 (a : int) (b : int) = ((let p2 = ((stack_ (Box.make (sum ((let mut c9 = b in let k10 = fun (y11 : int) -> Box.make (Int.add y11 c9) in c9 <- 2; k10 b))))), ((keep.* <- ((let mut c6 = b in let k7 = fun (y8 : int) -> Box.make (Int.add y8 c6) in c6 <- 2; k7 a)); ((let n5 @ local = (Box.make b) in Box.make (sum n5)))))) in match p2 with (a3, b4) -> Box.make (Int.add (sum a3) (sum b4))))
-    let f h k m (x : int) = ((keepc.* <- (mk2 x); ((let p12 = m 1 in p12 1))))
+    let t1 (a : int) (b : int) = ((match `A (m (Int.add a b)) with `A g2 -> g2 (Int.add b b)))
+    let f h k m (x : int) = (Box.make (k (fun (z : int) -> (h 1))))
     let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) (fun (a : int) -> fun (b : int) -> Box.make (Int.add a b)) 1 in sum r
-    a reference, from a toplevel, to the Partial_application at t.stag:5:30-52, made in the region of a call of toplevel f, which ends first
+    a reference, from an argument of a tail call, of the Box at t.stag:18:24-63, made in the region of a call of toplevel g, after it ended
     |}]
 ;;
 
@@ -569,7 +611,7 @@ let%expect_test "with tail calls not ending their region" =
   Option.iter (Queue.peek failures) ~f:print_endline;
   [%expect
     {|
-    (outcomes ((ran 374) (rejected 749) ("use after free" 377)))
+    (outcomes ((ran 395) (rejected 792) ("use after free" 313)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -586,9 +628,9 @@ let%expect_test "with tail calls not ending their region" =
     let h (y : int) = Box.make y
     let k (j : int -> box[int]) = sum (j 1)
     let m (a : int) (b : int) = Box.make (Int.add a b)
-    let t1 (a : int) (b : int) = ((let p2 = ((stack_ (Box.make (sum ((let mut c9 = b in let k10 = fun (y11 : int) -> Box.make (Int.add y11 c9) in c9 <- 2; k10 b))))), ((keep.* <- ((let mut c6 = b in let k7 = fun (y8 : int) -> Box.make (Int.add y8 c6) in c6 <- 2; k7 a)); ((let n5 @ local = (Box.make b) in Box.make (sum n5)))))) in match p2 with (a3, b4) -> Box.make (Int.add (sum a3) (sum b4))))
-    let f h k m (x : int) = ((keepc.* <- (mk2 x); ((let p12 = m 1 in p12 1))))
-    let l (u : unit) = let r @ local = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) mk2 1 in sum r [@nontail]
-    a reference, from the result of a call of toplevel f, of the Box at t.stag:5:30-52, made in the region of a call of toplevel f, after it ended
+    let t1 (a : int) (b : int) = ((match `A (m (Int.add a b)) with `A g2 -> g2 (Int.add b b)))
+    let f h k m (x : int) = (Box.make (k (fun (z : int) -> (h 1))))
+    let t (u : unit) = let r @ local = f (fun (y : int) -> exclave_ Box.make y) (fun j -> let b @ local = j 1 in sum b [@nontail]) (fun (a : int) -> exclave_ fun (b : int) -> exclave_ Box.make (Int.add a b)) 1 in sum r [@nontail]
+    a reference, from the result of a call of Closure at t.stag:18:37-61, of the Box at t.stag:19:64-74, made in the region of a call of Closure at t.stag:18:37-61, after it ended
     |}]
 ;;
