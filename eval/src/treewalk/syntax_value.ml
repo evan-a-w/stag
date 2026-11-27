@@ -903,3 +903,16 @@ let type_ref_path path =
   | `Prelude path -> To_value.con "Stag.Type_ref.Path.Prelude" [ names path ]
   | `Program path -> To_value.con "Stag.Type_ref.Path.Program" [ names path ]
 ;;
+
+let of_prim : Prim.Value.t -> Value.t = function
+  | Int n -> Int n
+  | Bool b -> Bool b
+  | String s -> String s
+  | Char c -> Char c
+  | Unit -> Unit
+  | String_list strings ->
+    List.fold_right strings ~init:(To_value.con "Nil" []) ~f:(fun s rest ->
+      To_value.con "Cons" [ Box (Tuple [ String s; rest ]) ])
+  | String_option None -> To_value.con "None" []
+  | String_option (Some s) -> To_value.con "Some" [ String s ]
+;;

@@ -21,6 +21,7 @@ let create (module I : Interpreter_intf.S) ~stamps =
 ;;
 
 let set_output (T ((module I), t)) output = I.set_output t output
+let set_argv (T ((module I), t)) argv = I.set_argv t argv
 let with_output (T ((module I), t)) output ~f = I.with_output t output ~f
 let set_limits (T ((module I), t)) limits = I.set_limits t limits
 

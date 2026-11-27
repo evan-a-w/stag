@@ -8,7 +8,7 @@ let%expect_test "prims return strings that share nothing with their arguments" =
         (Stag_ir.Prim.find
            (Syntax.Path.of_list_exn (String.split path ~on:'.')))
     in
-    match Stag_ir.Prim.apply prim ~output:ignore args with
+    match Stag_ir.Prim.apply prim ~io:{ output = ignore; argv = [] } args with
     | Ok (String r) ->
       print_s
         [%message path (r : string) ~shares_argument:(phys_equal r s : bool)]

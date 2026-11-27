@@ -37,15 +37,6 @@ type t =
   | Type of Syntax.Type_expr.t
   | Ref of Decl_ref.t
 
-let of_prim : Prim.Value.t -> t = function
-  | Int n -> Int n
-  | Bool b -> Bool b
-  | String s -> String s
-  | Char c -> Char c
-  | Unit -> Unit
-  | String_list _ -> raise_s [%message "Value.of_prim: prims return no lists"]
-;;
-
 (* A list is [Nil] or [Cons] of an element and a list: constructors without and
    with arguments. *)
 let string_list value =

@@ -10,6 +10,7 @@ type t =
   | Value_ref_name
   | Erase
   | Raise
+  | Exit
   | Ptr_make
   | Box_make
   | Assume_global
@@ -25,6 +26,7 @@ let name = function
   | Value_ref_name -> "value_ref_name"
   | Erase -> "erase"
   | Raise -> "raise"
+  | Exit -> "exit"
   | Ptr_make -> "ptr_make"
   | Box_make -> "box_make"
   | Assume_global -> "assume_global"
@@ -40,6 +42,7 @@ let public_name = function
   | Value_ref_name -> "Stag.Value_ref.name"
   | Erase -> "Stag.Code.erase"
   | Raise -> "raise"
+  | Exit -> "exit"
   | Ptr_make -> "Ptr.make"
   | Box_make -> "Box.make"
   | Assume_global -> "Unsafe.assume_global"
@@ -69,6 +72,7 @@ let ty t ~var ~row =
       (TCode { inner = var (); context = row () })
       (prelude "Stag.Expr.t")
   | Raise -> Type.arrow Type.exn (var ())
+  | Exit -> Type.arrow Type.int (var ())
   | Ptr_make ->
     let pointee = var () in
     Type.arrow pointee (Type.ptr pointee)

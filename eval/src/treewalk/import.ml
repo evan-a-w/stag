@@ -25,4 +25,5 @@ module Generated_syntax = Stag_eval.Generated_syntax
 module Global = Modes.Global
 module Local_result = Stag_common.Local_result
 module C_signature = Stag_ir.C_signature
+module C_int = Stag_ir.C_int
 module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
