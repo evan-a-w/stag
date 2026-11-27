@@ -612,7 +612,8 @@ let nul = strlen "a\000b"
 external strcmp : string -> string -> C.int = "strcmp"
 let long = strcmp "fine" "a string longer than is shown in an error, \000 with a NUL"
 |};
-  [%expect {|
+  [%expect
+    {|
     val strcmp : string -> string -> int
     val long : int
     -- evaluated at compile time
@@ -626,7 +627,8 @@ let long = strcmp "fine" "a string longer than is shown in an error, \000 with a
 external abs3 : C.int -> C.uint8 -> C.int8 -> C.int = "abs"
 let second = abs3 1 256 0
 |};
-  [%expect {|
+  [%expect
+    {|
     val abs3 : int -> int -> int -> int
     val second : int
     -- evaluated at compile time
@@ -640,7 +642,16 @@ let second = abs3 1 256 0
 external abs3 : C.int -> C.uint8 -> C.int8 -> C.int = "abs"
 let third = abs3 1 2 128
 |};
-  [%expect {| |}]
+  [%expect
+    {|
+    val abs3 : int -> int -> int -> int
+    val third : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs3 <fun>)
+    ("The external abs could not be called: argument 3 (128) is out of the range of C.int8"
+     @ t.stag:3:12-24)
+    |}]
 ;;
 
 let%expect_test "an external's C integer types and strings, with modes" =

@@ -228,6 +228,18 @@ whose write fails raises [Sys_error], as does the flush before a C call.
   Error: Uncaught exception Sys_error "No space left on device"
   Error: Writing to stdout failed: No space left on device
   [1]
+  $ cat > catch_prerr.stag <<'EOF'
+  > let main =
+  >   match prerr_endline "e" with
+  >   | () -> ()
+  >   | exception Sys_error message -> print_endline message; exit 5
+  > EOF
+  $ stag run catch_prerr.stag 2>&-
+  Bad file descriptor
+  [5]
+  $ stag run catch_prerr.stag 2>/dev/full
+  No space left on device
+  [5]
   $ cat > c_flush_fails.stag <<'EOF'
   > external labs : int -> int = "labs"
   > let main = print_string "x"; print_int (labs 1)
@@ -267,4 +279,13 @@ error, whatever the exit code would have been.
   [1]
   $ stag run exit.stag > /dev/full
   Error: Writing to stdout failed: No space left on device
+  [3]
+
+Even when stderr can't be written either, it exits cleanly with its code.
+
+  $ stag run final_flush.stag >&- 2>&-
+  [1]
+  $ stag run exit.stag > /dev/full 2>&-
+  [3]
+  $ stag run exit.stag > /dev/full 2>/dev/full
   [3]

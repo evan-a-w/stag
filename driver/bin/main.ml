@@ -1,5 +1,35 @@
 open! Import
 
+let write_stderr string =
+  try
+    Out_channel.output_string stderr string;
+    Out_channel.flush stderr
+  with
+  | Sys_error _ -> ()
+;;
+
+(* Before writing to stderr, so the two keep their order. A failure is left to
+   [exit_flushing]. *)
+let flush_before_stderr () =
+  try Out_channel.flush stdout with
+  | Sys_error _ -> ()
+;;
+
+(* Exits with [code], or fails if stdout can't be written. *)
+let exit_flushing code =
+  match Out_channel.flush stdout with
+  | () ->
+    (* If a write to stderr failed earlier, [exit] would flush it again and
+       raise. *)
+    (match Out_channel.flush stderr with
+     | () -> exit code
+     | exception Sys_error _ -> Core_unix.exit_immediately code)
+  | exception Sys_error message ->
+    write_stderr (sprintf "Error: Writing to stdout failed: %s\n" message);
+    (* [exit] would flush stdout again, raising. *)
+    Core_unix.exit_immediately (Int.max code 1)
+;;
+
 let dedup paths =
   List.stable_dedup
     paths
@@ -12,8 +42,8 @@ let read_files paths =
     match In_channel.read_all path with
     | contents -> { Source_file.path; contents }
     | exception Sys_error message ->
-      eprintf "Error: %s\n%!" message;
-      exit 2)
+      write_stderr (sprintf "Error: %s\n" message);
+      exit_flushing 2)
 ;;
 
 (* Files under the current directory, eg. the prelude's sources in a checkout,
@@ -35,27 +65,9 @@ let contents files path =
   | None -> Option.try_with (fun () -> In_channel.read_all path)
 ;;
 
-(* Before writing to stderr, so the two keep their order. A failure is left to
-   [exit_flushing]. *)
-let flush_before_stderr () =
-  try Out_channel.flush stdout with
-  | Sys_error _ -> ()
-;;
-
-(* Exits with [code], or fails if stdout can't be written. *)
-let exit_flushing code =
-  match Out_channel.flush stdout with
-  | () -> exit code
-  | exception Sys_error message ->
-    eprintf "Error: Writing to stdout failed: %s\n%!" message;
-    (* [exit] would flush stdout again, raising. *)
-    Core_unix.exit_immediately (Int.max code 1)
-;;
-
 let report ?warning files diagnostic =
   flush_before_stderr ();
-  eprintf
-    "%s%!"
+  write_stderr
     (Diagnostic.to_string_hum
        ~contents:(contents files)
        ?warning
@@ -64,8 +76,7 @@ let report ?warning files diagnostic =
 
 let report_all files diagnostics =
   flush_before_stderr ();
-  eprintf
-    "%s%!"
+  write_stderr
     (Diagnostic.list_to_string_hum
        ~contents:(contents files)
        (List.map diagnostics ~f:(Diagnostic.relocate ~f:relative_loc)))
@@ -117,24 +128,24 @@ let check_with_prelude_sources ~limits ~modes ~sources ~program =
             (Stdlib_checkout.root other)
             (Stdlib_checkout.root checkout))
     then (
-      eprintf
-        "Error: %s and %s are sources of the preludes of different checkouts, \
-         which are not checked together\n\
-         %!"
-        (fst (List.hd_exn sources))
-        path;
-      exit 1));
+      write_stderr
+        (sprintf
+           "Error: %s and %s are sources of the preludes of different \
+            checkouts, which are not checked together\n"
+           (fst (List.hd_exn sources))
+           path);
+      exit_flushing 1));
   let prelude =
     match Stdlib_checkout.prelude checkout with
     | Ok prelude -> prelude
     | Error diagnostic ->
       report [] diagnostic;
-      exit 1
+      exit_flushing 1
   in
   match Pipeline.Checked.to_result (Pipeline.check_prelude ~limits prelude) with
   | Error diagnostics ->
     report_all [] diagnostics;
-    exit 1
+    exit_flushing 1
   | Ok driver ->
     warn_stale [] driver;
     let signature = (Driver.checked driver).signature in
@@ -149,7 +160,7 @@ let check_with_prelude_sources ~limits ~modes ~sources ~program =
         print_string (Signature.to_string_hum ~of_prelude:true ~modes signature)
       | Error diagnostic ->
         report [] diagnostic;
-        exit 1);
+        exit_flushing 1);
     if not (List.is_empty program)
     then (
       let files = read_files program in
@@ -164,7 +175,7 @@ let check_with_prelude_sources ~limits ~modes ~sources ~program =
         | Ok driver -> driver
         | Error diagnostics ->
           report_all files diagnostics;
-          exit 1
+          exit_flushing 1
       in
       warn_stale files driver;
       print_string
@@ -203,14 +214,15 @@ let check_command =
            | Some checkout -> First (path, checkout)
            | None -> Second path)
        in
-       match sources with
-       | _ :: _ -> check_with_prelude_sources ~limits ~modes ~sources ~program
-       | [] ->
-         let files = read_files paths in
-         let driver = check (Pipeline_config.create ~limits paths) files in
-         warn_stale files driver;
-         print_string
-           (Signature.to_string_hum ~modes (Driver.checked driver).signature))
+       (match sources with
+        | _ :: _ -> check_with_prelude_sources ~limits ~modes ~sources ~program
+        | [] ->
+          let files = read_files paths in
+          let driver = check (Pipeline_config.create ~limits paths) files in
+          warn_stale files driver;
+          print_string
+            (Signature.to_string_hum ~modes (Driver.checked driver).signature));
+       exit_flushing 0)
 ;;
 
 let run_command =
