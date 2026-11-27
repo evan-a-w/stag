@@ -1,5 +1,7 @@
 open! Import
 
+let work = Work.create "typecheck.types"
+
 module Step = struct
   type t =
     | Index of int
@@ -63,6 +65,7 @@ let steps t =
 ;;
 
 let rec lower_rank t ~rank =
+  Work.incr work;
   Mode.Var.lower_rank t.whole ~rank;
   match t.parts with
   | Opaque -> ()
@@ -79,6 +82,7 @@ let rec lower_rank t ~rank =
 ;;
 
 let part t step =
+  Work.incr work;
   match t.parts with
   | Opaque -> None
   | Known parts -> List.Assoc.find parts step ~equal:Step.equal

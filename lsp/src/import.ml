@@ -28,3 +28,4 @@ module Prelude_path = Stag_types.Prelude_path
 module Pipeline = Stag_build.Pipeline
 module Pipeline_config = Stag_build.Pipeline_config
 module Name_reference = Stag_typecheck.Name_reference
+module Work = Stag_common.Work

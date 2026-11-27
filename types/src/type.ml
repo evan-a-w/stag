@@ -307,6 +307,9 @@ let presence_bound_var = function
   | If_present _ -> None
 ;;
 
+(* Each part of a type a traversal looks at. *)
+let work = Work.create "types.traversal"
+
 (* A type's structure only grows, as its variables are linked, so what a [Link]
    reaches is kept with it: if it is only tuples and constructors applied to
    types around a few variables, traversals reaching it again (as uses of a
@@ -348,6 +351,7 @@ module Frontier = struct
       vars
 
   and collect ty ~into =
+    Work.incr work;
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
       (match of_link var ~target with
@@ -561,6 +565,7 @@ let iterate
     Arrow_modes.iter_result modes ~f:(fun var -> f.mode var) [@nontail]
   in
   let rec iter_ty ~guarded ty =
+    Work.incr work;
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
       if Visited.enter_link visited ~id:var.id ~guarded
@@ -744,6 +749,7 @@ module Changes = struct
   ;;
 
   let rec ty t ty' =
+    Work.incr work;
     match ty' with
     | TVar ({ state = Link target; _ } as var') ->
       (match frontier var' with
@@ -844,6 +850,7 @@ let mapper (f : Mapper.t) =
   in
   (* Unchanged parts are kept as they are. *)
   let rec map_ty ty =
+    Work.incr work;
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
       link

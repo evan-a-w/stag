@@ -1638,6 +1638,9 @@ let define t (decl : Decl.t) =
 
 let layouts t = Set_once.get_exn t.layouts
 
+(* Each part of a type the typechecker looks through. *)
+let work = Work.create "typecheck.types"
+
 (* Whether [root] is pointer-free, taking the layouts not known yet, which it
    collects, to be: [`Nominal] is a declared type of arguments known to be
    pointer-free or not. *)
@@ -1697,6 +1700,7 @@ let pointer_free' t ~check root =
         result)
   in
   let rec ty_ params (ty : Type.ty) =
+    Work.incr work;
     match ty with
     | TVar { id; state = Generic; _ } when Map.mem params id ->
       Map.find_exn params id

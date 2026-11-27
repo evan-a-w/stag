@@ -1104,22 +1104,21 @@ let%expect_test "guarded bounds along a chain of nested schemes take linear \
     let o, nodes = build t ~rank:n ~acc:[ t ] in
     ok (Var.at_least o Locality Regional (reason "o is regional"));
     ok (Layout.raise layout ~because:[ reason "'a is string" ]);
-    let start = Time_ns.now () in
-    let lower = Var.Node.lower (locality t) in
-    let raised =
-      Var.Node.raised (List.map nodes ~f:(fun var -> locality var, 0))
-      |> Option.value_exn
+    let (lower, raised), counts =
+      Work.Private.measure (fun () ->
+        ( Var.Node.lower (locality t)
+        , Var.Node.raised (List.map nodes ~f:(fun var -> locality var, 0))
+          |> Option.value_exn ))
     in
-    Time_ns.diff (Time_ns.now ()) start, lower, List.length raised
+    lower, List.length raised, counts
   in
-  let time n =
-    List.init 3 ~f:(fun (_ : int) -> chain n)
-    |> List.min_elt ~compare:(fun (a, _, _) (b, _, _) ->
-      Time_ns.Span.compare a b)
-    |> Option.value_exn
+  let small_lower, small_raised, _ = chain 200 in
+  let large_lower, large_raised, _ = chain 800 in
+  let growth =
+    Work.Private.growth ~small:200 ~large:800 (fun n ->
+      let _, _, counts = chain n in
+      counts)
   in
-  let small, small_lower, small_raised = time 200 in
-  let large, large_lower, large_raised = time 800 in
   print_s
     [%message
       ""
@@ -1127,11 +1126,10 @@ let%expect_test "guarded bounds along a chain of nested schemes take linear \
         (small_raised : int)
         (large_lower : int)
         (large_raised : int)
-        ~within_16_times:
-          (Time_ns.Span.( < ) large (Time_ns.Span.scale small 16.) : bool)];
+        (growth : Work.Private.Growth.t String.Map.t)];
   [%expect
     {|
     ((small_lower 1) (small_raised 201) (large_lower 1) (large_raised 801)
-     (within_16_times true))
+     (growth ((allocated_words Linear) (mode.graph Linear))))
     |}]
 ;;

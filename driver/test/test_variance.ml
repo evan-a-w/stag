@@ -672,38 +672,43 @@ let%expect_test "many joins take time comparable to unification" =
   let arms n arm =
     String.concat (List.init n ~f:(fun i -> sprintf "| %d -> %s\n" i (arm i)))
   in
-  let within_bound name source =
-    let start = Time_ns.now () in
-    let ok = Result.is_ok (checked source) in
-    let elapsed = Time_ns.diff (Time_ns.now ()) start in
-    print_s
-      [%message
-        name
-          (ok : bool)
-          ~fast:(Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 60) : bool)]
+  let print_growth name ~small ~large source =
+    let growth =
+      Work.Private.growth ~net_of:1 ~small ~large (fun n ->
+        snd
+          (Work.Private.measure (fun () ->
+             assert (Result.is_ok (checked (source n))))))
+    in
+    print_s [%message name (growth : Work.Private.Growth.t String.Map.t)]
   in
-  within_bound
-    "800 arms of an instance"
-    (sprintf
-       "let myid x = x\nlet f (n : int) x = match n with\n%s| _ -> x\n"
-       (arms 800 (fun _ -> "myid x")));
-  within_bound
-    "a list of 100 parameters"
-    (sprintf
-       "let f %s = [ %s ]\n"
-       (params 100)
-       (String.concat ~sep:"; " (List.init 100 ~f:(sprintf "x%d"))));
-  within_bound
-    "100 arms of parameters"
-    (sprintf
-       "let f (n : int) %s = match n with\n%s| _ -> x0\n"
-       (params 100)
-       (arms 100 (sprintf "x%d")));
+  print_growth "arms of an instance" ~small:200 ~large:800 (fun n ->
+    sprintf
+      "let myid x = x\nlet f (n : int) x = match n with\n%s| _ -> x\n"
+      (arms n (fun _ -> "myid x")));
+  print_growth "a list of parameters" ~small:25 ~large:100 (fun n ->
+    sprintf
+      "let f %s = [ %s ]\n"
+      (params n)
+      (String.concat ~sep:"; " (List.init n ~f:(sprintf "x%d"))));
+  print_growth "arms of parameters" ~small:25 ~large:100 (fun n ->
+    sprintf
+      "let f (n : int) %s = match n with\n%s| _ -> x0\n"
+      (params n)
+      (arms n (sprintf "x%d")));
   [%expect
     {|
-    ("800 arms of an instance" (ok true) (fast true))
-    ("a list of 100 parameters" (ok true) (fast true))
-    ("100 arms of parameters" (ok true) (fast true))
+    ("arms of an instance"
+     (growth
+      ((allocated_words Linear) (mode.graph Linear) (typecheck.types Linear)
+       (types.traversal Linear) (types.unify Linear))))
+    ("a list of parameters"
+     (growth
+      ((allocated_words Quadratic) (mode.graph Quadratic) (syntax.format Linear)
+       (typecheck.types Linear) (types.traversal Linear) (types.unify Linear))))
+    ("arms of parameters"
+     (growth
+      ((allocated_words Quadratic) (mode.graph Quadratic) (syntax.format Linear)
+       (typecheck.types Linear) (types.traversal Linear) (types.unify Linear))))
     |}]
 ;;
 
@@ -713,24 +718,21 @@ let%expect_test "joins of variables that stay unknown take linear time" =
       "let myid x = x\nlet f (n : int) x = match n with\n%s| _ -> x\n"
       (String.concat (List.init n ~f:(fun i -> sprintf "| %d -> myid x\n" i)))
   in
-  let time n =
-    List.init 3 ~f:(fun _ ->
-      let start = Time_ns.now () in
-      assert (Result.is_ok (checked (source n)));
-      Time_ns.diff (Time_ns.now ()) start)
-    |> List.min_elt ~compare:Time_ns.Span.compare
-    |> Option.value_exn
+  let growth =
+    Work.Private.growth ~net_of:1 ~small:500 ~large:2000 (fun n ->
+      snd
+        (Work.Private.measure (fun () ->
+           assert (Result.is_ok (checked (source n))))))
   in
-  let small = time 500 in
-  let large = time 2000 in
   print_s
-    [%message
-      "4 times the arms"
-        ~within_6_times_the_time:
-          (Time_ns.Span.( < ) large (Time_ns.Span.scale small 6.) : bool)
-        ~under_4s:(Time_ns.Span.( < ) large (Time_ns.Span.of_int_sec 4) : bool)];
+    [%message "4 times the arms" (growth : Work.Private.Growth.t String.Map.t)];
   [%expect
-    {| ("4 times the arms" (within_6_times_the_time true) (under_4s true)) |}]
+    {|
+    ("4 times the arms"
+     (growth
+      ((allocated_words Linear) (mode.graph Linear) (typecheck.types Linear)
+       (types.traversal Linear) (types.unify Linear))))
+    |}]
 ;;
 
 let%expect_test "a quote's use of a toplevel being checked is by variance" =

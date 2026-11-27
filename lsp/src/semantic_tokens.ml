@@ -139,6 +139,9 @@ module Classified = struct
     }
 end
 
+(* Each name classified. *)
+let work = Work.create "lsp.tokens"
+
 let compute text ~file ~occurrences ~is_function =
   let { Lexer.Prefix.tokens; comments; error = _ } =
     Lexer.tokenize_prefix ~file (Text.contents text)
@@ -207,6 +210,7 @@ let compute text ~file ~occurrences ~is_function =
     ~f:(fun ({ loc; kind; declaration; _ } : Syntax_names.Occurrence.t) ->
       let names = name_tokens loc in
       Array.iteri names ~f:(fun i { token = _; loc = name_loc } ->
+        Work.incr work;
         let start = name_loc.start.#offset in
         let token_type : Token_type.t =
           if i < Array.length names - 1

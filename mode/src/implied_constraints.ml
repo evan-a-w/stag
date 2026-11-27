@@ -56,6 +56,8 @@ let acyclic succ =
   acyclic
 ;;
 
+let work = Work.create "mode.graph"
+
 (* A search from each node, recording for each node and morphism it reaches
    through which of the node's constraints it does: [many] when through several.
    [src <= m(dst)] is implied by the others when they reach [dst], at a morphism
@@ -73,6 +75,7 @@ let create ~succ =
   let touched = Stack.create () in
   let todo = Queue.create () in
   let reach w morphism first =
+    Work.incr work;
     match
       List.find reached.(w) ~f:(fun (morphism', _) ->
         Morphism.code morphism' = Morphism.code morphism)
