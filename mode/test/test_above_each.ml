@@ -53,25 +53,26 @@ let%expect_test "a chain of equalities takes linear time" =
       ok (Var.submode vars.(i) vars.(i + 1) (reason "up"));
       ok (Var.submode vars.(i + 1) vars.(i) (reason "down"))
     done;
-    let start = Time_ns.now () in
-    let { Var.Node.Above_each.above; _ } =
-      Var.Node.Above_each.create [ locality vars.(0) ] ~keep:(fun _ -> true)
+    let { Var.Node.Above_each.above; _ }, counts =
+      Work.Private.measure (fun () ->
+        Var.Node.Above_each.create [ locality vars.(0) ] ~keep:(fun _ -> true))
     in
-    Time_ns.diff (Time_ns.now ()) start, List.length (Bitset.to_list above.(0))
+    List.length (Bitset.to_list above.(0)), counts
   in
-  let time k =
-    List.init 3 ~f:(fun (_ : int) -> chain k)
-    |> List.min_elt ~compare:(fun (a, _) (b, _) -> Time_ns.Span.compare a b)
-    |> Option.value_exn
+  let small_above, _ = chain 250 in
+  let large_above, _ = chain 1000 in
+  let growth =
+    Work.Private.growth ~small:250 ~large:1000 (fun k -> snd (chain k))
   in
-  let small, small_above = time 250 in
-  let large, large_above = time 1000 in
   print_s
     [%message
       ""
         (small_above : int)
         (large_above : int)
-        ~within_16_times:
-          (Time_ns.Span.( < ) large (Time_ns.Span.scale small 16.) : bool)];
-  [%expect {| ((small_above 250) (large_above 1000) (within_16_times true)) |}]
+        (growth : Work.Private.Growth.t String.Map.t)];
+  [%expect
+    {|
+    ((small_above 250) (large_above 1000)
+     (growth ((allocated_words Linear) (mode.graph Linear))))
+    |}]
 ;;

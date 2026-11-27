@@ -18,3 +18,4 @@ module Lift = Stag_syntax.Lift
 module Decl_paths = Stag_syntax.Decl_paths
 module Traverse = Stag_syntax.Traverse
 module Antiquote = Stag_syntax.Antiquote
+module Work = Stag_common.Work

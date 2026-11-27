@@ -311,6 +311,9 @@ and expr t : Expr.t =
          ; (fun t ->
              Let
                (binder t, list t ~min:0 ~max:2 binding, annot t, expr t, expr t))
+         ; (fun t ->
+             Let_nonrec
+               (binder t, list t ~min:0 ~max:2 binding, annot t, expr t, expr t))
          ; (fun t -> Seq (expr t, expr t))
          ; (fun t -> Let_mut (name t, annot t, expr t, expr t))
          ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
@@ -405,11 +408,12 @@ and type_decl t : Type_decl.t =
               loc (uident t), list t ~min:0 ~max:3 maybe_modality))
        | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, maybe_modality t))
        | _ -> Splice (Located.create (expr t)))
+  ; nonrec_ = bool t
   }
 
 and toplevel t : Toplevel.t =
   loc
-    (match int t 13 with
+    (match int t 14 with
      | 0 -> Toplevel.Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
      | 1 | 2 -> Type (type_decl t)
      | 3 -> Expect_test { name = loc (string t); body = expr t }
@@ -435,12 +439,13 @@ and toplevel t : Toplevel.t =
      | 9 ->
        External { name = name t; ty = type_expr t; symbol = loc (string t) }
      | 10 -> Let_mut (name t, annot t, expr t)
-     | 11 when t.size > 0 ->
+     | 11 -> Let_nonrec (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
+     | 12 when t.size > 0 ->
        t.size <- t.size - 1;
        (match toplevel t with
         | { txt = Attribute _ as floating; _ } -> floating
         | toplevel -> Attributed (toplevel, attribute t))
-     | 12 -> Attribute (attribute t)
+     | 13 -> Attribute (attribute t)
      | _ -> Let (name t, [], Annot.none, expr t))
 
 and expansion t =

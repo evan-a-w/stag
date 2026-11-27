@@ -22,7 +22,7 @@ let of_toplevels text toplevels =
   let rec of_toplevel (toplevel : Syntax.Toplevel.t) =
     let loc = toplevel.loc in
     match toplevel.txt with
-    | Let (name, bindings, _, body) ->
+    | Let (name, bindings, _, body) | Let_nonrec (name, bindings, _, body) ->
       let is_function =
         (not (List.is_empty bindings))
         ||

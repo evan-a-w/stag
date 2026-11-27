@@ -182,13 +182,18 @@ let builtins =
   List.map
     [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
     ~f:(fun name ->
-      { Type_decl.name = Located.create name; params = []; kind = Abstract })
+      { Type_decl.name = Located.create name
+      ; params = []
+      ; kind = Abstract
+      ; nonrec_ = false
+      })
   @ [ { Type_decl.name = Located.create "ptr"
       ; params =
           [ Located.create (Type_decl.Param.Ty "a")
           ; Located.create (Type_decl.Param.Mode "p")
           ]
       ; kind = Abstract
+      ; nonrec_ = false
       }
     ]
 ;;
@@ -1249,7 +1254,10 @@ let declare
     ~data:
       { Decl.decl
       ; name
-      ; module_
+      ; module_ =
+          (if decl.nonrec_
+           then Module_scope.without module_ Type decl.name.txt
+           else module_)
       ; params
       ; wrap_error
       ; used_while_defined = false
@@ -1630,6 +1638,9 @@ let define t (decl : Decl.t) =
 
 let layouts t = Set_once.get_exn t.layouts
 
+(* Each part of a type the typechecker looks through. *)
+let work = Work.create "typecheck.types"
+
 (* Whether [root] is pointer-free, taking the layouts not known yet, which it
    collects, to be: [`Nominal] is a declared type of arguments known to be
    pointer-free or not. *)
@@ -1689,6 +1700,7 @@ let pointer_free' t ~check root =
         result)
   in
   let rec ty_ params (ty : Type.ty) =
+    Work.incr work;
     match ty with
     | TVar { id; state = Generic; _ } when Map.mem params id ->
       Map.find_exn params id

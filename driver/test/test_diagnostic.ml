@@ -409,11 +409,11 @@ let%expect_test "end to end: source to rendered errors" =
     File "a.stag", line 1, characters 4-7:
     1 | let rec f x = f x
             ^^^
-    Error: Lets are always recursive; remove `rec`
+    Error: Lets are recursive unless `nonrec`; remove `rec`
     File "a.stag", line 1, characters 12-15:
     1 | let g = let rec f x = f x in f
                     ^^^
-    Error: Lets are always recursive; remove `rec`
+    Error: Lets are recursive unless `nonrec`; remove `rec`
     File "a.stag", line 1, characters 9-11:
     1 | let x = f.{y}
                  ^^

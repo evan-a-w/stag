@@ -11,3 +11,4 @@ module Pipeline_config = Stag_build.Pipeline_config
 module Program = Stag_build.Program
 module Project = Stag_build.Project
 module Diagnostic = Stag_driver.Diagnostic
+module Work = Stag_common.Work

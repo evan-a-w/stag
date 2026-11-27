@@ -72,6 +72,8 @@ and t =
   { module_ : module_
   ; position : Position.t
   ; warnings : Warning.Settings.t
+  ; hidden : Member.t option
+    (* Not visible from here, but from the enclosing module: of [nonrec]. *)
   }
 
 and entry =
@@ -135,7 +137,10 @@ let join path = String.concat path ~sep:"."
 let sexp_of_t t = Sexp.Atom (join t.module_.path)
 let canonical_name t name = join (t.module_.path @ [ name ])
 let path t = t.module_.path
-let at_end module_ = { module_; position = End; warnings = module_.warnings }
+let at_end module_ =
+  { module_; position = End; warnings = module_.warnings; hidden = None }
+;;
+
 let enter t name = at_end (Hashtbl.find_exn t.module_.modules name)
 let warnings (t : t) = t.warnings
 
@@ -197,9 +202,11 @@ let rec members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
   in
   match toplevel.txt with
   | Attributed (toplevel, _) -> members toplevel
-  | Let (name, _, _, _) | Let_mut (name, _, _) | External { name; _ } ->
-    [ member Value name ]
-  | Type { name; params = _; kind } ->
+  | Let (name, _, _, _)
+  | Let_nonrec (name, _, _, _)
+  | Let_mut (name, _, _)
+  | External { name; _ } -> [ member Value name ]
+  | Type { name; params = _; kind; nonrec_ = _ } ->
     member Type name
     ::
     (let rec kind_members : Type_decl.Kind.t -> _ = function
@@ -230,7 +237,7 @@ let rec unique_among ~path taken toplevels ~report =
     let toplevel, _ = Toplevel.unattributed written in
     let params_unique =
       match toplevel.txt with
-      | Type { name; params; kind = _ } ->
+      | Type { name; params; kind = _; nonrec_ = _ } ->
         let type_name = join (path @ [ name.txt ]) in
         List.fold_until
           params
@@ -243,6 +250,7 @@ let rec unique_among ~path taken toplevels ~report =
             else Continue (Set.add seen param))
           ~finish:(fun _ -> Some ())
       | Let _
+      | Let_nonrec _
       | Let_mut _
       | Exception _
       | External _
@@ -291,6 +299,7 @@ let rec unique_among ~path taken toplevels ~report =
            }))
     | ( _ :: _
       , ( Let _
+        | Let_nonrec _
         | Let_mut _
         | Exception _
         | External _
@@ -321,6 +330,7 @@ let rec unique_among ~path taken toplevels ~report =
                        ~report )
              }
            | Let _
+           | Let_nonrec _
            | Let_mut _
            | Type _
            | Exception _
@@ -375,6 +385,7 @@ let rec register module_ toplevels ~parent ~generated_by =
          { module_
          ; position = At (prefix @ [ Queue.length into ])
          ; warnings = Attribute.apply_warnings attributes warnings
+         ; hidden = None
          }
        in
        let splice (expr : Expr.t) ~expansion ~into =
@@ -395,6 +406,7 @@ let rec register module_ toplevels ~parent ~generated_by =
          Queue.enqueue module_.includes splice;
          warnings
        | Let _
+       | Let_nonrec _
        | Let_mut _
        | Type _
        | Exception _
@@ -436,6 +448,7 @@ let rec register module_ toplevels ~parent ~generated_by =
             Hashtbl.add_exn module_.definitions ~key:decl.name.txt ~data:splice;
             Queue.enqueue module_.includes splice
           | Let _
+          | Let_nonrec _
           | Let_mut _
           | Type _
           | Exception _
@@ -497,7 +510,7 @@ let root t =
       when not
              (Option.exists outside ~f:(fun outside ->
                 phys_equal outside.module_ enclosing.module_)) -> go enclosing
-    | Some _ | None -> { t with position = End }
+    | Some _ | None -> { t with position = End; hidden = None }
   in
   go t
 ;;
@@ -696,11 +709,14 @@ end
 (* The scope [member] is found in from [t] outwards. *)
 let find_scope t member =
   let rec search (t : t) ~blocked =
-    match%bind.Result lookup t member with
-    | Visible -> Ok { Found.scope = Some t; blocked }
-    | Hidden _ -> outward t ~blocked
-    | Absent { blocked = here } ->
-      outward t ~blocked:(Option.first_some blocked here)
+    if Option.exists t.hidden ~f:([%compare.equal: Member.t] member)
+    then outward t ~blocked
+    else (
+      match%bind.Result lookup t member with
+      | Visible -> Ok { Found.scope = Some t; blocked }
+      | Hidden _ -> outward t ~blocked
+      | Absent { blocked = here } ->
+        outward t ~blocked:(Option.first_some blocked here))
   and outward (t : t) ~blocked =
     match t.module_.enclosing with
     | Some t -> search t ~blocked
@@ -1112,6 +1128,7 @@ let iter_declarations t ~f =
          | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
          | Let _
+         | Let_nonrec _
          | Let_mut _
          | Type _
          | Exception _
@@ -1250,4 +1267,8 @@ let path_from_splice splice toplevels namespace ~modules ~locals path =
   |> function
   | Some path -> Some path
   | None -> resolves (Root (Path.of_string (Prelude_path.root_path name)))
+;;
+
+let without t namespace name =
+  { t with hidden = Some (Member_kind.Member namespace, name) }
 ;;

@@ -240,6 +240,8 @@ module Defs = struct
     { name : Name.t
     ; params : type_decl_param Located.t list
     ; kind : type_decl_kind
+    ; nonrec_ : bool [@sexp.bool]
+    (** [type nonrec t = ...]: [t] is not bound in its definition. *)
     }
 
   (** [: t @ m] of a binder or a variable, each part optional. *)
@@ -284,6 +286,8 @@ module Defs = struct
     | Var of Decl_path.t * annot
     | App of expr * expr
     | Let of Name.t * binding list * annot * expr * expr
+    | Let_nonrec of Name.t * binding list * annot * expr * expr
+    (** [let nonrec x = e in body]: [x] is not bound in [e]. *)
     | Seq of expr * expr (** [e1; e2] *)
     | Let_mut of Name.t * annot * expr * expr
     (** [let mut x = e in body]: not recursive. *)
@@ -341,6 +345,8 @@ module Defs = struct
 
   and toplevel_desc =
     | Let of Name.t * binding list * annot * expr
+    | Let_nonrec of Name.t * binding list * annot * expr
+    (** [let nonrec x = e]: [x] is not bound in [e]. *)
     | Let_mut of Name.t * annot * expr
     | Type of type_decl
     | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
@@ -448,6 +454,7 @@ module Type_decl = struct
     { name : Name.t
     ; params : Param.t Located.t list
     ; kind : Kind.t
+    ; nonrec_ : bool
     }
 
   let sexp_of_t = sexp_of_type_decl
@@ -526,6 +533,7 @@ module Expr = struct
     | Var of Decl_path.t * Annot.t
     | App of t * t
     | Let of Name.t * Binding.t list * Annot.t * t * t
+    | Let_nonrec of Name.t * Binding.t list * Annot.t * t * t
     | Seq of t * t
     | Let_mut of Name.t * Annot.t * t * t
     | Assign of Decl_path.t Located.t * t
@@ -591,6 +599,7 @@ module Toplevel = struct
 
   type desc = toplevel_desc =
     | Let of Name.t * Binding.t list * Annot.t * Expr.t
+    | Let_nonrec of Name.t * Binding.t list * Annot.t * Expr.t
     | Let_mut of Name.t * Annot.t * Expr.t
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list

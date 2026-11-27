@@ -615,59 +615,69 @@ let%expect_test "comments with lines indented by tabs are not moved" =
     |}]
 ;;
 
-let%expect_test "long files format quickly" =
-  let check source =
-    let start = Time_ns.now () in
-    let format source =
-      Formatter.format ~file:"t.stag" source |> Result.ok |> Option.value_exn
+let%expect_test "long files format in linear time" =
+  let check ~small ~large source =
+    let growth =
+      Work.Private.growth ~small ~large (fun n ->
+        let format source =
+          Formatter.format ~file:"t.stag" source
+          |> Result.ok
+          |> Option.value_exn
+        in
+        let (formatted, reformatted), counts =
+          Work.Private.measure (fun () ->
+            let formatted = format (source n) in
+            formatted, format formatted)
+        in
+        if n = large
+        then (
+          let lines = String.split_lines formatted in
+          print_s
+            [%message
+              ""
+                ~lines:(List.length lines : int)
+                ~idempotent:(String.equal formatted reformatted : bool)
+                ~last_lines:
+                  (List.drop lines (List.length lines - 3) : string list)]);
+        counts)
     in
-    let formatted = format source in
-    let reformatted = format formatted in
-    let elapsed = Time_ns.diff (Time_ns.now ()) start in
-    let lines = String.split_lines formatted in
-    print_s
-      [%message
-        ""
-          ~lines:(List.length lines : int)
-          ~idempotent:(String.equal formatted reformatted : bool)
-          ~last_lines:(List.drop lines (List.length lines - 3) : string list)];
-    if Time_ns.Span.(elapsed > of_sec 10.)
-    then print_s [%message "too slow" (elapsed : Time_ns.Span.t)]
+    print_s [%message (growth : Work.Private.Growth.t String.Map.t)]
   in
-  check
-    (String.concat
-       (List.init 5000 ~f:(fun i ->
-          sprintf
-            "let f%d x = match x with a, b -> a, b (* c%d *)\n\
-             let g%d = (((%d)))\n"
-            i
-            i
-            i
-            i)));
-  check
-    (String.concat
-       (List.init 5000 ~f:(fun i ->
-          sprintf "let f%d x = Int.add (((x))) %d\n" i i)));
+  check ~small:1250 ~large:5000 (fun n ->
+    String.concat
+      (List.init n ~f:(fun i ->
+         sprintf
+           "let f%d x = match x with a, b -> a, b (* c%d *)\n\
+            let g%d = (((%d)))\n"
+           i
+           i
+           i
+           i)));
+  check ~small:1250 ~large:5000 (fun n ->
+    String.concat
+      (List.init n ~f:(fun i -> sprintf "let f%d x = Int.add (((x))) %d\n" i i)));
   (* One toplevel, so aligned as a whole. *)
-  check
-    ("let x = {\n"
-     ^ String.concat
-         (List.init 10000 ~f:(fun i ->
-            sprintf "  `a%d = ((%d)); (* c%d *)\n" i i i))
-     ^ "}\n");
+  check ~small:2500 ~large:10000 (fun n ->
+    "let x = {\n"
+    ^ String.concat
+        (List.init n ~f:(fun i -> sprintf "  `a%d = ((%d)); (* c%d *)\n" i i i))
+    ^ "}\n");
   [%expect
     {|
     ((lines 10000) (idempotent true)
      (last_lines
       ("let g4998 = 4998" "let f4999 x = match x with a, b -> (a, b) (* c4999 *)"
        "let g4999 = 4999")))
+    (growth ((allocated_words Linear) (syntax.format Linear)))
     ((lines 5000) (idempotent true)
      (last_lines
       ("let f4997 x = Int.add x 4997" "let f4998 x = Int.add x 4998"
        "let f4999 x = Int.add x 4999")))
+    (growth ((allocated_words Linear) (syntax.format Linear)))
     ((lines 10002) (idempotent true)
      (last_lines
       ("  `a9998 = 9998; (* c9998 *)" "  `a9999 = 9999; (* c9999 *)" })))
+    (growth ((allocated_words Linear) (syntax.format Linear)))
     |}]
 ;;
 

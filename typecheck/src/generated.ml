@@ -13,8 +13,10 @@ let create splice (toplevel : Syntax.Toplevel.t) =
     | Attributed (toplevel, _) -> declaration toplevel
     | Attribute attribute -> sprintf "[@@@%s]" attribute.name.txt
     | Let (name, _, _, _) -> "let " ^ name.txt
+    | Let_nonrec (name, _, _, _) -> "let nonrec " ^ name.txt
     | Let_mut (name, _, _) -> "let mut " ^ name.txt
-    | Type decl -> "type " ^ decl.name.txt
+    | Type decl ->
+      (if decl.nonrec_ then "type nonrec " else "type ") ^ decl.name.txt
     | Exception (name, _) | Malformed_exception (name, _) ->
       "exception " ^ name.txt
     | External { name; _ } -> "external " ^ name.txt

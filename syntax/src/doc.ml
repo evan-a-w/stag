@@ -62,6 +62,9 @@ module Leaf = struct
     | If_break of string
 end
 
+(* Each command a layout looks at. *)
+let work = Work.create "syntax.format"
+
 let rec fold_map_leaves t ~init ~f =
   match t with
   | Empty
@@ -149,6 +152,7 @@ let spaced_after s ~spaced =
    the start of a line or after a space. *)
 let rec fits ?(ended = false) ~spaced width (commands : (int * Mode.t * t) list)
   =
+  Work.incr work;
   width >= 0
   &&
   match commands with
@@ -257,6 +261,7 @@ let rec is_blank = function
 
 let fits_all ~width ~col ~spaced ~indent t =
   let rec go col ~spaced (commands : (int * Mode.t * t) list) =
+    Work.incr work;
     if col > width
     then None
     else (
@@ -354,6 +359,7 @@ let render ?(width = 80) t =
     !line_empty || (n > 0 && Char.equal (Buffer.nth buf (n - 1)) ' ')
   in
   let rec go (commands : (int * Mode.t * t) list) =
+    Work.incr work;
     match commands with
     | [] -> ()
     | (indent, mode, t) :: rest ->

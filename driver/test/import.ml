@@ -35,3 +35,4 @@ module Env = Stag_typecheck.Env
 module Binding = Stag_typecheck.Binding
 module Mode = Stag_mode
 module Warning = Stag_syntax.Warning
+module Work = Stag_common.Work

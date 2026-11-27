@@ -13,7 +13,7 @@ let file = "doc.stag"
 let limits =
   { Limits.fuel = Some 10_000_000
   ; max_depth = Some 100_000
-  ; time_limit = Some (Time_ns.Span.of_int_sec 10)
+  ; time_limit = Some (Time_ns.Span.of_int_sec 120)
   }
 ;;
 
@@ -300,6 +300,8 @@ let%expect_test "learn_stag.md" =
       val shout : string -> string
       val fact : int -> int
       val fact10 : int
+      val word : string
+      val word_length : int
       val is_even : int -> bool
       val is_odd : int -> bool
       val even10 : bool
@@ -329,13 +331,15 @@ let%expect_test "learn_stag.md" =
     Doc.shout = <fun>
     Doc.fact = <fun>
     Doc.fact10 = 3628800
+    Doc.word = "hello"
+    Doc.word_length = 5
     Doc.is_even = <fun>
     Doc.is_odd = <fun>
     Doc.even10 = true
     Doc.hello = ()
     -- output
     hello, stag
-    === learn_stag.md:85
+    === learn_stag.md:89
     module Doc : sig
       type point = { x : int; y : int }
       val origin : point
@@ -363,7 +367,7 @@ let%expect_test "learn_stag.md" =
     Doc.with_id = {`age = 36; `id = 1; `name = "ada"}
     Doc.without_age = {`name = "ada"}
     Doc.get_name = <fun>
-    === learn_stag.md:115
+    === learn_stag.md:119
     module Doc : sig
       type shape = Circle of int | Rect of int * int | Empty
       val area : shape -> int

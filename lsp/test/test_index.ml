@@ -106,37 +106,44 @@ let y2 = N.y
 ;;
 
 let%expect_test "semantic tokens of a large typechecked file take linear time" =
-  let lines = 20_000 in
-  let source =
-    String.concat
-      (List.init lines ~f:(fun i -> sprintf "let v%d = Int.add %d 1\n" i i))
+  let tokens lines =
+    let source =
+      String.concat
+        (List.init lines ~f:(fun i -> sprintf "let v%d = Int.add %d 1\n" i i))
+    in
+    let measured = ref String.Map.empty in
+    Client.with_server
+      ~files:[ "a.stag", source ]
+      (fun client ->
+        Client.did_open client "a.stag";
+        Client.print_hover client "a.stag" ~line:0 ~character:12;
+        let tokens, counts =
+          Work.Private.measure (fun () ->
+            Client.request
+              client
+              "textDocument/semanticTokens/full"
+              (Client.text_document client "a.stag"))
+        in
+        (match tokens with
+         | Some json ->
+           let tokens = Lsp_types.SemanticTokens.t_of_yojson json in
+           printf "%d tokens\n" (Array.length tokens.data / 5)
+         | None -> ());
+        measured := counts);
+    !measured
   in
-  Client.with_server
-    ~files:[ "a.stag", source ]
-    (fun client ->
-      Client.did_open client "a.stag";
-      Client.print_hover client "a.stag" ~line:0 ~character:12;
-      let start = Time_ns.now () in
-      let tokens =
-        Client.request
-          client
-          "textDocument/semanticTokens/full"
-          (Client.text_document client "a.stag")
-      in
-      let elapsed = Time_ns.diff (Time_ns.now ()) start in
-      (match tokens with
-       | Some json ->
-         let tokens = Lsp_types.SemanticTokens.t_of_yojson json in
-         printf "%d tokens\n" (Array.length tokens.data / 5)
-       | None -> ());
-      print_s
-        [%sexp (Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 5) : bool)];
-      [%expect
-        {|
-        0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
-        140000 tokens
-        true
-        |}])
+  let growth = Work.Private.growth ~small:2500 ~large:10_000 tokens in
+  print_s [%message (growth : Work.Private.Growth.t String.Map.t)];
+  [%expect
+    {|
+    0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+    17500 tokens
+    0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+    17500 tokens
+    0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
+    70000 tokens
+    (growth ((allocated_words Linear) (lsp.text Linear) (lsp.tokens Linear)))
+    |}]
 ;;
 
 let%expect_test "inline expansions" =
@@ -464,5 +471,34 @@ let f x = match x with A n | B n -> n
         1:31 -> a.stag 1:31-1:32
         1:36 1:36-1:37 ```stag n : int ```
         1:36 -> a.stag 1:25-1:26
+        |}])
+;;
+
+let%expect_test "a nonrec let refers to the outer binding" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|let s = "abc"
+let f (u : unit) = let nonrec s = String.length s in s
+module N = struct let nonrec s = String.append s "!" end
+type t = int
+module M = struct type nonrec t = list[t] end
+|}
+        )
+      ]
+    (fun client ->
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 1, 48; 1, 53; 2, 47; 4, 39 ];
+      [%expect
+        {|
+        1:48 1:48-1:49 ```stag A.s : string ```
+        1:48 -> a.stag 0:4-0:5
+        1:53 1:53-1:54 ```stag s : int ```
+        1:53 -> a.stag 1:30-1:31
+        2:47 2:47-2:48 ```stag A.s : string ```
+        2:47 -> a.stag 0:4-0:5
+        4:39 4:39-4:40 ```stag type A.t ```
+        4:39 -> a.stag 3:5-3:6
         |}])
 ;;

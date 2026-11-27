@@ -15,7 +15,7 @@ let constructor_refs =
        | Module (name, items) ->
          List.iter items ~f:(add ~path:(path @ [ name.txt ]))
        | Attributed (item, _) -> add ~path item
-       | Type { name; kind = Variant constructors; params = _ } ->
+       | Type { name; kind = Variant constructors; params = _; nonrec_ = _ } ->
          let type_name = qualify path name.txt in
          List.iteri constructors ~f:(fun index (constructor, _) ->
            let name = qualify path constructor.txt in
@@ -28,6 +28,7 @@ let constructor_refs =
        | External _
        | Malformed_exception _
        | Let _
+       | Let_nonrec _
        | Let_mut _
        | Expect_test _
        | Bench _
@@ -584,6 +585,7 @@ module Of_value = struct
     { name = field "name" (name Lower ~loc) value
     ; params = field "params" (list param) value
     ; kind = field "kind" (type_decl_kind ~loc) value
+    ; nonrec_ = false
     }
 
   and type_decl_kind value ~loc : Type_decl.Kind.t =
@@ -675,6 +677,13 @@ module Of_value = struct
          | "Seq", 2 -> Seq (arg 0 (expr ~loc), arg 1 (expr ~loc))
          | "Let", 5 ->
            Let
+             ( arg 0 (name Binder ~loc)
+             , arg 1 (list (binding ~loc))
+             , arg 2 (annot ~loc)
+             , arg 3 (expr ~loc)
+             , arg 4 (expr ~loc) )
+         | "Let_nonrec", 5 ->
+           Let_nonrec
              ( arg 0 (name Binder ~loc)
              , arg 1 (list (binding ~loc))
              , arg 2 (annot ~loc)
@@ -774,10 +783,18 @@ module Of_value = struct
                , arg 1 (list (binding ~loc))
                , arg 2 (annot ~loc)
                , arg 3 (expr ~loc) )
+           | "Let_nonrec", 4 ->
+             Let_nonrec
+               ( arg 0 (name Binder ~loc)
+               , arg 1 (list (binding ~loc))
+               , arg 2 (annot ~loc)
+               , arg 3 (expr ~loc) )
            | "Let_mut", 3 ->
              Let_mut
                (arg 0 (name Binder ~loc), arg 1 (annot ~loc), arg 2 (expr ~loc))
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
+           | "Type_nonrec", 1 ->
+             Type { (arg 0 (type_decl ~loc)) with nonrec_ = true }
            | "Exception", 2 ->
              Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))
            | "External", 1 ->
