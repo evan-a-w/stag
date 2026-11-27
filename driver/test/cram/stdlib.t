@@ -87,6 +87,23 @@ The preludes of two checkouts are not checked together.
 
 Errors are located in their files.
 
+  $ cat >> core/bool.stag <<'X'
+  > let warn_unused b = match b with true -> 1 | false -> 2 | _ -> 3
+  > X
+  $ stag check core/bool.stag >/dev/null
+  File "core/bool.stag", line 28, characters 58-59:
+  28 | let warn_unused b = match b with true -> 1 | false -> 2 | _ -> 3
+                                                                 ^
+  Warning: This case is unused [unused-arm]: the cases before it match every value it does
+  $ stag check -w -unused-arm core/bool.stag >/dev/null
+  $ stag check -w @unused-arm core/bool.stag >/dev/null
+  File "core/bool.stag", line 28, characters 58-59:
+  28 | let warn_unused b = match b with true -> 1 | false -> 2 | _ -> 3
+                                                                 ^
+  Error: This case is unused [unused-arm]: the cases before it match every value it does
+  [1]
+  $ cp "$ROOT"/../../../core/bool.stag core/
+
   $ sed -i.bak 's/Int.succ acc/Int.succc acc/' core/list.stag && rm core/list.stag.bak
   $ stag check core/option.stag
   File "core/list.stag", line 16, characters 32-41:

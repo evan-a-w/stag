@@ -228,6 +228,10 @@ let%expect_test "literals" =
   check [ int 0; int 1; int 3 ];
   check [ int 1; int 0; any; int 2 ];
   check [ char 'a'; char 'b' ];
+  check (List.init 256 ~f:(fun i -> char (Char.of_int_exn i)));
+  check (List.init 256 ~f:(fun i -> char (Char.of_int_exn i)) @ [ any ]);
+  check (List.init 256 ~f:(fun i -> char (Char.of_int_exn i)) @ [ char 'a' ]);
+  check (List.init 255 ~f:(fun i -> char (Char.of_int_exn i)));
   check [ string ""; string "a"; string "aa"; string "b" ];
   check [ bool true ];
   check [ bool false ];
@@ -241,6 +245,10 @@ let%expect_test "literals" =
     ((missing (2)) (unused ()))
     ((missing ()) (unused (3)))
     ((missing ('c')) (unused ()))
+    ((missing ()) (unused ()))
+    ((missing ()) (unused (256)))
+    ((missing ()) (unused (256)))
+    ((missing ("'\\255'")) (unused ()))
     ((missing ("\"aaa\"")) (unused ()))
     ((missing (false)) (unused ()))
     ((missing (true)) (unused ()))
@@ -344,7 +352,7 @@ let%expect_test "polymorphic variants" =
       ~presence:[ "B", PVar (Type.Var.create (fresh_id ()) (Unbound 0)) ]
   in
   check [ tag unknown "A" None ];
-  let shadowed =
+  let shadowed_absent_present =
     Type.TVariant
       { id = fresh_id ()
       ; row =
@@ -356,7 +364,35 @@ let%expect_test "polymorphic variants" =
             , RExtend ("A", Present, Absent, Type.unit, REmpty) )
       }
   in
-  check [ tag shadowed "A" None ];
+  check [ tag shadowed_absent_present "A" None ];
+  let shadowed_present_present =
+    Type.TVariant
+      { id = fresh_id ()
+      ; row =
+          RExtend
+            ( "A"
+            , Present
+            , Absent
+            , Type.int
+            , RExtend ("A", Present, Absent, Type.bool, REmpty) )
+      }
+  in
+  check [ tag shadowed_present_present "A" (Some any) ];
+  check [ tag shadowed_present_present "A" (Some any); any ];
+  let shadowed_present_absent =
+    Type.TVariant
+      { id = fresh_id ()
+      ; row =
+          RExtend
+            ( "A"
+            , Present
+            , Absent
+            , Type.int
+            , RExtend ("A", Absent, Absent, Type.bool, REmpty) )
+      }
+  in
+  check [ tag shadowed_present_absent "A" (Some any) ];
+  check [ tag shadowed_present_absent "A" (Some any); any ];
   let nested = variant [ "A"; "B" ] ~args:[ "A", TCon ("de", []) ] in
   check [ some (tag nested "A" (Some d)); some (tag nested "B" None); none ];
   check [ some (tag open_ "A" None); none ];
@@ -371,7 +407,11 @@ let%expect_test "polymorphic variants" =
     ((missing ()) (unused ()))
     ((missing ()) (unused ()))
     ((missing (`B)) (unused ()))
+    ((missing (_)) (unused ()))
+    ((missing (_)) (unused ()))
     ((missing ()) (unused ()))
+    ((missing ()) (unused ()))
+    ((missing ()) (unused (1)))
     ((missing ("Some (`A E)")) (unused ()))
     ((missing ("Some `B")) (unused ()))
     |}]

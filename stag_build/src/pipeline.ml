@@ -96,8 +96,8 @@ let check
       sources )
 ;;
 
-let check_prelude ?record_references ?output ~limits prelude =
-  Driver.check_prelude ?record_references ~limits ?output prelude
+let check_prelude ?record_references ?warnings ?output ~limits prelude =
+  Driver.check_prelude ?record_references ?warnings ~limits ?output prelude
   |> Checked.of_result
        ~groups:
          (Some

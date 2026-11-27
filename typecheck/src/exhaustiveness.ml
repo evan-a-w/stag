@@ -35,19 +35,20 @@ module Variant_row = struct
   let of_ty ty =
     match Type.canonical_ty ty with
     | TVariant { row; _ } ->
-      let rec loop row ~seen ~tags =
+      let rec loop row ~seen ~tags ~open_ =
         match Type.canonical_row row with
-        | Type.REmpty -> { tags = List.rev tags; open_ = false }
+        | Type.REmpty -> { tags = List.rev tags; open_ }
         | RVar _ -> { tags = List.rev tags; open_ = true }
         | RExtend (tag, presence, _, ty, rest) ->
           let shadowed = Set.mem seen tag in
           let seen = Set.add seen tag in
           (match shadowed, Type.canonical_presence presence with
-           | true, _ | false, Absent -> loop rest ~seen ~tags
+           | _, Absent -> loop rest ~seen ~tags ~open_
+           | true, (Present | PVar _) -> loop rest ~seen ~tags ~open_:true
            | false, (Present | PVar _) ->
-             loop rest ~seen ~tags:((tag, ty) :: tags))
+             loop rest ~seen ~tags:((tag, ty) :: tags) ~open_)
       in
-      loop row ~seen:String.Set.empty ~tags:[]
+      loop row ~seen:String.Set.empty ~tags:[] ~open_:false
     | _ -> { tags = []; open_ = true }
   ;;
 
@@ -263,12 +264,11 @@ module Signature = struct
         (first
            (Sequence.map (Sequence.range 0 Int.max_value) ~f:Syntax.Lit.int))
     | Char _ ->
-      Some
-        (first
-           (Sequence.append
-              (Sequence.range (Char.to_int 'a') (Char.to_int 'z' + 1))
-              (Sequence.range 0 256)
-            |> Sequence.map ~f:(fun c -> Syntax.Lit.Char (Char.of_int_exn c))))
+      Sequence.append
+        (Sequence.range (Char.to_int 'a') (Char.to_int 'z' + 1))
+        (Sequence.range 0 256)
+      |> Sequence.map ~f:(fun c -> Syntax.Lit.Char (Char.of_int_exn c))
+      |> Sequence.find ~f:absent
     | String _ ->
       Some
         (first

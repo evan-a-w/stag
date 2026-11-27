@@ -241,12 +241,20 @@ let check_files
 let check_prelude
   ?interpreter
   ?record_references
+  ?warnings
   ?(limits = Limits.unlimited)
   ?output
   prelude
   =
   let typecheck, interpreter =
-    create_typecheck ?interpreter ?record_references ~limits ~output ~prelude ()
+    create_typecheck
+      ?interpreter
+      ?record_references
+      ?warnings
+      ~limits
+      ~output
+      ~prelude
+      ()
   in
   let%map.Result checked = Typecheck.check_prelude typecheck in
   { checked; interpreter; eval_order = toplevels checked.program.items }

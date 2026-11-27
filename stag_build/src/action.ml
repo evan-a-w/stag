@@ -126,6 +126,15 @@ let checker ?(stale_are_errors = false) ?load_prelude ~limits project =
             (* The prelude's, which [load_prelude] reported. *)
             None
           | Ok ((_ : Pipeline_config.Loaded_prelude.t), checked) ->
+            let files = files target in
+            let warnings =
+              List.filter
+                (checked : Pipeline.Checked.t).warnings
+                ~f:(fun (diagnostic : Diagnostic.t) ->
+                  Loc.is_none diagnostic.loc
+                  || Set.mem files (Loc.file_name diagnostic.loc))
+            in
+            if not (List.is_empty warnings) then report project warnings;
             (match Pipeline.Checked.to_result checked with
              | Ok driver ->
                warn_unrun_tests project target driver;

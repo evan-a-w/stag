@@ -731,13 +731,19 @@ and expr_type
       ~level:scope.level
       ~f:(fun () -> expr_type t scope ~at ~expr:body)
   | Attributed (inner, attribute) ->
+    let rec peel expr acc =
+      match Source.Expr.view expr with
+      | Attributed (inner, attr) -> peel inner (attr :: acc)
+      | _ -> expr, acc
+    in
+    let inner, attributes = peel inner [ attribute ] in
     expr_type
       ?expected
       ~hint
       ~applied
       t
       { scope with
-        warnings = Syntax.Attribute.apply_warnings [ attribute ] scope.warnings
+        warnings = Syntax.Attribute.apply_warnings attributes scope.warnings
       }
       ~at
       ~expr:inner
@@ -2100,7 +2106,16 @@ and match_type
          patterns_failed := true;
          Scope.report scope error)));
   (match expr with
-   | Syntax _ when not (!patterns_failed || Type.is_error scrutinee.ty) ->
+   | Syntax _
+     when not
+            (!patterns_failed
+             || Type.contains_error scrutinee.ty
+             || List.exists cases ~f:(fun ((pattern : Typed.Pattern.t), _) ->
+               Type.contains_error pattern.ty)
+             || List.exists
+                  exception_cases
+                  ~f:(fun ((pattern : Typed.Pattern.t), _) ->
+                    Type.contains_error pattern.ty)) ->
      report_coverage
        scope
        ~loc

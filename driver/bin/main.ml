@@ -111,7 +111,9 @@ let check_with_prelude_sources ~limits ~warnings ~modes ~sources ~program =
       report [] diagnostic;
       exit 1
   in
-  match Pipeline.Checked.to_result (Pipeline.check_prelude ~limits prelude) with
+  let checked = Pipeline.check_prelude ~warnings ~limits prelude in
+  report_all [] checked.warnings;
+  match Pipeline.Checked.to_result checked with
   | Error diagnostics ->
     report_all [] diagnostics;
     exit 1

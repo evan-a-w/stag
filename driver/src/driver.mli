@@ -73,6 +73,7 @@ val check_modules
 val check_prelude
   :  ?interpreter:(module Interpreter_intf.S)
   -> ?record_references:bool
+  -> ?warnings:Warning.Settings.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> Syntax.Toplevel.t list

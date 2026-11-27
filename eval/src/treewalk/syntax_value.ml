@@ -764,9 +764,15 @@ module Of_value = struct
             value
       }
     in
-    match Attribute.validate attribute ~position with
-    | Ok () -> attribute
-    | Error (_, message) -> unexpected ~expected:message value
+    match position, attribute.name.txt with
+    | Attribute.Position.Expr, "nontail" ->
+      unexpected
+        ~expected:"an attribute other than `nontail` (use Stag.Expr.Nontail)"
+        value
+    | _ ->
+      (match Attribute.validate attribute ~position with
+       | Ok () -> attribute
+       | Error (_, message) -> unexpected ~expected:message value)
 
   and toplevel value ~loc : Toplevel.t =
     Located.create

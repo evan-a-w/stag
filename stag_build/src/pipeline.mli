@@ -55,6 +55,7 @@ val check
     [Prelude_path.root] of its toplevels. *)
 val check_prelude
   :  ?record_references:bool
+  -> ?warnings:Warning.Settings.t
   -> ?output:(string -> unit)
   -> limits:Limits.t
   -> Syntax.Toplevel.t list

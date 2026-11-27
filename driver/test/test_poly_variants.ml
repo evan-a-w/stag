@@ -275,11 +275,15 @@ let unknown c (v : [..'r]) =
 let absent c (v : [..'d]) =
   .< .< let z = 1 in .~(.~(c : <<'a>{..'c}>{..'d})) >. >.;
   v
+let closed_optional (v : [..'r]) (c : <int>{..'r}) =
+  let _ : <int>{a : int} = .< let y = 1 in .~c >. in
+  match v with `a n -> n
 |};
   [%expect
     {|
     val unknown : <int>{y?'a : immut int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b]
     val absent : <<'a>{z?'b : immut int; ..'c}>{-z; ..'d} -> [-`z; ..'d] -> [-`z; ..'d]
+    val closed_optional : [`a of int] -> <int>{a : immut int} -> int
     |}]
 ;;
 

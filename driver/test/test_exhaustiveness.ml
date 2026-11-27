@@ -279,3 +279,58 @@ let ok = .< fun v -> match v with A -> 0 | B -> 1 >.
     t.stag:4:23-42: Error: This match is not exhaustive [non-exhaustive]: it does not cover `B`
     |}]
 ;;
+
+let%expect_test "shadowed polymorphic variant tags" =
+  check
+    {|
+type t[{..'r}] = [`A of int; ..'r]
+let residual (v : t[{`A : bool}]) =
+  match v with
+  | `A n -> n
+  | other -> (match other with `A b -> match b with true -> 1 | false -> 2)
+|};
+  [%expect {| ok |}];
+  check
+    {|
+type t[{..'r}] = [`A of int; ..'r]
+let f (v : t[{`A : bool}]) = match (v, 0) with (`A n, _) -> n
+|};
+  [%expect
+    {| t.stag:3:29-61: Error: This match is not exhaustive [non-exhaustive]: it does not cover `_, _` |}]
+;;
+
+let%expect_test "stacked expression warning attributes" =
+  check
+    {|
+type t = A | B
+let err v = (match v with A -> 0 | B -> 1 | A -> 2) [@warning "-all"] [@warning "@unused-arm"]
+let silent v = (match v with A -> 0 | B -> 1 | A -> 2) [@warning "@unused-arm"] [@warning "-all"]
+|};
+  [%expect
+    {| t.stag:3:44-45: Error: This case is unused [unused-arm]: the cases before it match every value it does |}]
+;;
+
+let%expect_test "closed-tail variant with optional tag" =
+  check
+    {|
+let closed_pvar (v : [..'r]) (c : <int>{..'r}) =
+  let _ : <int>{a : int} = .< let y = 1 in .~c >. in
+  match v with `a n -> n
+|};
+  [%expect {| ok |}]
+;;
+
+let%expect_test "nested error type in scrutinee suppresses coverage" =
+  check
+    {|
+let f _ = match (unbound_xyz, true) with ( *1, true) -> 0 | (1, true) -> 1
+|};
+  [%expect {| t.stag:2:17-28: Error: Unbound value unbound_xyz |}];
+  check
+    {|
+type t = [`Nil | `Cons of int * ptr[t]]
+let f (v : t) = match v with `Nil -> 0
+|};
+  [%expect
+    {| t.stag:3:16-38: Error: This match is not exhaustive [non-exhaustive]: it does not cover ``Cons _` |}]
+;;

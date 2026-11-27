@@ -1884,3 +1884,34 @@ end >.
     let h (g : int @ local _ -> int @ global _) = g
     |}]
 ;;
+
+let%expect_test "nontail is rejected in Stag.Expr.Attributed" =
+  let at txt = Located.create ~loc:Loc.none txt in
+  let app =
+    at
+      (Syntax.Expr.App
+         ( at (Syntax.Expr.Var (Path (Syntax.Path.name "f"), Syntax.Annot.none))
+         , at (Syntax.Expr.Lit (Int 1)) ))
+  in
+  let check_attr name payload =
+    let expr =
+      at
+        (Syntax.Expr.Attributed
+           (app, { name = at name; payload = Option.map payload ~f:at }))
+    in
+    match
+      Syntax_value.Expr.of_value (Syntax_value.Expr.to_value expr) ~loc:Loc.none
+    with
+    | Ok expr -> print_endline (Printer.expr expr)
+    | Error error -> print_error error
+  in
+  check_attr "nontail" None;
+  check_attr "nontail" (Some "x");
+  check_attr "warning" (Some "-unused-arm");
+  [%expect
+    {|
+    Malformed syntax: expected an attribute other than `nontail` (use Stag.Expr.Nontail), got {`name = "nontail"; `payload = None}, within Stag.Expr.Attributed argument 1
+    Malformed syntax: expected an attribute other than `nontail` (use Stag.Expr.Nontail), got {`name = "nontail"; `payload = Some "x"}, within Stag.Expr.Attributed argument 1
+    f 1 [@warning "-unused-arm"]
+    |}]
+;;

@@ -396,6 +396,7 @@ unknown attribute, or a `warning` without a valid spec, is a syntax error.
 `stag check`, `run`, `test` and `bench` take `-w SPEC` (any number of times),
 which sets the program's defaults that attributes change; the language server
 shows warnings as warnings. A program's warnings don't include the prelude's.
+
 ## Exceptions
 
 ```ocaml

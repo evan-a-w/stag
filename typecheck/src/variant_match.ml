@@ -68,8 +68,8 @@ let is_closed_variant scrutinee =
         let shadowed = Set.mem seen tag in
         let seen = Set.add seen tag in
         (match shadowed, Type.canonical_presence presence with
-         | true, (Present | PVar _) -> false
-         | true, Absent | false, (Present | Absent | PVar _) -> loop seen rest)
+         | _, PVar _ | true, Present -> false
+         | _, Absent | false, Present -> loop seen rest)
     in
     loop String.Set.empty row
   | _ -> false
