@@ -245,6 +245,8 @@ let conv (ctx : Context.t) dir ty =
       | Stag.Type_expr.Arg.Ty ty -> conv ctx arg_dir ty
       | Stag.Type_expr.Arg.Row _ ->
         raise (failure ctx.generator "row arguments are not supported")
+      | Stag.Type_expr.Arg.Mode _ ->
+        raise (failure ctx.generator "mode arguments are not supported")
     in
     apply (named ctx dir r) (List.map arg args)
   | Stag.Type_expr.Con (Stag.Path.Name path, _) ->
@@ -257,6 +259,13 @@ let conv (ctx : Context.t) dir ty =
     raise (failure ctx.generator "code has no sexp conversion")
   | Stag.Type_expr.Record _ ->
     raise (failure ctx.generator "polymorphic records are not supported")
+  | Stag.Type_expr.Mut _
+  | Stag.Type_expr.Immut _
+  | Stag.Type_expr.Splice _
+  | Stag.Type_expr.Moded _
+  | Stag.Type_expr.Constrained _
+  | Stag.Type_expr.Modality _ ->
+    raise (failure ctx.generator "unsupported type")
 
 (* The conversion of [ty] matched in place, as a function. *)
 let conv_in_place ctx dir ty =
@@ -447,6 +456,7 @@ let record_of_sexp (ctx : Context.t) fields v =
       (Stag.Pattern.list (List.map pvar binders),
        Stag.Expr.Record
          (List.map2_exn field fields (of_sexps ctx tys binders)));
+      (Stag.Pattern.Any, erase .< raise (Failure "Sexp.Deriving.record_fields") >.);
     ]
 
 (* The type of [dir]'s converter of [ty]. *)
@@ -460,6 +470,7 @@ let conv_type dir ty =
     | Stag.Type_expr.Con (result, [_; error]) ->
       Stag.Type_expr.Arrow (Ptr.make (
         (sexp, Stag.Type_expr.Con (result, [Stag.Type_expr.Arg.Ty ty; error]))))
+    | _ -> raise (Failure "Sexp_derive.conv_type: result is not a constructor")
 
 (* Whether [ty] has a polymorphic variant, whose row its conversion leaves
    open. *)
@@ -467,7 +478,7 @@ let has_variant ty =
   let arg a =
     match a with
     | Stag.Type_expr.Arg.Ty ty -> has_variant ty
-    | Stag.Type_expr.Arg.Row _ -> false
+    | Stag.Type_expr.Arg.Row _ | Stag.Type_expr.Arg.Mode _ -> false
   in
   match ty with
   | Stag.Type_expr.Variant _ -> true
@@ -514,6 +525,8 @@ let params (decl : Stag.Type.Decl.t) =
     | Stag.Type_decl.Param.Ty a -> param_conv a
     | Stag.Type_decl.Param.Row _ ->
       raise (derive_failure "row parameters are not supported")
+    | Stag.Type_decl.Param.Mode _ ->
+      raise (derive_failure "mode parameters are not supported")
   in
   List.map param decl.params
 

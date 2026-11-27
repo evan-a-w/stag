@@ -48,6 +48,8 @@ let indirect_constructors =
     ; "Expr.Nontail", 1
     ; "Expr.Annotated", 2
     ; "Expr.Forget", 2
+    ; "Expr.Attributed", 2
+    ; "Toplevel.Attributed", 2
     ]
 ;;
 
@@ -86,6 +88,13 @@ module Make (B : Builder) = struct
 
   let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
     decl_path_txt kind txt
+  ;;
+
+  let attribute ({ name = attribute_name; payload } : Attribute.t) =
+    B.record
+      [ "name", name attribute_name
+      ; "payload", option (fun (p : string Located.t) -> B.string p.txt) payload
+      ]
   ;;
 
   let lit : Lit.t -> B.t = function
@@ -309,6 +318,7 @@ module Make (B : Builder) = struct
       | Exclave e -> con "Exclave" [ expr e ]
       | Region e -> con "Region" [ expr e ]
       | Nontail e -> con "Nontail" [ expr e ]
+      | Attributed (e, a) -> con "Attributed" [ expr e; attribute a ]
       | Annotated (e, a) -> con "Annotated" [ expr e; annot a ]
       | Forget (names, e) -> con "Forget" [ list name names; expr e ]
       | Error -> raise_s [%message "Lift: an expression that did not parse"]
@@ -340,7 +350,11 @@ module Make (B : Builder) = struct
         (match A.antiquote Item e with
          | Some items -> con "Module" [ name module_name; items ]
          | None -> con "Module_splice" [ name module_name; expr e ])
-      | Include (e, _) -> con "Include" [ expr e ]
+      | Include (e, _) ->
+        (match A.antiquote Item e with
+         | Some _ ->
+           raise_s [%message "Lift: an antiquoted include with an attribute"]
+         | None -> con "Include" [ expr e ])
       | Expect_test { name = test_name; body } ->
         con
           "Expect_test"
@@ -358,6 +372,8 @@ module Make (B : Builder) = struct
               ; "body", expr body
               ]
           ]
+      | Attributed (item, a) -> con "Attributed" [ toplevel item; attribute a ]
+      | Attribute a -> con "Attribute" [ attribute a ]
 
     and program (toplevels : Toplevel.t list) =
       match toplevels with

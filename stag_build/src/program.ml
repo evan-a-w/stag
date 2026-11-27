@@ -69,6 +69,9 @@ let check ?load_prelude ?record_references ?output ~limits project target =
     ?load_prelude
     ?record_references
     ?output
-    { prelude = prelude_choice project target; limits }
+    { prelude = prelude_choice project target
+    ; limits
+    ; warnings = Warning.Settings.default
+    }
     (parse_recovering project target)
 ;;

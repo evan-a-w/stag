@@ -657,6 +657,38 @@ let iter_row f row =
   iterate f ~held:(fun var -> f.mode var) (stack_ Iter_start.Row row) [@nontail]
 ;;
 
+let contains_error ty =
+  let visited = stack_ { Visited.unremembered = 64; table = Null } in
+  let rec has_ty ty =
+    match ty with
+    | TVar ({ state = Link target; _ } as var) ->
+      Visited.enter_link visited ~id:var.id ~guarded:true && has_ty target
+    | TVar _ -> false
+    | TCon (name, args) ->
+      String.equal name error_name || List.exists args ~f:has_arg
+    | TArrow (ty1, ty2, _) -> has_ty ty1 || has_ty ty2
+    | TTuple tys -> List.exists tys ~f:has_ty
+    | TCode { inner; context } -> has_ty inner || has_row context
+    | TRecord { id; row } | TVariant { id; row } ->
+      Visited.enter_node visited id && has_row row
+  and has_arg = function
+    | ATy ty -> has_ty ty
+    | ARow row -> has_row row
+    | AMode _ -> false
+  and has_row row =
+    match row with
+    | REmpty -> false
+    | RExtend (_, presence, _, ty, rest) ->
+      (match canonical_presence presence with
+       | Absent -> has_row rest
+       | Present | PVar _ -> has_ty ty || has_row rest)
+    | RVar ({ state = Link target; _ } as var) ->
+      Visited.enter_link visited ~id:var.id ~guarded:true && has_row target
+    | RVar _ -> false
+  in
+  has_ty ty [@nontail]
+;;
+
 module Mapper = struct
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty

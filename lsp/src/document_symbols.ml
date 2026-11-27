@@ -98,6 +98,8 @@ let of_toplevels text toplevels =
     | Bench { name; param = _; body = _ } ->
       [ symbol ~detail:"bench" ~kind:Event ~loc ~name_loc:name.loc name.txt ]
     | Include (_, expansion) -> of_expansion expansion
+    | Attributed (toplevel, _) -> of_toplevel toplevel
+    | Attribute _ -> []
   and of_expansion expansion =
     Option.value_map expansion ~default:[] ~f:(fun expansion ->
       List.concat_map expansion.txt ~f:of_toplevel)

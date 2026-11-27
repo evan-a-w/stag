@@ -57,6 +57,24 @@ let is_empty_nominal (scope : Scope.t) scrutinee =
   | _ -> Ok false
 ;;
 
+let is_closed_variant scrutinee =
+  match Type.canonical_ty scrutinee with
+  | TVariant { row; _ } ->
+    let rec loop seen row =
+      match Type.canonical_row row with
+      | Type.REmpty -> true
+      | RVar _ -> false
+      | RExtend (tag, presence, _, _, rest) ->
+        let shadowed = Set.mem seen tag in
+        let seen = Set.add seen tag in
+        (match shadowed, Type.canonical_presence presence with
+         | _, PVar _ | true, Present -> false
+         | _, Absent | false, Present -> loop seen rest)
+    in
+    loop String.Set.empty row
+  | _ -> false
+;;
+
 let close t (scope : Scope.t) ~scrutinee ~loc (patterns : Typed.Pattern.t list) =
   let patterns =
     List.concat_map patterns ~f:alternatives
@@ -73,12 +91,16 @@ let close t (scope : Scope.t) ~scrutinee ~loc (patterns : Typed.Pattern.t list) 
       | Var _ | Any -> true
       | _ -> false)
   in
-  let%bind.Result open_ =
+  let%bind.Result needs_close =
     match patterns with
-    | [] -> is_empty_nominal scope scrutinee
-    | _ :: _ -> Ok (has_catch_all || List.is_empty tags)
+    | [] -> Result.map (is_empty_nominal scope scrutinee) ~f:not
+    | _ :: _ ->
+      Ok
+        ((not has_catch_all)
+         && (not (List.is_empty tags))
+         && not (is_closed_variant scrutinee))
   in
-  if open_
+  if not needs_close
   then Ok ()
   else (
     let closed =

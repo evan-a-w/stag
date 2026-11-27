@@ -14,6 +14,7 @@ let constructor_refs =
        match item.txt with
        | Module (name, items) ->
          List.iter items ~f:(add ~path:(path @ [ name.txt ]))
+       | Attributed (item, _) -> add ~path item
        | Type { name; kind = Variant constructors; params = _; nonrec_ = _ } ->
          let type_name = qualify path name.txt in
          List.iteri constructors ~f:(fun index (constructor, _) ->
@@ -32,7 +33,8 @@ let constructor_refs =
        | Expect_test _
        | Bench _
        | Module_splice _
-       | Include _ -> ()
+       | Include _
+       | Attribute _ -> ()
      in
      List.iter (force Prelude.toplevels) ~f:(add ~path:[]);
      refs)
@@ -746,7 +748,31 @@ module Of_value = struct
            Expr.annotated (arg 0 (expr ~loc)) (arg 1 (annot ~loc))
          | "Forget", 2 ->
            Forget (arg 0 (list (name Binder ~loc)), arg 1 (expr ~loc))
+         | "Attributed", 2 ->
+           Attributed
+             ( arg 0 (expr ~loc)
+             , arg 1 (attribute ~loc ~position:Attribute.Position.Expr) )
          | _ -> raise Bad_arguments))
+
+  and attribute value ~loc ~position : Attribute.t =
+    let attribute : Attribute.t =
+      { name = Located.create ~loc (field "name" string value)
+      ; payload =
+          field
+            "payload"
+            (option (fun payload -> Located.create ~loc (string payload)))
+            value
+      }
+    in
+    match position, attribute.name.txt with
+    | Attribute.Position.Expr, "nontail" ->
+      unexpected
+        ~expected:"an attribute other than `nontail` (use Stag.Expr.Nontail)"
+        value
+    | _ ->
+      (match Attribute.validate attribute ~position with
+       | Ok () -> attribute
+       | Error (_, message) -> unexpected ~expected:message value)
 
   and toplevel value ~loc : Toplevel.t =
     Located.create
@@ -816,6 +842,11 @@ module Of_value = struct
                        bench
                  ; body = field "body" (expr ~loc) bench
                  })
+           | "Attributed", 2 ->
+             Attributed
+               (arg 0 (toplevel ~loc), arg 1 (attribute ~loc ~position:Item))
+           | "Attribute", 1 ->
+             Attribute (arg 0 (attribute ~loc ~position:Floating))
            | _ -> raise Bad_arguments))
   ;;
 

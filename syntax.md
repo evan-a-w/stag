@@ -52,7 +52,8 @@ node, for good errors.
   `f`): what the code does with it is checked where the code is spliced. An
   explicit substitution (`.{f}`) counts as a use.
 - `@` introduces a mode (see [Modes](#modes)); `@@` introduces a
-  modality, of a record field, a constructor argument or `ptr`'s argument. `[@nontail]` is the one attribute.
+  modality, of a record field, a constructor argument or `ptr`'s argument.
+  `[@`, `[@@` and `[@@@` start attributes (see [Attributes](#attributes)).
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
 - Expect test tokens: `let%expect_test`, `[%expect`. Benchmarks: `let%bench`.
   Inline expansions: `include%inline`, `module%inline`, `end%inline`.
@@ -355,6 +356,46 @@ variables, at the same types. A variable's mode is the join of its modes in
 each alternative: if it is bound to a local part in one, it is local. In an
 exception arm, `exception E | exception F` is `exception (E | F)`; an
 alternative mixing value and exception patterns is an error.
+
+### Exhaustiveness
+
+A match must cover every value of its scrutinee's type: one it does not is an
+error naming a value no arm matches, as `This match is not exhaustive
+[non-exhaustive]: it does not cover `B (C _)``. Variants (nominal, by their
+constructors; polymorphic, by the tags their inferred type may have: a type
+left open, as `[> `A]`, needs a catch-all), records, tuples, pointers
+(`*p`), or-patterns and nested patterns are covered precisely; literals of
+`int`, `char` and `string` need a catch-all, `bool` and `unit` don't. An arm
+no value reaches, as the cases before it match all it does, is a warning,
+`This case is unused [unused-arm]`. Exception arms never make a match
+non-exhaustive (an exception no arm matches propagates), but one the
+exception arms before it cover is unused too. A match in a quote is checked
+where it is written, once, and not again in the code it is spliced into; one a
+syntax splice builds (as `Stag.Expr.Match`) is checked where it is spliced.
+A match whose other values can't happen can end in
+`| _ -> raise (Failure "...")`.
+
+### Attributes
+
+```ocaml
+e [@warning "-unused-arm"]                  (* an expression's *)
+let f x = e [@@warning "-non-exhaustive"]   (* an item's: after it *)
+[@@@warning "@unused-arm"]                  (* floating: the rest of the module *)
+f x [@nontail]                              (* see Modes *)
+```
+
+Attributes are written as in OCaml, `[@name "payload"]` after an expression,
+`[@@name "payload"]` after a declaration (a module's applies to its
+declarations), and `[@@@name "payload"]` on its own, for the declarations after
+it in its module (and their modules). The attributes are `[@nontail]` and
+`warning`, which configures warnings by a spec: items separated by spaces or
+commas, each a sign, `-` (off), `+` (a warning) or `@` (an error), then a
+warning's name or `all`, later items winning. The warnings are
+`non-exhaustive` (an error by default) and `unused-arm` (a warning). An
+unknown attribute, or a `warning` without a valid spec, is a syntax error.
+`stag check`, `run`, `test` and `bench` take `-w SPEC` (any number of times),
+which sets the program's defaults that attributes change; the language server
+shows warnings as warnings. A program's warnings don't include the prelude's.
 
 ## Exceptions
 

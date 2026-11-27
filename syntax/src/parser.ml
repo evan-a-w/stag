@@ -71,6 +71,23 @@ let advance t =
   | _ -> t.pos <- t.pos + 1
 ;;
 
+let attribute_ahead_with t (ats : Token.t list) =
+  is t Lbracket
+  && List.for_alli ats ~f:(fun i at -> Token.equal (peek_at t (i + 1)) at)
+;;
+
+let expr_attribute_ahead t = attribute_ahead_with t [ At ]
+
+let item_attribute_ahead t =
+  attribute_ahead_with t [ At_at ] && not (attribute_ahead_with t [ At_at; At ])
+;;
+
+let floating_attribute_ahead t = attribute_ahead_with t [ At_at; At ]
+
+let any_attribute_ahead t =
+  attribute_ahead_with t [ At ] || attribute_ahead_with t [ At_at ]
+;;
+
 let located ~loc txt = { Located.txt; loc }
 
 (** Located from [start] to the last token consumed. *)
@@ -544,7 +561,7 @@ and type_tuple t : Type_expr.t =
 and type_app t : Type_expr.t =
   let ty = type_atom t in
   let ty =
-    if is t Lbracket
+    if is t Lbracket && not (any_attribute_ahead t)
     then (
       match ty.txt with
       | Con (path, []) ->
@@ -553,7 +570,8 @@ and type_app t : Type_expr.t =
         in
         if List.is_empty args
         then fail (prev_loc t) "expected a type argument, found `]`";
-        if is t Lbracket then fail (loc t) "type arguments are written once";
+        if is t Lbracket && not (any_attribute_ahead t)
+        then fail (loc t) "type arguments are written once";
         since t ty.loc (Type_expr.Con (path, args))
       | _ ->
         fail (loc t) "only type constructors like `list` take type arguments")
@@ -995,29 +1013,44 @@ let pattern_parameter =
    m)`; use `match`"
 ;;
 
-let attribute_ahead t = is t Lbracket && Token.equal (peek_at t 1) At
-
-(** Parses [[@nontail]], returning its location. *)
-let nontail_attribute t =
+(** Parses [[@name "payload"]], with as many [@]s as [position] takes, and
+    validates it. *)
+let attribute t ~(position : Attribute.Position.t) : Attribute.t Located.t =
   let open_loc = loc t in
   advance t;
-  advance t;
-  let name = lident t ~what:"an attribute, `nontail`" in
-  if not (String.equal name.txt "nontail")
-  then
-    fail
-      name.loc
-      (sprintf "unknown attribute `[@%s]`, only `[@nontail]` exists" name.txt);
+  (match position with
+   | Expr -> expect t At
+   | Item -> expect t At_at
+   | Floating ->
+     expect t At_at;
+     expect t At);
+  let first = lident t ~what:"an attribute's name, like `warning`" in
+  let rec dotted (name : Name.t) =
+    match peek t, peek_at t 1 with
+    | Dot, Lident next ->
+      advance t;
+      advance t;
+      dotted (since t name.loc (name.txt ^ "." ^ next))
+    | _ -> name
+  in
+  let name = dotted first in
+  let payload =
+    match peek t with
+    | String s ->
+      let loc = loc t in
+      advance t;
+      Some (located ~loc s)
+    | _ -> None
+  in
   close t Rbracket ~opener:Lbracket ~open_loc;
-  Loc.merge open_loc (prev_loc t)
+  let attribute = { Attribute.name; payload } in
+  match Attribute.validate attribute ~position with
+  | Ok () -> since t open_loc attribute
+  | Error (loc, message) -> fail loc message
 ;;
 
 let nontail_without_application_message =
   "`[@nontail]` is only written after an application, as in `f x [@nontail]`"
-;;
-
-let nontail_without_application t =
-  fail (nontail_attribute t) nontail_without_application_message
 ;;
 
 (** [: t], [: t @ m] or [@ m], if any. *)
@@ -1328,59 +1361,74 @@ and construct ?(in_argument = false) t : Expr.t =
   | Uident _ | Root ->
     (match path t ~what:"" with
      | path, true ->
-       let args =
-         if attribute_ahead t
-         then nontail_without_application t
-         else if starts_atom (peek t)
-         then (
-           let arg = construct ~in_argument:true t in
-           construct_args t arg ~tuple_items:(function
-             | Expr.Tuple items -> Some items
-             | _ -> None))
-         else []
-       in
-       expr_since t start (Construct (path, args))
+       if any_attribute_ahead t
+       then
+         attributes ~in_argument t (expr_since t start (Construct (path, [])))
+       else (
+         let args =
+           if starts_atom (peek t)
+           then (
+             let arg = construct ~in_argument:true t in
+             construct_args t arg ~tuple_items:(function
+               | Expr.Tuple items -> Some items
+               | _ -> None))
+           else []
+         in
+         expr_since t start (Construct (path, args)))
      | _, false ->
        t.pos <- saved;
        app ~in_argument t)
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
-    let arg =
-      if attribute_ahead t
-      then nontail_without_application t
-      else if starts_atom (peek t)
-      then Some (construct ~in_argument:true t)
-      else None
-    in
-    expr_since t start (Poly_variant (tag, arg))
+    if any_attribute_ahead t
+    then
+      attributes ~in_argument t (expr_since t start (Poly_variant (tag, None)))
+    else (
+      let arg =
+        if starts_atom (peek t)
+        then Some (construct ~in_argument:true t)
+        else None
+      in
+      expr_since t start (Poly_variant (tag, arg)))
   | Type ->
     advance t;
     expr_since t start (Type (type_app t))
   | _ -> app ~in_argument t
 
-(* [in_argument]: [t] is a constructor's argument, which [[@nontail]] can't
+(* [in_argument]: [t] is a constructor's argument, which an attribute can't
    follow, as it would read as applying to the construction. *)
 and app ?(in_argument = false) t : Expr.t =
   let rec loop (f : Expr.t) =
-    if starts_atom (peek t) && not (attribute_ahead t)
+    if starts_atom (peek t) && not (any_attribute_ahead t)
     then (
       let arg = splice t in
       loop (expr_at ~loc:(Loc.merge f.loc arg.loc) (Expr.App (f, arg))))
     else f
   in
-  let e = loop (splice t) in
-  if attribute_ahead t
+  attributes ~in_argument t (loop (splice t))
+
+(* [e [@a] [@b]], of the attributes following [e]. *)
+and attributes ?(in_argument = false) t (e : Expr.t) : Expr.t =
+  if expr_attribute_ahead t
   then (
-    let attribute_loc = nontail_attribute t in
-    match e.txt with
-    | App _ when in_argument ->
+    let attribute = attribute t ~position:Expr in
+    let name = attribute.txt.name.txt in
+    let after_argument () =
       fail
-        attribute_loc
-        "`[@nontail]` can't follow a constructor's argument: parenthesize the \
-         application, as in `C (f x [@nontail])`"
-    | App _ -> expr_since t e.loc (Nontail e)
-    | _ -> fail attribute_loc nontail_without_application_message)
+        attribute.loc
+        (sprintf
+           "`[@%s]` can't follow a constructor's argument: parenthesize the \
+            argument, as in `C (f x [@%s])`"
+           name
+           name)
+    in
+    match name, e.txt with
+    | "nontail", App _ when in_argument -> after_argument ()
+    | "nontail", App _ -> attributes t (expr_since t e.loc (Nontail e))
+    | "nontail", _ -> fail attribute.loc nontail_without_application_message
+    | _ when in_argument -> after_argument ()
+    | _ -> attributes t (expr_since t e.loc (Attributed (e, attribute.txt))))
   else e
 
 and splice t : Expr.t =
@@ -1741,7 +1789,7 @@ let type_decl t ~salvage : Type_decl.t =
   in
   salvage [] Abstract;
   let params =
-    if is t Lbracket
+    if is t Lbracket && not (any_attribute_ahead t)
     then (
       let params =
         delimited t ~opener:Lbracket ~close:Rbracket ~sep:Comma ~item:type_param
@@ -1789,10 +1837,13 @@ let first_on_line t i =
   i = 0 || t.tokens.(i).loc.start.#line > t.tokens.(i - 1).loc.stop.#line
 ;;
 
-(* Whether the token at [i] is a toplevel keyword first on its line and not
-   indented more than [col]. *)
+(* Whether the token at [i] is a toplevel keyword or [[@@@] first on its line
+   and not indented more than [col]. *)
 let starts_toplevel_at t i ~col =
-  match t.tokens.(i).token with
+  let token i =
+    if i < Array.length t.tokens then t.tokens.(i).token else Token.Eof
+  in
+  match token i with
   | Let
   | Type
   | Exception
@@ -1803,6 +1854,10 @@ let starts_toplevel_at t i ~col =
   | Include_inline
   | Let_expect_test
   | Let_bench -> first_on_line t i && t.tokens.(i).loc.start.#col <= col
+  | Lbracket ->
+    (match token (i + 1), token (i + 2) with
+     | At_at, At -> first_on_line t i && t.tokens.(i).loc.start.#col <= col
+     | _ -> false)
   | _ -> false
 ;;
 
@@ -1848,6 +1903,26 @@ let unclosed t ~start ~stop =
 ;;
 
 let rec toplevel t : Toplevel.t =
+  if floating_attribute_ahead t
+  then (
+    let attribute = attribute t ~position:Floating in
+    located ~loc:attribute.loc (Toplevel.Attribute attribute.txt))
+  else item_attributes t (item t)
+
+(* [item [@@a] [@@b]]: the item with the attributes following it. *)
+and item_attributes t (item : Toplevel.t) =
+  if item_attribute_ahead t
+  then (
+    salvage t (fun _ -> item.txt);
+    let attribute = attribute t ~position:Item in
+    item_attributes
+      t
+      (located
+         ~loc:(Loc.merge item.loc attribute.loc)
+         (Toplevel.Attributed (item, attribute.txt))))
+  else item
+
+and item t : Toplevel.t =
   let start = loc t in
   match peek t with
   | Let when Token.equal (peek_at t 1) Mut ->

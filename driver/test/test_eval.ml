@@ -53,7 +53,7 @@ let called = h 7
 
 let%expect_test "nominal types" =
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type t = A | B of int * bool
 type r = {x : int; y : bool}
 let of_t t = match t with A -> 0 | B (n, _) -> n
@@ -78,7 +78,7 @@ let failure = only_a (B (1, true))
 
 let%expect_test "negative literals" =
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type t = A of int
 let lits = (-1, -4611686018427387904, Int.add -2 3, Int.neg -5)
 let sign n = match n with -1 -> `Minus_one | 0 -> `Zero | _ -> `Other
@@ -87,7 +87,9 @@ let only_minus_one t = match t with A -1 -> 0
 let matched = only_minus_one (A -1)
 let failure = only_minus_one (A -2)
 |};
-  eval "let tag_failure = match `B -3 with `B 0 -> 0";
+  eval
+    "[@@@warning \"-non-exhaustive\"]\n\
+     let tag_failure = match `B -3 with `B 0 -> 0";
   [%expect
     {|
     (lits (Tuple -1 -4611686018427387904 1 5))
@@ -96,7 +98,7 @@ let failure = only_minus_one (A -2)
     (only_minus_one <fun>)
     (matched 0)
     ("Match failure: no case matches the value A (-2)" @ t.stag:6:23-45)
-    ("Match failure: no case matches the value `B (-3)" @ t.stag:1:18-44)
+    ("Match failure: no case matches the value `B (-3)" @ t.stag:2:18-44)
     |}]
 ;;
 
@@ -123,7 +125,7 @@ let%expect_test "printed negative ints parse back" =
 
 let%expect_test "nominal records print with their unqualified field names" =
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 module N = struct
   type r = {x : int; y : option[ptr[r]]}
 end
@@ -191,12 +193,12 @@ type s = {x : bool}
 
 let%expect_test "printed constructors of one tuple keep its parentheses" =
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type t = P of (int * int) | Q of int * int
 let one = match P ((1, 2)) with Q (_, _) -> 0
 |};
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type t = P of (int * int) | Q of int * int
 let two = match Q (1, 2) with P _ -> 0
 |};
@@ -341,7 +343,7 @@ let%expect_test "a failing toplevel splice fails checking, before anything is \
                  evaluated"
   =
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B | C
 let fails_at_runtime = match B with A -> 0
 let fails_at_expansion = .~(match C with A -> .<0>.)
@@ -363,7 +365,7 @@ let fails_at_expansion = .~(match C with A -> .<0>.)
 
 let%expect_test "a constructor of one tuple argument, and one of two" =
   eval
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type t = C of (int * int)
 type u = D of int * int
 type box['a] = Box of 'a

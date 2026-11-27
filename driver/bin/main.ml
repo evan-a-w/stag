@@ -65,12 +65,11 @@ let contents files path =
   | None -> Option.try_with (fun () -> In_channel.read_all path)
 ;;
 
-let report ?warning files diagnostic =
+let report files diagnostic =
   flush_before_stderr ();
   write_stderr
     (Diagnostic.to_string_hum
        ~contents:(contents files)
-       ?warning
        (Diagnostic.relocate diagnostic ~f:relative_loc))
 ;;
 
@@ -84,7 +83,7 @@ let report_all files diagnostics =
 
 let warn_stale files driver =
   List.iter (Inline_expansion.stale driver) ~f:(fun expansion ->
-    report ~warning:true files (Inline_expansion.diagnostic expansion))
+    report files { (Inline_expansion.diagnostic expansion) with warning = true })
 ;;
 
 (* The driver of the program, and the prelude it sees. *)
@@ -94,6 +93,7 @@ let check_with_prelude ?output config files =
     report [] diagnostic;
     exit_flushing 1
   | Ok (prelude, checked) ->
+    report_all files (checked : Pipeline.Checked.t).warnings;
     (match Pipeline.Checked.to_result checked with
      | Ok driver -> driver, prelude
      | Error diagnostics ->
@@ -120,7 +120,7 @@ let files_param =
 
 (* The sources of the prelude among [paths] are checked as the prelude of their
    checkout, then the others as a program that sees it. *)
-let check_with_prelude_sources ~limits ~modes ~sources ~program =
+let check_with_prelude_sources ~limits ~warnings ~modes ~sources ~program =
   let checkout = snd (List.hd_exn sources) in
   List.iter sources ~f:(fun (path, other) ->
     if not
@@ -142,7 +142,9 @@ let check_with_prelude_sources ~limits ~modes ~sources ~program =
       report [] diagnostic;
       exit_flushing 1
   in
-  match Pipeline.Checked.to_result (Pipeline.check_prelude ~limits prelude) with
+  let checked = Pipeline.check_prelude ~warnings ~limits prelude in
+  report_all [] checked.warnings;
+  match Pipeline.Checked.to_result checked with
   | Error diagnostics ->
     report_all [] diagnostics;
     exit_flushing 1
@@ -167,10 +169,13 @@ let check_with_prelude_sources ~limits ~modes ~sources ~program =
       let driver =
         match
           Pipeline.check_sources
+            ~warnings
             ~prelude:(Parsed prelude)
             ~limits
             (Pipeline.parse_files files)
-          |> Pipeline.Checked.to_result
+          |> fun checked ->
+          report_all files (checked : Pipeline.Checked.t).warnings;
+          Pipeline.Checked.to_result checked
         with
         | Ok driver -> driver
         | Error diagnostics ->
@@ -199,6 +204,7 @@ let check_command =
           Stdlib_checkout.core_dir)
     (let%map_open.Command paths = files_param
      and limits = Pipeline_config.limits_param ()
+     and warnings = Pipeline_config.warnings_param
      and modes =
        flag
          "modes"
@@ -215,10 +221,13 @@ let check_command =
            | None -> Second path)
        in
        (match sources with
-        | _ :: _ -> check_with_prelude_sources ~limits ~modes ~sources ~program
+        | _ :: _ ->
+          check_with_prelude_sources ~limits ~warnings ~modes ~sources ~program
         | [] ->
           let files = read_files paths in
-          let driver = check (Pipeline_config.create ~limits paths) files in
+          let driver =
+            check (Pipeline_config.create ~warnings ~limits paths) files
+          in
           warn_stale files driver;
           print_string
             (Signature.to_string_hum ~modes (Driver.checked driver).signature));
@@ -232,6 +241,7 @@ let run_command =
       Pipeline_config.limits_readme ~phases:"compile time and evaluation")
     (let%map_open.Command paths = files_param
      and limits = Pipeline_config.limits_param ()
+     and warnings = Pipeline_config.warnings_param
      and argv =
        flag
          "--"
@@ -240,7 +250,9 @@ let run_command =
      in
      fun () ->
        let files = read_files paths in
-       let driver = check (Pipeline_config.create ~limits paths) files in
+       let driver =
+         check (Pipeline_config.create ~warnings ~limits paths) files
+       in
        warn_stale files driver;
        eval ?argv ~limits files driver;
        exit_flushing 0)
@@ -260,6 +272,7 @@ let test_command =
           ~phases:"compile time, evaluation and each test")
     (let%map_open.Command paths = files_param
      and limits = Pipeline_config.limits_param ()
+     and warnings = Pipeline_config.warnings_param
      and mode =
        choose_one
          ~if_nothing_chosen:(Default_to `Write_corrected)
@@ -281,7 +294,9 @@ let test_command =
           eprintf "Error: -print-corrected takes one FILE\n%!";
           exit 2
         | _ -> ());
-       let driver = check (Pipeline_config.create ~limits paths) files in
+       let driver =
+         check (Pipeline_config.create ~warnings ~limits paths) files
+       in
        let outcome =
          Test_and_correct.run
            ~limits
@@ -341,6 +356,7 @@ let bench_command ~fake_clock =
        unlimited; limits apply to compile time and evaluation.")
     (let%map_open.Command paths = files_param
      and limits = Pipeline_config.limits_param ()
+     and warnings = Pipeline_config.warnings_param
      and options = Bench_command.Options.param ~fake_clock
      and filters =
        flag
@@ -360,7 +376,7 @@ let bench_command ~fake_clock =
        let driver, prelude =
          check_with_prelude
            ~output:ignore
-           (Pipeline_config.create ~limits paths)
+           (Pipeline_config.create ~warnings ~limits paths)
            files
        in
        warn_stale files driver;

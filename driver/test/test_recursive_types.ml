@@ -107,7 +107,7 @@ let%expect_test "extensible interpreter" =
   let eval body = top "eval" [ "e" ] body in
   check_program
     (parse_exn
-       {|
+       {|[@@@warning "-non-exhaustive"]
 let eval_num self k e = match e with `Num n -> n | other -> k other
 let eval_add self k e = match e with `Add *(a, b) -> add (self a) (self b) | other -> k other
 let eval_neg self k e = match e with `Neg *a -> add 0 (self a) | other -> k other
@@ -130,7 +130,7 @@ let example = eval (`Add (Ptr.make (`Num 1, `Neg (Ptr.make (`Num 2)))))
     );
   check_program
     (parse_exn
-       {|
+       {|[@@@warning "-non-exhaustive"]
 let eval_num self k e = match e with `Num n -> n | other -> k other
 |}
      @ [ eval (app (var "eval_num") [ var "eval"; absurd; var "e" ]) ]

@@ -75,7 +75,7 @@ let h = g (type list[string])
 
 (* [head ty] is the ref of the declared type [ty] is an instance of. *)
 let reflect =
-  {|
+  {|[@@@warning "-non-exhaustive"]
 let head ty =
   match Stag.Type.expr ty with
   | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r

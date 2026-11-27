@@ -104,6 +104,8 @@ let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
         name ~declaration:true Kind.Parameter param;
         List.iter args ~f:expr);
       expr body
+    | Attributed (toplevel, _) -> walk_toplevel ~quoted toplevel
+    | Attribute _ -> ()
   and expansion_toplevels = function
     | Some (expansion : Syntax.Toplevel.t list Located.t)
       when walk_expansion expansion -> walk_toplevels expansion.txt
@@ -270,7 +272,11 @@ let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
       add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
       Option.iter arg ~f:recurse
     | Struct_quote quoted -> toplevels quoted
-    | Stack expr | Exclave expr | Region expr | Nontail expr -> recurse expr
+    | Stack expr
+    | Exclave expr
+    | Region expr
+    | Nontail expr
+    | Attributed (expr, _) -> recurse expr
     | Annotated (expr, annot) ->
       recurse expr;
       Option.iter annot.ty ~f:type_expr

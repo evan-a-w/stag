@@ -588,7 +588,7 @@ let two_unknown c1 c2 = .<add .~c1 .~c2>.
 let conflict = two_unknown .<add y 1>. .<cond y 1 1>.
 |};
   check
-    {|
+    {|[@@@warning "-non-exhaustive"]
 let toplevel_unknown =
   .~(let opaque u = opaque u in match 1 with 2 -> opaque 1)
 |};

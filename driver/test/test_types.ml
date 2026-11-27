@@ -256,7 +256,7 @@ let fn = (id, add 1)
 
 let%expect_test "match" =
   check
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type list['a] = Nil | Cons of ptr['a * list['a]]
 type option['a] = None | Some of 'a
 type point = {x : int; y : int}

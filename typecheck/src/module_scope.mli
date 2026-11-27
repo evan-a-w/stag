@@ -66,6 +66,7 @@ end
 val create_root
   :  ?enclosing:t
   -> ?path:string list
+  -> ?warnings:Warning.Settings.t
   -> types:string list
   -> declare:(t -> Syntax.Toplevel.t -> generated_by:Splice.t option -> unit)
   -> force:(Splice.t -> (Syntax.Toplevel.t list, Force_error.t) Result.t)
@@ -92,8 +93,16 @@ val iter_declarations
   -> f:(t -> Syntax.Toplevel.t -> generated_by:Splice.t option -> unit)
   -> unit
 
+(** The warnings' settings at [t]: those of the root's [create_root], changed by
+    the [warning] attributes of the declarations enclosing [t] and the floating
+    ones before it, in order. *)
+val warnings : t -> Warning.Settings.t
+
 (** The full path of member [name] of [t]'s module, joined with [.]. *)
 val canonical_name : t -> string -> string
+
+(** The full path of [t]'s module. *)
+val path : t -> string list
 
 (** The end of the member module [name] of [t]'s module, which must exist. *)
 val enter : t -> string -> t

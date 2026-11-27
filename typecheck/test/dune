@@ -1,0 +1,6 @@
+(library
+ (name test_typecheck)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core stag_common stag_ir stag_syntax stag_typecheck stag_types))

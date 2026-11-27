@@ -186,6 +186,7 @@ include%inline .~(Core.Sexp.derive (type point))
     match Core.Sexp.Deriving.record_fields "point_of_sexp" ["x"; "y"] sexp with
     | [x; y] ->
       {x = Core.Sexp.int_of_sexp_exn x; y = Core.Sexp.int_of_sexp_exn y}
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let point_of_sexp sexp = Core.Sexp.Deriving.catch point_of_sexp_exn sexp
 end%inline
@@ -286,6 +287,7 @@ include%inline .~(Core.Sexp.derive (type item))
           | _ -> Core.Sexp.Deriving.tuple_error "item_of_sexp" 2 flags;
         raw = raw;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let item_of_sexp sexp = Core.Sexp.Deriving.catch item_of_sexp_exn sexp
 end%inline
@@ -361,6 +363,7 @@ include%inline .~(Core.Sexp.derive (type labelled['a]))
         label = Core.Sexp.string_of_sexp_exn label;
         value = Core.Sexp.of_sexp_exn _of_a value;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let labelled_of_sexp _of_a sexp =
     Core.Sexp.Deriving.catch (labelled_of_sexp_exn _of_a) sexp
@@ -500,6 +503,7 @@ include%inline .~(Core.List.append
         title = Core.Sexp.option_of_sexp_exn Core.Sexp.string_of_sexp title;
         body = expr_of_sexp_exn body;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let stmt_of_sexp sexp = Core.Sexp.Deriving.catch stmt_of_sexp_exn sexp
 end%inline
@@ -636,6 +640,7 @@ module Geometry = struct
       with
       | [dx; dy] ->
         {dx = Core.Sexp.int_of_sexp_exn dx; dy = Core.Sexp.int_of_sexp_exn dy}
+      | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
     let vec_of_sexp sexp = Core.Sexp.Deriving.catch vec_of_sexp_exn sexp
   end%inline
@@ -659,6 +664,7 @@ include%inline .~(Core.Sexp.derive (type step))
         by = Geometry.vec_of_sexp_exn by;
         times = Core.Sexp.int_of_sexp_exn times;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let step_of_sexp sexp = Core.Sexp.Deriving.catch step_of_sexp_exn sexp
 end%inline
@@ -740,6 +746,7 @@ module Shadowing = struct
                  .Core.Sexp.unit_of_sexp)
               either;
         }
+      | _ -> .raise (Failure "Sexp.Deriving.record_fields")
 
     let t_of_sexp sexp = .Core.Sexp.Deriving.catch t_of_sexp_exn sexp
   end%inline
@@ -815,6 +822,7 @@ include%inline .~(Core.Sexp.derive (type inline))
               ["R"]
               dir;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let inline_of_sexp sexp = Core.Sexp.Deriving.catch inline_of_sexp_exn sexp
 end%inline
@@ -858,6 +866,7 @@ include%inline .~(Core.Sexp.derive (type with_a['a]))
     with
     | [an_a; param] ->
       {an_a = a_of_sexp_exn an_a; param = Core.Sexp.of_sexp_exn _of_a param}
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let with_a_of_sexp _of_a sexp =
     Core.Sexp.Deriving.catch (with_a_of_sexp_exn _of_a) sexp
@@ -895,6 +904,7 @@ include%inline .~(Core.Sexp.derive (type odd))
         v0 = Core.Sexp.int_of_sexp_exn v1;
         v1 = Core.Sexp.string_of_sexp_exn v2;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let odd_of_sexp sexp = Core.Sexp.Deriving.catch odd_of_sexp_exn sexp
 end%inline
@@ -960,6 +970,7 @@ module X = struct
             u = u_of_sexp_exn u;
             color = color_of_sexp_exn color;
           }
+        | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
       let t_of_sexp sexp = Core.Sexp.Deriving.catch t_of_sexp_exn sexp
     end%inline
@@ -989,6 +1000,7 @@ module Shadowed_conversion = struct
     let paint_of_sexp_exn sexp =
       match Core.Sexp.Deriving.record_fields "paint_of_sexp" ["hue"] sexp with
       | [hue] -> {hue = color_of_sexp_exn hue}
+      | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
     let paint_of_sexp sexp = Core.Sexp.Deriving.catch paint_of_sexp_exn sexp
   end%inline
@@ -1015,6 +1027,7 @@ module Palette = struct
       with
       | [color; vec] ->
         {color = color_of_sexp_exn color; vec = Geometry.vec_of_sexp_exn vec}
+      | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
     let swatch_of_sexp sexp = Core.Sexp.Deriving.catch swatch_of_sexp_exn sexp
   end%inline
@@ -1168,6 +1181,7 @@ include%inline .~(Core.Sexp.derive (type tuples))
              Core.Sexp.int_of_sexp_exn three_2)
           | _ -> Core.Sexp.Deriving.tuple_error "tuples_of_sexp" 3 three;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let tuples_of_sexp sexp = Core.Sexp.Deriving.catch tuples_of_sexp_exn sexp
 end%inline
@@ -1216,14 +1230,21 @@ include%inline .~(Core.Sexp.derive (type errors))
         of_sexp = Core.Sexp.Of_sexp_error.t_of_sexp_exn of_sexp;
         parse = Core.Sexp.Parse_error.t_of_sexp_exn parse;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let errors_of_sexp sexp = Core.Sexp.Deriving.catch errors_of_sexp_exn sexp
 end%inline
 
 let%expect_test "Core's error types" =
-  let parse_error = match Core.Sexp.of_string "(a" with Error e -> e in
+  let parse_error =
+    match Core.Sexp.of_string "(a" with
+    | Error e -> e
+    | Ok _ -> raise (Failure "parsed")
+  in
   let of_sexp_error =
-    match Core.Sexp.int_of_sexp (Core.Sexp.Atom "x") with Error e -> e
+    match Core.Sexp.int_of_sexp (Core.Sexp.Atom "x") with
+    | Error e -> e
+    | Ok _ -> raise (Failure "converted")
   in
   round_trip
     sexp_of_errors
@@ -1273,6 +1294,7 @@ include%inline .~(Core.Sexp.derive (type row))
         flag = Core.Sexp.bool_of_sexp_exn flag;
         mark = Core.Sexp.char_of_sexp_exn mark;
       }
+    | _ -> raise (Failure "Sexp.Deriving.record_fields")
 
   let row_of_sexp sexp = Core.Sexp.Deriving.catch row_of_sexp_exn sexp
 end%inline

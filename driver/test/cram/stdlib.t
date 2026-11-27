@@ -17,7 +17,7 @@ checkout is made outside it.
   type option['a] = None | Some of 'a
   type result['a, 'b] = Ok of 'a | Error of 'b
   $ cd core && stag check option.stag ../prelude/prelude.stag | grep -c . && cd ..
-  178
+  181
 
 Names in the prelude's sources are as within the prelude, and a file given
 twice is checked once.
@@ -87,6 +87,23 @@ The preludes of two checkouts are not checked together.
 
 Errors are located in their files.
 
+  $ cat >> core/bool.stag <<'X'
+  > let warn_unused b = match b with true -> 1 | false -> 2 | _ -> 3
+  > X
+  $ stag check core/bool.stag >/dev/null
+  File "core/bool.stag", line 28, characters 58-59:
+  28 | let warn_unused b = match b with true -> 1 | false -> 2 | _ -> 3
+                                                                 ^
+  Warning: This case is unused [unused-arm]: the cases before it match every value it does
+  $ stag check -w -unused-arm core/bool.stag >/dev/null
+  $ stag check -w @unused-arm core/bool.stag >/dev/null
+  File "core/bool.stag", line 28, characters 58-59:
+  28 | let warn_unused b = match b with true -> 1 | false -> 2 | _ -> 3
+                                                                 ^
+  Error: This case is unused [unused-arm]: the cases before it match every value it does
+  [1]
+  $ cp "$ROOT"/../../../core/bool.stag core/
+
   $ sed -i.bak 's/Int.succ acc/Int.succc acc/' core/list.stag && rm core/list.stag.bak
   $ stag check core/option.stag
   File "core/list.stag", line 16, characters 32-41:
@@ -102,8 +119,8 @@ Errors are located in their files.
   16 |     | Cons * (_, rest) -> loop (Int.succc acc) rest
                                        ^^^^^^^^^
   Error: Unbound value Int.succc
-  File "prelude/prelude.stag", line 432, characters 11-25:
-  432 | let oops = Prim.Nope.nope
+  File "prelude/prelude.stag", line 443, characters 11-25:
+  443 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -121,8 +138,8 @@ Prims are only the prelude's.
   16 |     | Cons * (_, rest) -> loop (Int.succc acc) rest
                                        ^^^^^^^^^
   Error: Unbound value Int.succc
-  File "stag/prelude/prelude.stag", line 432, characters 11-25:
-  432 | let oops = Prim.Nope.nope
+  File "stag/prelude/prelude.stag", line 443, characters 11-25:
+  443 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]

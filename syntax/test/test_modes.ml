@@ -141,10 +141,10 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
      ((Nontail (App (App (Var f ()) (Var x ())) (Var y ())))
       (Nontail (App (Var g ()) (Var x ())))))
     t.stag:1:2-12: `[@nontail]` is only written after an application, as in `f x [@nontail]`
-    t.stag:1:6-11: unknown attribute `[@other]`, only `[@nontail]` exists
-    t.stag:1:11-21: `[@nontail]` can't follow a constructor's argument: parenthesize the application, as in `C (f x [@nontail])`
-    t.stag:1:6-16: `[@nontail]` can't follow a constructor's argument: parenthesize the application, as in `C (f x [@nontail])`
-    t.stag:1:9-19: `[@nontail]` can't follow a constructor's argument: parenthesize the application, as in `C (f x [@nontail])`
+    t.stag:1:6-11: unknown attribute `[@other]`: the attributes are `[@nontail]` and `[@warning "spec"]`
+    t.stag:1:11-21: `[@nontail]` can't follow a constructor's argument: parenthesize the argument, as in `C (f x [@nontail])`
+    t.stag:1:6-16: `[@nontail]` can't follow a constructor's argument: parenthesize the argument, as in `C (f x [@nontail])`
+    t.stag:1:9-19: `[@nontail]` can't follow a constructor's argument: parenthesize the argument, as in `C (f x [@nontail])`
     (Construct Some ((Nontail (App (Var f ()) (Var x ())))))
     t.stag:1:2-12: `[@nontail]` is only written after an application, as in `f x [@nontail]`
     t.stag:1:3-13: `[@nontail]` is only written after an application, as in `f x [@nontail]`

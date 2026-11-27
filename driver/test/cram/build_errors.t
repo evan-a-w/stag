@@ -56,3 +56,43 @@ Past 50 errors, only how many more are reported.
   $ stag-build build 2>&1 | tail -2
   Error: This expression has type string but an expression was expected of type int
   ... and 7 more errors
+
+Warnings are reported once per target, both when checking succeeds and when it fails.
+
+  $ rm -rf lib
+  $ mkdir lib bin
+  $ echo '(library (name lib))' > lib/stag
+  $ echo '(executable (name app) (libraries lib))' > bin/stag
+  $ cat > lib/a.stag <<'X'
+  > let f b = match b with true -> 1 | false -> 2 | _ -> 3
+  > X
+  $ cat > bin/main.stag <<'X'
+  > let g b = match b with true -> 1 | false -> 2 | true -> 3
+  > let x = Lib.A.f true
+  > X
+  $ stag-build build
+  File "lib/a.stag", line 1, characters 48-49:
+  1 | let f b = match b with true -> 1 | false -> 2 | _ -> 3
+                                                      ^
+  Warning: This case is unused [unused-arm]: the cases before it match every value it does
+  File "bin/main.stag", line 1, characters 48-52:
+  1 | let g b = match b with true -> 1 | false -> 2 | true -> 3
+                                                      ^^^^
+  Warning: This case is unused [unused-arm]: the cases before it match every value it does
+  $ cat >> bin/main.stag <<'X'
+  > let bad : int = "oops"
+  > X
+  $ stag-build build
+  File "lib/a.stag", line 1, characters 48-49:
+  1 | let f b = match b with true -> 1 | false -> 2 | _ -> 3
+                                                      ^
+  Warning: This case is unused [unused-arm]: the cases before it match every value it does
+  File "bin/main.stag", line 1, characters 48-52:
+  1 | let g b = match b with true -> 1 | false -> 2 | true -> 3
+                                                      ^^^^
+  Warning: This case is unused [unused-arm]: the cases before it match every value it does
+  File "bin/main.stag", line 3, characters 16-22:
+  3 | let bad : int = "oops"
+                      ^^^^^^
+  Error: This expression has type string but an expression was expected of type int
+  [1]

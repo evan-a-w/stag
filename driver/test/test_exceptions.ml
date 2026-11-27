@@ -460,7 +460,7 @@ let%expect_test "type errors" =
 
 let%expect_test "matching on exn" =
   run
-    {|
+    {|[@@@warning "-non-exhaustive"]
 exception E
 exception F of int
 let name e = match e with E -> "E" | F n -> "F"
@@ -474,7 +474,7 @@ let main = print_endline (name Division_by_zero)
     Error: Match failure: no case matches the value Division_by_zero
     |}];
   run
-    {|
+    {|[@@@warning "-non-exhaustive"]
 exception E
 exception F of int
 let name e = match e with E -> "E" | F 1 -> "F 1" | _ -> "other"
@@ -491,12 +491,13 @@ let main =
     other
     |}];
   run
-    "let f b = match b with true -> 1 | exception Division_by_zero -> 0\n\
+    "[@@@warning \"-non-exhaustive\"]\n\
+     let f b = match b with true -> 1 | exception Division_by_zero -> 0\n\
      let main = f false";
   [%expect
     {|
-    File "a.stag", line 1, characters 10-66:
-    1 | let f b = match b with true -> 1 | exception Division_by_zero -> 0
+    File "a.stag", line 2, characters 10-66:
+    2 | let f b = match b with true -> 1 | exception Division_by_zero -> 0
                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: Match failure: no case matches the value false
     |}]

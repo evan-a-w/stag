@@ -363,7 +363,7 @@ let%expect_test "output before a runtime error" =
   print_int 1;
   [%expect {| 1 |}];
   print_string "before";
-  match 2 with 1 -> ()
+  match 2 with 1 -> () [@@warning "-non-exhaustive"]
 |x};
   [%expect
     {xxx|

@@ -32,6 +32,9 @@ type t =
   (** The uses of toplevels being checked made by the code, by the innermost
       [let] whose definition is being checked. *)
   ; expansion : bool (** See [Reporter.expansion]. *)
+  ; warnings : Warning.Settings.t
+  (** At the code: those of its module, changed by enclosing [warning]
+      attributes. *)
   }
 
 and quote =
@@ -97,6 +100,10 @@ val splices : t -> bool
 
 val reporter : t -> Reporter.t
 val report : ?once:string -> t -> Typecheck_error.t -> unit
+
+(** Reports [warning], of the warning [name], as [t.warnings] say: not at all,
+    as a warning, or as an error. *)
+val warning : t -> Warning.Name.t -> Typecheck_error.t -> unit
 
 (** Whether the mode constraint held: if not, it is reported. Each limit is
     shown once, at what first exceeded it. *)

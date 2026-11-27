@@ -76,6 +76,17 @@ let lit : Lit.t -> Doc.t = function
   | Unit -> text "()"
 ;;
 
+let attribute position (a : Attribute.t) =
+  text
+    (sprintf
+       "[%s%s%s]"
+       (Attribute.Position.ats position)
+       a.name.txt
+       (match a.payload with
+        | None -> ""
+        | Some payload -> " " ^ string_literal payload.txt))
+;;
+
 (* [{a; b}], or broken with each item on its own line, followed by a [;] unless
    [~trailing:false], then the [tail]. *)
 let braces ?(opener = "{") ?(closer = "}") ?(trailing = true) ?tail items =
@@ -197,7 +208,7 @@ let level (e : Expr.t) : Level.t =
   | Region _
   | Forget _ -> Item
   | Assign _ | Store _ -> Assign
-  | Nontail _ -> Construct
+  | Nontail _ | Attributed _ -> Construct
   | Lit (Int n) when n < 0 -> Item
   | _ when is_construct e -> Construct
   | App _ -> App
@@ -294,13 +305,14 @@ module Kind = struct
     | Other
   [@@deriving equal]
 
-  let of_toplevel (t : Toplevel.t) =
+  let rec of_toplevel (t : Toplevel.t) =
     match t.txt with
     | Let _ | Let_nonrec _ | Let_mut _ -> Let
     | Type _ | Exception _ | External _ | Malformed_exception _ -> Type
     | Module_splice _ -> Module_splice
     | Include _ -> Include
-    | Module _ | Expect_test _ | Bench _ -> Other
+    | Attributed (t, _) -> of_toplevel t
+    | Module _ | Expect_test _ | Bench _ | Attribute _ -> Other
   ;;
 end
 
@@ -698,6 +710,13 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
   | Region body -> region roots ctx "region_" body
   | Nontail app ->
     group (expr roots (Ctx.at App) app ^^ nest 2 (line ^^ text "[@nontail]"))
+  | Attributed (inner, a) ->
+    let inner =
+      match (unwrap inner).txt with
+      | Nontail _ | Attributed _ -> expr roots (Ctx.at Construct) inner
+      | _ -> expr roots (Ctx.at App) inner
+    in
+    group (inner ^^ nest 2 (line ^^ attribute Expr a))
   | App _ ->
     let rec spine (e : Expr.t) args =
       match e.txt with
@@ -983,6 +1002,9 @@ and toplevel roots ~indent (t : Toplevel.t) =
         ^^ list_literal (list_items roots args)
     in
     definition lhs (expr_doc roots body)
+  | Attributed (item, a) ->
+    toplevel roots ~indent item ^^ group (nest 2 (line ^^ attribute Item a))
+  | Attribute a -> attribute Floating a
 
 and splice_toplevel roots ~indent ~keyword ~prefix e expansion =
   match (expansion : _ Located.t option) with

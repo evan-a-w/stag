@@ -6,6 +6,7 @@ module Checked = struct
     ; checked : Typecheck.Checked.t option
     ; driver : Driver.t option
     ; diagnostics : Diagnostic.t list
+    ; warnings : Diagnostic.t list
     }
 
   let to_result t =
@@ -28,6 +29,11 @@ module Checked = struct
     ; checked = Some checked
     ; driver = Option.filter driver ~f:(fun _ -> List.is_empty diagnostics)
     ; diagnostics
+    ; warnings =
+        Diagnostic.sort
+          (List.map
+             checked.warnings
+             ~f:(Diagnostic.of_typecheck_error ~warning:true))
     }
   ;;
 end
@@ -44,6 +50,7 @@ let parse_files files =
 let check_sources
   ?compile_time_c_calls
   ?record_references
+  ?warnings
   ?output
   ~prelude
   ~limits
@@ -55,11 +62,13 @@ let check_sources
     ; checked = None
     ; driver = None
     ; diagnostics = Diagnostic.sort errors
+    ; warnings = []
     }
   | Some modules ->
     Driver.check_modules
       ?compile_time_c_calls
       ?record_references
+      ?warnings
       ~limits
       ?output
       ?prelude:(Pipeline_config.Loaded_prelude.toplevels prelude)
@@ -72,7 +81,7 @@ let check
   ?record_references
   ?output
   ?(load_prelude = Pipeline_config.Loaded_prelude.load ?contents:None)
-  ({ prelude; limits } : Pipeline_config.t)
+  ({ prelude; limits; warnings } : Pipeline_config.t)
   sources
   =
   let%map.Result prelude = load_prelude prelude in
@@ -81,13 +90,14 @@ let check
       ?compile_time_c_calls
       ?record_references
       ?output
+      ~warnings
       ~prelude
       ~limits
       sources )
 ;;
 
-let check_prelude ?record_references ?output ~limits prelude =
-  Driver.check_prelude ?record_references ~limits ?output prelude
+let check_prelude ?record_references ?warnings ?output ~limits prelude =
+  Driver.check_prelude ?record_references ?warnings ~limits ?output prelude
   |> Checked.of_result
        ~groups:
          (Some

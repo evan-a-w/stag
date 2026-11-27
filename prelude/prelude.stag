@@ -254,6 +254,11 @@ module Stag = struct
     type t = string * Annot.t
   end
 
+  (* [[@name "payload"]], [[@@name "payload"]] or [[@@@name "payload"]]. *)
+  module Attribute = struct
+    type t = {`name : string; `payload : option[string]}
+  end
+
   module Pattern = struct
     module Rest = struct
       type t = Closed | Open | Bind of string
@@ -330,6 +335,8 @@ module Stag = struct
       | Annotated of ptr[t * Annot.t]
       (* [forget x, y in e]. *)
       | Forget of ptr[list[string] * t]
+      (* [e [@name "payload"]], of an attribute but [[@nontail]]. *)
+      | Attributed of ptr[t * Attribute.t]
 
     let var name = Var (Path.Name name, Annot.none)
     let construct name args = Construct (Path.Name name, args)
@@ -385,6 +392,10 @@ module Stag = struct
       | Bench of {`name : string;
                   `param : option[string * list[Expr.t]];
                   `body : Expr.t}
+      (* [item [@@name "payload"]]. *)
+      | Attributed of ptr[t * Attribute.t]
+      (* [[@@@name "payload"]]. *)
+      | Attribute of Attribute.t
 
     (* [let_ name params body] is [let name params = body]. *)
     let let_ name params body =

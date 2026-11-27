@@ -25,6 +25,7 @@ let create_typecheck
   ?(interpreter = Stag_treewalk.interpreter)
   ?compile_time_c_calls
   ?record_references
+  ?warnings
   ~limits
   ~output
   ?prelude
@@ -39,6 +40,7 @@ let create_typecheck
       ~interpreter
       ?compile_time_c_calls
       ?record_references
+      ?warnings
       ?prelude
       ()
   , interpreter )
@@ -47,6 +49,7 @@ let create_typecheck
 let check
   ?interpreter
   ?compile_time_c_calls
+  ?warnings
   ?(limits = Limits.unlimited)
   ?output
   ?prelude
@@ -56,6 +59,7 @@ let check
     create_typecheck
       ?interpreter
       ?compile_time_c_calls
+      ?warnings
       ~limits
       ~output
       ?prelude
@@ -84,7 +88,9 @@ module Module_group = struct
             | Module_splice _
             | Include _
             | Expect_test _
-            | Bench _ )
+            | Bench _
+            | Attributed _
+            | Attribute _ )
         ; _
         } -> raise_s [%message "Driver.check_modules: a file is not a module"]
   ;;
@@ -158,6 +164,7 @@ let check_modules
   ?interpreter
   ?compile_time_c_calls
   ?record_references
+  ?warnings
   ?(limits = Limits.unlimited)
   ?output
   ?prelude
@@ -168,6 +175,7 @@ let check_modules
       ?interpreter
       ?compile_time_c_calls
       ?record_references
+      ?warnings
       ~limits
       ~output
       ?prelude
@@ -197,6 +205,7 @@ let eval ?(limits = Limits.unlimited) ?(argv = []) t =
 let check_files
   ?interpreter
   ?compile_time_c_calls
+  ?warnings
   ?limits
   ?output
   ?prelude
@@ -214,6 +223,7 @@ let check_files
        check_modules
          ?interpreter
          ?compile_time_c_calls
+         ?warnings
          ?limits
          ?output
          ?prelude
@@ -232,12 +242,20 @@ let check_files
 let check_prelude
   ?interpreter
   ?record_references
+  ?warnings
   ?(limits = Limits.unlimited)
   ?output
   prelude
   =
   let typecheck, interpreter =
-    create_typecheck ?interpreter ?record_references ~limits ~output ~prelude ()
+    create_typecheck
+      ?interpreter
+      ?record_references
+      ?warnings
+      ~limits
+      ~output
+      ~prelude
+      ()
   in
   let%map.Result checked = Typecheck.check_prelude typecheck in
   { checked; interpreter; eval_order = toplevels checked.program.items }

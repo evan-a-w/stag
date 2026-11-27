@@ -13,11 +13,12 @@ type t =
   ; whole_file : bool
   ; message : string
   ; notes : Note.t list
+  ; warning : bool [@sexp.bool]
   }
 [@@deriving sexp_of]
 
-let create ?(notes = []) ?(whole_file = false) ~loc message =
-  { loc; whole_file; message; notes }
+let create ?(notes = []) ?(whole_file = false) ?(warning = false) ~loc message =
+  { loc; whole_file; message; notes; warning }
 ;;
 
 let sort ts = Loc.sort_by ts ~f:(fun t -> t.loc)
@@ -68,7 +69,7 @@ let declaration_source ?root_modules toplevel =
   indented_source (Printer.toplevel ~width:78 ?root_modules toplevel)
 ;;
 
-let of_typecheck_error (error : Typecheck_error.t) =
+let of_typecheck_error ?warning (error : Typecheck_error.t) =
   let root_modules =
     Option.map error.in_scope ~f:(fun in_scope -> in_scope.root_modules)
   in
@@ -173,6 +174,7 @@ let of_typecheck_error (error : Typecheck_error.t) =
     | _ -> []
   in
   create
+    ?warning
     ~notes:(notes error.kind)
     ~loc:error.loc
     (Typecheck_error.message error)
@@ -317,8 +319,7 @@ let located ~contents ~whole_file (loc : Loc.t) =
 
 let to_string_hum
   ?(contents = fun _ -> None)
-  ?(warning = false)
-  { loc; whole_file; message; notes }
+  { loc; whole_file; message; notes; warning }
   =
   let contents file =
     match contents file with
@@ -335,15 +336,17 @@ let to_string_hum
 
 let max_shown = 50
 
-let list_to_string_hum ?contents ?warning ts =
+let list_to_string_hum ?contents ts =
   let #(shown, hidden) = List.split_n ts max_shown in
-  String.concat (List.map shown ~f:(to_string_hum ?contents ?warning))
+  String.concat (List.map shown ~f:(to_string_hum ?contents))
   ^
   match List.length hidden with
   | 0 -> ""
-  | hidden ->
+  | count ->
     sprintf
       "... and %d more %s\n"
-      hidden
-      (if Option.value warning ~default:false then "warnings" else "errors")
+      count
+      (if List.for_all hidden ~f:(fun t -> t.warning)
+       then "warnings"
+       else "errors")
 ;;

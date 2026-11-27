@@ -9,6 +9,7 @@ type t =
   ; compile_time_c_calls : Compile_time_c_calls.t
   ; prelude : Syntax.Toplevel.t list Lazy.t
   ; record_references : bool
+  ; warnings : Warning.Settings.t
   }
 
 let create
@@ -17,6 +18,7 @@ let create
   ?(const_toplevels = false)
   ?(compile_time_c_calls = Compile_time_c_calls.none)
   ?(record_references = false)
+  ?(warnings = Warning.Settings.default)
   ?prelude
   ()
   =
@@ -32,6 +34,7 @@ let create
        | Some prelude -> Lazy.from_val prelude
        | None -> Prelude.toplevels)
   ; record_references
+  ; warnings
   }
 ;;
 
@@ -357,6 +360,7 @@ and check_toplevel_in
     ; owner = None
     ; uses = Uses.of_code program scc
     ; expansion = false
+    ; warnings = Module_scope.warnings toplevel.module_
     }
   in
   let modes = Scope.modes scope in
@@ -733,6 +737,23 @@ and expr_type
       (List.map names ~f:(fun (name : Syntax.Name.t) -> name.txt))
       ~level:scope.level
       ~f:(fun () -> expr_type t scope ~at ~expr:body)
+  | Attributed (inner, attribute) ->
+    let rec peel expr acc =
+      match Source.Expr.view expr with
+      | Attributed (inner, attr) -> peel inner (attr :: acc)
+      | _ -> expr, acc
+    in
+    let inner, attributes = peel inner [ attribute ] in
+    expr_type
+      ?expected
+      ~hint
+      ~applied
+      t
+      { scope with
+        warnings = Syntax.Attribute.apply_warnings attributes scope.warnings
+      }
+      ~at
+      ~expr:inner
   | Var (Ref var_ref) ->
     (match var_ref_type t scope ~at var_ref ~loc with
      | Error error -> fail error
@@ -1901,6 +1922,57 @@ and record_update_type
        in
        if unified then update else node (Error [ update ]) Type.error)
 
+(* Matches in generated code were checked where they were written, in quotes. *)
+and report_coverage (scope : Scope.t) ~loc ~scrutinee ~cases ~exception_cases =
+  let variant_constructors type_name =
+    match Type_env.variant_constructors scope.program.type_env type_name with
+    | Ok constructors ->
+      Option.map
+        constructors
+        ~f:
+          (List.map ~f:(fun (constructor : Type_env.Constructor.t) ->
+             ( { Typed.Constructor_ref.type_name
+               ; name = constructor.name
+               ; index = constructor.index
+               }
+             , List.length constructor.args )))
+    | Error (_ : Typecheck_error.t) -> None
+  in
+  (* Relative to the innermost enclosing module that has it. *)
+  let name canonical =
+    match Prelude_path.relative canonical with
+    | Some _ -> Prelude_path.to_string_hum canonical
+    | None ->
+      let path = Module_scope.path scope.module_ in
+      List.init (List.length path) ~f:(fun n ->
+        String.concat (List.take path (List.length path - n)) ~sep:"." ^ ".")
+      |> List.find_map ~f:(fun prefix -> String.chop_prefix canonical ~prefix)
+      |> Option.value ~default:canonical
+  in
+  let { Exhaustiveness.Result.missing; unused } =
+    Exhaustiveness.check_match ~variant_constructors ~name ~scrutinee cases
+  in
+  Option.iter missing ~f:(fun missing ->
+    Scope.warning
+      scope
+      Non_exhaustive
+      (Typecheck_error.create
+         ~loc
+         (Non_exhaustive_match (Exhaustiveness.Counterexample.to_string missing))));
+  let unused_cases kind cases unused =
+    List.iter unused ~f:(fun index ->
+      let (pattern : Typed.Pattern.t) = List.nth_exn cases index in
+      Scope.warning
+        scope
+        Unused_arm
+        (Typecheck_error.create ~loc:pattern.loc kind))
+  in
+  unused_cases Unused_arm cases unused;
+  unused_cases
+    Unused_exception_arm
+    exception_cases
+    (Exhaustiveness.check_exception_arms ~variant_constructors exception_cases)
+
 and match_type
   ?expected
   ~hint
@@ -2030,15 +2102,34 @@ and match_type
         have been known only from an annotation. *)
      ()
    | _ ->
-     Variant_match.close
-       t
+     counting_errors (fun () ->
+       Variant_match.close
+         t
+         scope
+         ~scrutinee:scrutinee.ty
+         ~loc
+         (List.map cases ~f:fst)
+       |> Result.iter_error ~f:(fun error ->
+         patterns_failed := true;
+         Scope.report scope error)));
+  (match expr with
+   | Syntax _
+     when not
+            (!patterns_failed
+             || Type.contains_error scrutinee.ty
+             || List.exists cases ~f:(fun ((pattern : Typed.Pattern.t), _) ->
+               Type.contains_error pattern.ty)
+             || List.exists
+                  exception_cases
+                  ~f:(fun ((pattern : Typed.Pattern.t), _) ->
+                    Type.contains_error pattern.ty)) ->
+     report_coverage
        scope
-       ~scrutinee:scrutinee.ty
        ~loc
-       (List.map cases ~f:fst)
-     |> Result.iter_error ~f:(fun error ->
-       patterns_failed := true;
-       Scope.report scope error));
+       ~scrutinee:scrutinee.ty
+       ~cases:(List.map cases ~f:fst)
+       ~exception_cases:(List.map exception_cases ~f:fst)
+   | Syntax _ | Generated _ -> ());
   let match_ = node (Match { scrutinee; cases; exception_cases }) result in
   if !patterns_failed then node (Error [ match_ ]) result else match_
 
@@ -2614,6 +2705,7 @@ module Checked = struct
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
     ; references : (Loc.t * Name_reference.t) list option
+    ; warnings : Typecheck_error.t list
     }
 end
 
@@ -2654,6 +2746,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; owner = None
   ; uses = Uses.of_code program scc
   ; expansion = false
+  ; warnings = Module_scope.warnings module_
   }
 ;;
 
@@ -2916,6 +3009,7 @@ let declare
   (toplevel : Syntax.Toplevel.t)
   ~generated_by
   =
+  let toplevel, _ = Syntax.Toplevel.unattributed toplevel in
   let generated =
     Option.map generated_by ~f:(fun splice -> Generated.create splice toplevel)
   in
@@ -3014,7 +3108,14 @@ let declare
       name
       Syntax.Annot.none
       (Located.create ~loc:toplevel.loc (Syntax.Expr.Lit Unit))
-  | (Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _), _ -> ()
+  | ( ( Module _
+      | Module_splice _
+      | Include _
+      | Expect_test _
+      | Bench _
+      | Attributed _
+      | Attribute _ )
+    , _ ) -> ()
 ;;
 
 module Deferred = struct
@@ -3035,6 +3136,7 @@ let check_declarations t (program : Program_env.t) module_ =
   Module_scope.iter_declarations
     module_
     ~f:(fun module_ (toplevel : Syntax.Toplevel.t) ~generated_by ->
+      let toplevel, _ = Syntax.Toplevel.unattributed toplevel in
       let defer (kind : Deferred.t) =
         let generated =
           Option.map generated_by ~f:(fun splice ->
@@ -3072,7 +3174,8 @@ let check_declarations t (program : Program_env.t) module_ =
       | Expect_test { name; body } -> defer (Deferred.Expect_test (name, body))
       | Bench { name; param; body } ->
         defer (Deferred.Bench (name, param, body))
-      | Module _ | Module_splice _ | Include _ -> ());
+      | Module _ | Module_splice _ | Include _ | Attributed _ | Attribute _ ->
+        ());
   Queue.to_list deferred
 ;;
 
@@ -3094,7 +3197,7 @@ let rec items (program_env : Program_env.t) module_ =
   List.filter_map
     (Module_scope.declarations module_)
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Typed.Program.Item.t option ->
-      match toplevel.txt with
+      match (fst (Syntax.Toplevel.unattributed toplevel)).txt with
       | Let ({ txt = name; loc = _ }, _, _, _)
       | Let_nonrec ({ txt = name; loc = _ }, _, _, _)
       | Let_mut ({ txt = name; loc = _ }, _, _)
@@ -3113,7 +3216,9 @@ let rec items (program_env : Program_env.t) module_ =
       | Malformed_exception _
       | Expect_test _
       | Bench _
-      | Include _ -> None)
+      | Include _
+      | Attributed _
+      | Attribute _ -> None)
 ;;
 
 let invalid_prelude error =
@@ -3122,7 +3227,7 @@ let invalid_prelude error =
 
 (* The prelude, outside the program's root module, sees the builtin types as the
    program does. *)
-let add_prelude (program : Program_env.t) toplevels =
+let add_prelude (program : Program_env.t) toplevels ~warnings =
   let builtins =
     Module_scope.create_root
       ~types:builtin_names
@@ -3136,6 +3241,7 @@ let add_prelude (program : Program_env.t) toplevels =
     Module_scope.create_root
       ~enclosing:builtins
       ~path:[ Prelude_path.root ]
+      ~warnings
       ~types:[]
       ~declare:(declare program ~in_prelude:true)
       ~force:no_splices
@@ -3157,8 +3263,8 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
   List.filter_map
     (Module_scope.declarations module_)
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
-      match toplevel.txt with
-      | Expect_test _ | Bench _ | Include _ -> None
+      match (fst (Syntax.Toplevel.unattributed toplevel)).txt with
+      | Expect_test _ | Bench _ | Include _ | Attributed _ | Attribute _ -> None
       | Let ({ txt = name; loc = _ }, _, _, _)
       | Let_nonrec ({ txt = name; loc = _ }, _, _, _)
       | Let_mut ({ txt = name; loc = _ }, _, _)
@@ -3242,9 +3348,10 @@ let program_env
 ;;
 
 (* The program's root module, within the prelude. *)
-let root t program_env ~enclosing =
+let root t program_env ~enclosing ~warnings =
   Module_scope.create_root
     ~enclosing
+    ~warnings
     ~types:builtin_names
     ~declare:(declare program_env ~in_prelude:false)
     ~force:(generate t program_env)
@@ -3276,8 +3383,10 @@ let sorted_errors errors ~root =
 ;;
 
 let prelude_and_root t program_env =
-  let prelude = add_prelude program_env (force t.prelude) in
-  prelude, root t.fresh program_env ~enclosing:prelude
+  let prelude =
+    add_prelude program_env (force t.prelude) ~warnings:Warning.Settings.off
+  in
+  prelude, root t.fresh program_env ~enclosing:prelude ~warnings:t.warnings
 ;;
 
 let prelude_signature ({ fresh; stamps; interpreter; _ } as t) =
@@ -3345,6 +3454,7 @@ let check_module t (program_env : Program_env.t) module_
     ; program
     ; expansions = expansions module_
     ; references = Type_env.references program_env.type_env
+    ; warnings = sorted_errors (Program_env.warnings program_env) ~root:module_
     }
   in
   match errors with
@@ -3377,6 +3487,7 @@ let check_prelude
   ; const_toplevels
   ; compile_time_c_calls
   ; record_references
+  ; warnings
   }
   =
   let program_env =
@@ -3389,6 +3500,6 @@ let check_prelude
       ~record_references
       interpreter
   in
-  let prelude = add_prelude program_env (force prelude) in
+  let prelude = add_prelude program_env (force prelude) ~warnings in
   check_module fresh program_env prelude
 ;;

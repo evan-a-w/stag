@@ -25,6 +25,7 @@ type t =
   ; owner : Allocation_sites.Frame.t option
   ; uses : Local_uses.t
   ; expansion : bool
+  ; warnings : Warning.Settings.t
   }
 
 and quote =
@@ -168,6 +169,14 @@ let reporter t =
 
 let report ?once t (error : Typecheck_error.t) =
   Program_env.report_by t.program (reporter t) ?once error
+;;
+
+let warning t name (warning : Typecheck_error.t) =
+  let once = Sexp.to_string [%sexp (warning : Typecheck_error.t)] in
+  match Warning.Settings.level t.warnings name with
+  | Off -> ()
+  | Warn -> Program_env.warn t.program (reporter t) ~once warning
+  | Error -> report t ~once warning
 ;;
 
 let mode_holds t ~loc = function

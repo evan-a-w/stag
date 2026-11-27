@@ -227,6 +227,7 @@ val arrow : ty -> ty -> ty
 
 val error_name : string
 val is_error : ty -> bool
+val contains_error : ty -> bool
 val ptr_name : string
 
 (** [ptr[pointee @@ held]], by default [ptr[pointee]], whose cell holds only

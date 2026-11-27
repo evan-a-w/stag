@@ -8,8 +8,10 @@ type t =
 [@@deriving sexp_of]
 
 let create splice (toplevel : Syntax.Toplevel.t) =
-  let declaration =
+  let rec declaration (toplevel : Syntax.Toplevel.t) =
     match toplevel.txt with
+    | Attributed (toplevel, _) -> declaration toplevel
+    | Attribute attribute -> sprintf "[@@@%s]" attribute.name.txt
     | Let (name, _, _, _) -> "let " ^ name.txt
     | Let_nonrec (name, _, _, _) -> "let nonrec " ^ name.txt
     | Let_mut (name, _, _) -> "let mut " ^ name.txt
@@ -23,6 +25,7 @@ let create splice (toplevel : Syntax.Toplevel.t) =
     | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
     | Bench { name; _ } -> sprintf "let%%bench %S" name.txt
   in
+  let declaration = declaration toplevel in
   { splice = Module_scope.Splice.loc splice; declaration; generated = toplevel }
 ;;
 

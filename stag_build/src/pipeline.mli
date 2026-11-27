@@ -12,6 +12,7 @@ module Checked : sig
         [Typecheck.Failed.partial]. *)
     ; driver : Driver.t option (** If there are no [diagnostics]. *)
     ; diagnostics : Diagnostic.t list (** Parse and type errors, by location. *)
+    ; warnings : Diagnostic.t list (** By location. *)
     }
 
   val to_result : t -> (Driver.t, Diagnostic.t list) Result.t
@@ -25,10 +26,11 @@ val parse_files
 
 (** Checks the program [groups], if it parsed, with [errors] (its parse errors),
     seeing [prelude] within [limits]. [output] is as for [Driver.check],
-    [record_references] as for [Typecheck.create]. *)
+    [record_references] and [warnings] as for [Typecheck.create]. *)
 val check_sources
   :  ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?record_references:bool
+  -> ?warnings:Warning.Settings.t
   -> ?output:(string -> unit)
   -> prelude:Pipeline_config.Loaded_prelude.t
   -> limits:Limits.t
@@ -53,6 +55,7 @@ val check
     [Prelude_path.root] of its toplevels. *)
 val check_prelude
   :  ?record_references:bool
+  -> ?warnings:Warning.Settings.t
   -> ?output:(string -> unit)
   -> limits:Limits.t
   -> Syntax.Toplevel.t list

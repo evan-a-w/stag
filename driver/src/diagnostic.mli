@@ -18,10 +18,17 @@ type t =
       source. *)
   ; message : string
   ; notes : Note.t list
+  ; warning : bool (** Shown as a warning, not an error. *)
   }
 [@@deriving sexp_of]
 
-val create : ?notes:Note.t list -> ?whole_file:bool -> loc:Loc.t -> string -> t
+val create
+  :  ?notes:Note.t list
+  -> ?whole_file:bool
+  -> ?warning:bool
+  -> loc:Loc.t
+  -> string
+  -> t
 
 (** Stably sorted by location ([Loc.sort_by]). *)
 val sort : t list -> t list
@@ -31,7 +38,7 @@ val relocate : t -> f:(Loc.t -> Loc.t) @ local -> t
 
 val of_parse_error : Parser.Error.t -> t
 val of_source_file_error : Source_file.Error.t -> t
-val of_typecheck_error : Typecheck_error.t -> t
+val of_typecheck_error : ?warning:bool -> Typecheck_error.t -> t
 val of_driver_error : Driver.Error.t -> t
 
 (** An error of evaluation, located if it is a [Runtime_error]. *)
@@ -52,20 +59,12 @@ Error: message
     Then each note likewise, with [Note:] for [Error:]. The quoted source is
     that of [contents] of the file, if given and the span is in it. Spans of
     several lines quote them (elided in the middle when there are many) without
-    underlining. With [warning], [Warning:] for [Error:]. *)
-val to_string_hum
-  :  ?contents:(string -> string option)
-  -> ?warning:bool
-  -> t
-  -> string
+    underlining. A [warning] says [Warning:] for [Error:]. *)
+val to_string_hum : ?contents:(string -> string option) -> t -> string
 
 (** Each as [to_string_hum], the first [max_shown] only, then a line of how many
-    more there are. *)
-val list_to_string_hum
-  :  ?contents:(string -> string option)
-  -> ?warning:bool
-  -> t list
-  -> string
+    more there are, which are warnings if all are. *)
+val list_to_string_hum : ?contents:(string -> string option) -> t list -> string
 
 (** 50. *)
 val max_shown : int

@@ -167,7 +167,7 @@ let f = let x = 1 in .~(x; .<1>.)
 let%expect_test "toplevels are only evaluated if used at compile time" =
   run
     ~eval:false
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let fails = match B with A -> 0
 let loops = let f x = f x in f ()
@@ -176,13 +176,13 @@ let used_code = .<1>.
 let spliced = .~used_code
 |};
   run
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let fails = match B with A -> 0
 let spliced = .~(.<1>.)
 |};
   run
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let fails = match B with A -> 0
 let spliced = .~(fails; .<1>.)
@@ -213,7 +213,8 @@ let spliced = .~(fails; .<1>.)
 ;;
 
 let%expect_test "splice evaluation failures" =
-  run {|
+  run
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let x = .~(match B with A -> .<0>.)
 |};
@@ -375,7 +376,7 @@ let%expect_test "closures made at compile time read the toplevels they capture \
   =
   run
     ~eval:false
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let fails = match B with A -> 0
 let n = 3
@@ -495,7 +496,7 @@ let f = .~(x; .<2>.)
 
 let%expect_test "toplevels of a component are evaluated separately" =
   run
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type abc = A | B
 let f x = v; forget x in .<x>.
 let v = f; match B with A -> 0

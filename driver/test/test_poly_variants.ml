@@ -175,7 +175,7 @@ let later_cases v k = match v with `A -> 1 | other -> k other | `B -> 2
 
 let%expect_test "nested variant patterns stay open" =
   check
-    {|
+    {|[@@@warning "-non-exhaustive"]
 type option['a] = None | Some of 'a
 let pair p = match p with (`A, `B) -> 1
 let inner v = match v with `A `B -> 1
@@ -275,11 +275,15 @@ let unknown c (v : [..'r]) =
 let absent c (v : [..'d]) =
   .< .< let z = 1 in .~(.~(c : <<'a>{..'c}>{..'d})) >. >.;
   v
+let closed_optional (v : [..'r]) (c : <int>{..'r}) =
+  let _ : <int>{a : int} = .< let y = 1 in .~c >. in
+  match v with `a n -> n
 |};
   [%expect
     {|
     val unknown : <int>{y?'a : immut int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b]
     val absent : <<'a>{z?'b : immut int; ..'c}>{-z; ..'d} -> [-`z; ..'d] -> [-`z; ..'d]
+    val closed_optional : [`a of int] -> <int>{a : immut int} -> int
     |}]
 ;;
 
