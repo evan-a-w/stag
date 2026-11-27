@@ -672,7 +672,7 @@ and apply_prim t ctx prim applied args ~site =
         | _ -> unsupported "a prim of a non-prim value")
     in
     let result =
-      match Prim.apply prim ~output:ignore values with
+      match Prim.apply prim ~io:{ output = ignore; argv = [] } values with
       | Ok value -> Prim_value value
       | Error _ -> unsupported "a prim raising"
     in

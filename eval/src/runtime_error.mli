@@ -33,6 +33,7 @@ module Kind : sig
     | Reached_error
     (** Code that did not check ([Typed.Expr.Desc.Error]), whose error was
         reported when checking it. *)
+    | Exited of int (** [exit], with its code. *)
   [@@deriving sexp_of]
 end
 
@@ -59,3 +60,6 @@ val of_error : Error.t -> t option
 
 (** The exception an error raises, if it is one. *)
 val raised : Error.t -> Raised.t option
+
+(** The code the program exited with, if [error] is its [exit]. *)
+val exit_code : Error.t -> int option

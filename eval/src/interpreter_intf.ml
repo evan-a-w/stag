@@ -30,6 +30,10 @@ module type S = sig
   (** Where prims print to, stdout by default. *)
   val set_output : t -> (string -> unit) -> unit
 
+  (** The program's arguments, without its name, as [argv ()] returns them: none
+      by default. *)
+  val set_argv : t -> string list -> unit
+
   (** Runs [f] with prims printing to [output], then restores the previous. *)
   val with_output : t -> (string -> unit) -> f:(unit -> 'a) @ local -> 'a
 

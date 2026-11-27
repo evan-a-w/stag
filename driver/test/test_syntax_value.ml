@@ -30,7 +30,24 @@ let%expect_test "the prelude's signature" =
     exception Division_by_zero
     exception Invalid_argument of string
     exception Failure of string
+    exception Sys_error of string
     val raise : exn -> 'a
+    val exit : int -> 'a
+    module C : sig
+      type int8
+      type int16
+      type int32
+      type int64
+      type uint8
+      type uint16
+      type uint32
+      type uint64
+      type int
+      type uint
+      type long
+      type ulong
+      type size_t
+    end
     module Ptr : sig
       val make : 'a -> ptr['a]
     end

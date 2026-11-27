@@ -830,20 +830,76 @@ let as_external : Core.Lru.t[int, string, external] = cache
 (* Error: but an expression was expected of type Core.Lru.t[int, string, external] *)
 ```
 
+## Input and output
+
+Besides `print_*`, prims write to stderr, read stdin, read and write whole
+files, and give the program's arguments: `stag run main.stag -- a b` makes
+`argv ()` return `["a"; "b"]`. Failed system calls (including writes to stdout)
+raise `Sys_error`, and `exit` ends the program with an exit code in 0..255;
+others are errors. Output is flushed before reading stdin, writing to stderr,
+calling C, and on exit (by `exit`, returning, or an uncaught exception), so it
+keeps its order. `prerr_*` writes straight to stderr, so an expect test doesn't
+see it.
+
+```stag
+let args = argv ()                  (* val args : list[string] = Nil *)
+let missing =
+  match read_file "/nonexistent/stag.txt" with
+  | contents -> contents
+  | exception Sys_error message -> message
+(* val missing : string = "/nonexistent/stag.txt: No such file or directory" *)
+
+(* Echoes stdin to stdout, line by line, then exits with [code]. *)
+let echo_then_exit code =
+  let loop _ =
+    match read_line () with
+    | Some line -> print_endline line; loop ()
+    | None -> flush (); exit code
+  in
+  loop ()
+(* val echo_then_exit : int -> 'a *)
+let copy src dst = write_file dst (read_file src)
+let warn message = prerr_endline (String.append "warning: " message)
+```
+
+At compile time, programs may print, but not read or write files, read
+stdin, see their arguments or exit, so checking a program never changes
+anything, and depends only on its sources.
+
+```stag-error
+let x = .~(write_file "out.txt" ""; .< 1 >.)
+(* Error: write_file can't be called at compile time *)
+```
+
 ## C functions
 
-`external` binds a C function, called through libffi. For now only immediates
-(`int`, `bool`, `char`, `unit`) may cross.
+`external` binds a C function, called through libffi. Its type says the C
+types: `int`, `bool` and `char` as themselves (an `int` is an `int64_t`), C's
+integer types as `C.int`, `C.uint8`, `C.size_t` etc., and `unit` results as
+`void`. Stag sees each C integer type as an `int`: arguments are range checked,
+and so are results, as an `int` has 63 bits. A `string` argument is passed as a
+`const char *` to a NUL-terminated copy, valid only during the call.
 
 ```stag
 external labs : int -> int = "labs"
 let a = labs (Int.sub 0 42)         (* val a : int = 42 *)
+external strlen : string -> C.size_t = "strlen"
+let n = strlen "hello"              (* val n : int = 5 *)
+external toupper : C.int -> C.int = "toupper"
+let upper = Core.Char.of_code_exn (toupper (Core.Char.code 'a'))   (* val upper : char = 'A' *)
 ```
 
+Other pointers can't cross yet, so neither can a `string` result.
+
 ```stag-error
-external strlen : string -> int = "strlen"
-(* Error: string *)
+external getenv : string -> string = "getenv"
+(* Error: string would be returned by C as a pointer *)
 ```
+
+Buffered output is flushed before every C call, so a C function writing to the
+same file descriptors, or calling `exit`, sees it in order. C's stdio has its
+own buffers, though: C's `stdout` is flushed only by C, and C reading stdin
+doesn't see what stag has buffered of it, nor stag what C has.
 
 At compile time, C calls are only allowed in libraries whose stanza says
 `(compile_time_c_calls)` (see the project above).

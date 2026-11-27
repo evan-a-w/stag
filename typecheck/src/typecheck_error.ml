@@ -740,14 +740,14 @@ let rec kind_message (kind : Kind.t) ~show_type =
       | Not_a_function -> "it must be a function"
       | Argument ty ->
         sprintf
-          "C functions can't take arguments of type %s, only int, bool and \
-           char%s"
+          "C functions can't take arguments of type %s, only int, C integer \
+           types (C.int etc.), bool, char and string%s"
           (Type.Printer.ty printer ty)
           (Type.Printer.where printer)
       | Result ty ->
         sprintf
-          "C functions can't return values of type %s, only int, bool, char \
-           and unit%s"
+          "C functions can't return values of type %s, only int, C integer \
+           types (C.int etc.), bool, char and unit%s"
           (Type.Printer.ty printer ty)
           (Type.Printer.where printer)
       | Unit_argument ->
@@ -755,6 +755,11 @@ let rec kind_message (kind : Kind.t) ~show_type =
       | Pointer ty ->
         sprintf
           "%s would be passed to C as a pointer, which is not supported yet%s"
+          (Type.Printer.ty printer ty)
+          (Type.Printer.where printer)
+      | Pointer_result ty ->
+        sprintf
+          "%s would be returned by C as a pointer, which is not supported yet%s"
           (Type.Printer.ty printer ty)
           (Type.Printer.where printer)
     in

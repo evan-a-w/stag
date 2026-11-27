@@ -15,6 +15,7 @@ type t =
   | Value_ref_name (** [Stag.Value_ref.t -> string] *)
   | Erase (** [<'a>{..'r} -> Stag.Expr.t] *)
   | Raise (** [exn -> 'a] *)
+  | Exit (** [int -> 'a], ending the program with that exit code *)
   | Ptr_make (** ['a -> ptr['a]] *)
   | Box_make (** ['a -> box['a]] *)
   | Assume_global (** ['a @ local -> 'a] *)

@@ -31,6 +31,7 @@ module Kind = struct
     | Message of string
     | Raised of Raised.t
     | Reached_error
+    | Exited of int
   [@@deriving sexp_of]
 end
 
@@ -48,6 +49,7 @@ let message t =
   | Message message -> message
   | Raised exn -> "Uncaught exception " ^ Raised.to_string_for_message exn
   | Reached_error -> "Reached code that did not check"
+  | Exited code -> sprintf "Exited with code %d" code
 ;;
 
 exception Runtime_error of t
@@ -72,5 +74,11 @@ let of_error error =
 let raised error =
   match of_error error with
   | Some { kind = Raised exn; loc = _ } -> Some exn
-  | Some { kind = Message _ | Reached_error; loc = _ } | None -> None
+  | Some { kind = Message _ | Reached_error | Exited _; loc = _ } | None -> None
+;;
+
+let exit_code error =
+  match of_error error with
+  | Some { kind = Exited code; loc = _ } -> Some code
+  | Some { kind = Message _ | Raised _ | Reached_error; loc = _ } | None -> None
 ;;

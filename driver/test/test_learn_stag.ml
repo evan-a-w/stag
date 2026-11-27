@@ -882,18 +882,48 @@ let%expect_test "learn_stag.md" =
                                                                 ^^^^^
     Error: This expression has type Core.Lru.t[int, string, gc] but an expression was expected of type Core.Lru.t[int, string, external]
     Their modes differ: The modes external and gc must be equal, because the types are unified
-    === learn_stag.md:838
+    === learn_stag.md:844
+    module Doc : sig
+      val args : list[string]
+      val missing : string
+      val echo_then_exit : int -> 'a
+      val copy : string -> string -> unit
+      val warn : string -> unit
+    end
+    Doc.args = Nil
+    Doc.missing = "/nonexistent/stag.txt: No such file or directory"
+    Doc.echo_then_exit = <fun>
+    Doc.copy = <fun>
+    Doc.warn = <fun>
+    === learn_stag.md:869
+    File "doc.stag", line 870, characters 8-44:
+    870 | let x = .~(write_file "out.txt" ""; .< 1 >.)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This toplevel splice failed at compile time: write_file can't be called at compile time
+    File "doc.stag", line 870, characters 11-34:
+    870 | let x = .~(write_file "out.txt" ""; .< 1 >.)
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The error was raised here
+    === learn_stag.md:883
     module Doc : sig
       val labs : int -> int
       val a : int
+      val strlen : string -> int
+      val n : int
+      val toupper : int -> int
+      val upper : char
     end
     Doc.labs = <fun>
     Doc.a = 42
-    === learn_stag.md:843
-    File "doc.stag", line 844, characters 18-31:
-    844 | external strlen : string -> int = "strlen"
-                            ^^^^^^^^^^^^^
-    Error: The external strlen has no C signature: string would be passed to C as a pointer, which is not supported yet
+    Doc.strlen = <fun>
+    Doc.n = 5
+    Doc.toupper = <fun>
+    Doc.upper = 'A'
+    === learn_stag.md:894
+    File "doc.stag", line 895, characters 18-34:
+    895 | external getenv : string -> string = "getenv"
+                            ^^^^^^^^^^^^^^^^
+    Error: The external getenv has no C signature: string would be returned by C as a pointer, which is not supported yet
     |}]
 ;;
 

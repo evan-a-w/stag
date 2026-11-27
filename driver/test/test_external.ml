@@ -155,18 +155,17 @@ external q : int -> ptr[int] = "q"
   [%expect
     {|
     The external a has no C signature: it must be a function
-    The external b has no C signature: C functions can't take arguments of type list[int], only int, bool and char
-    The external c has no C signature: string would be passed to C as a pointer, which is not supported yet
-    The external d has no C signature: C functions can't take arguments of type int -> int, only int, bool and char
+    The external b has no C signature: C functions can't take arguments of type list[int], only int, C integer types (C.int etc.), bool, char and string
+    The external c has no C signature: string would be returned by C as a pointer, which is not supported yet
+    The external d has no C signature: C functions can't take arguments of type int -> int, only int, C integer types (C.int etc.), bool, char and string
     The external e has no C signature: unit can only be the only argument, of a C function of no arguments
-    The external f has no C signature: C functions can't take arguments of type r, only int, bool and char
-    The external g has no C signature: C functions can't return values of type int * int, only int, bool, char and unit
+    The external f has no C signature: C functions can't take arguments of type r, only int, C integer types (C.int etc.), bool, char and string
+    The external g has no C signature: C functions can't return values of type int * int, only int, C integer types (C.int etc.), bool, char and unit
     Unbound type variable 'a
-    The external i has no C signature: C functions can't take arguments of type <int>{}, only int, bool and char
+    The external i has no C signature: C functions can't take arguments of type <int>{}, only int, C integer types (C.int etc.), bool, char and string
     The external k has no C signature: it must be a function
-    The external s has no C signature: string would be passed to C as a pointer, which is not supported yet
     The external p has no C signature: ptr[int] would be passed to C as a pointer, which is not supported yet
-    The external q has no C signature: ptr[int] would be passed to C as a pointer, which is not supported yet
+    The external q has no C signature: ptr[int] would be returned by C as a pointer, which is not supported yet
     |}]
 ;;
 
@@ -407,4 +406,268 @@ let%expect_test "the prelude's and core's externals may always be called at \
      (policy (Denied (external_ Foo.labs) (library (foo)))))
     ("denying Foo" Bar.labs (policy (Denied (external_ Bar.labs) (library ()))))
     |}]
+;;
+
+(* C's [abs] returns an [int]: read as an [int64_t], its sign would be lost, as
+   [abs] of the least [int] is itself. *)
+let%expect_test "C integer types are converted to and from int" =
+  run
+    {|
+external abs : C.int -> C.int = "abs"
+external atoi : string -> C.int = "atoi"
+let least = abs (Int.sub (Int.sub 0 2147483647) 1)
+let minus_one = atoi "-1"
+external labs : C.long -> C.long = "labs"
+external to_upper : C.int -> C.int = "toupper"
+external narrow : C.int8 -> C.uint8 = "abs"
+let negative = abs (Int.sub 0 7)
+let small = labs (Int.sub 0 7)
+let upper = to_upper 97
+let widened = narrow (Int.sub 0 1)
+|};
+  [%expect
+    {|
+    val abs : int -> int
+    val atoi : string -> int
+    val least : int
+    val minus_one : int
+    val labs : int -> int
+    val to_upper : int -> int
+    val narrow : int -> int
+    val negative : int
+    val small : int
+    val upper : int
+    val widened : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs <fun>)
+    (atoi <fun>)
+    (least -2147483648)
+    (minus_one -1)
+    (labs <fun>)
+    (to_upper <fun>)
+    (narrow <fun>)
+    (negative 7)
+    (small 7)
+    (upper 65)
+    (widened 1)
+    |}]
+;;
+
+(* Each case runs on its own, as an error stops the evaluation. *)
+let%expect_test "C integer arguments out of range err" =
+  List.iter
+    [ "let max_int32 = abs 2147483647"
+    ; "let too_big = abs 2147483648"
+    ; "let too_small = abs (Int.sub (Int.sub 0 2147483647) 2)"
+    ; "let negative_unsigned = byte (Int.sub 0 1)"
+    ; "let too_big_byte = byte 256"
+    ]
+    ~f:(fun line ->
+      run
+        ({|
+external abs : C.int -> C.int = "abs"
+external byte : C.uint8 -> C.uint8 = "abs"
+|}
+         ^ line));
+  [%expect
+    {|
+    val abs : int -> int
+    val byte : int -> int
+    val max_int32 : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs <fun>)
+    (byte <fun>)
+    (max_int32 2147483647)
+    val abs : int -> int
+    val byte : int -> int
+    val too_big : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs <fun>)
+    (byte <fun>)
+    ("The external abs could not be called: argument 1 (2147483648) is out of the range of C.int"
+     @ t.stag:4:14-28)
+    val abs : int -> int
+    val byte : int -> int
+    val too_small : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs <fun>)
+    (byte <fun>)
+    ("The external abs could not be called: argument 1 (-2147483649) is out of the range of C.int"
+     @ t.stag:4:16-54)
+    val abs : int -> int
+    val byte : int -> int
+    val negative_unsigned : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs <fun>)
+    (byte <fun>)
+    ("The external abs could not be called: argument 1 (-1) is out of the range of C.uint8"
+     @ t.stag:4:24-42)
+    val abs : int -> int
+    val byte : int -> int
+    val too_big_byte : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs <fun>)
+    (byte <fun>)
+    ("The external abs could not be called: argument 1 (256) is out of the range of C.uint8"
+     @ t.stag:4:19-27)
+    |}]
+;;
+
+(* [atoll] returns a [long long], which may be out of the range of [int]. *)
+let%expect_test "C results out of the range of int err" =
+  List.iter
+    [ {|let max = atoll "4611686018427387903"|}
+    ; {|let too_big = atoll "4611686018427387904"|}
+    ; {|let min = atoll "-4611686018427387904"|}
+    ; {|let too_small = atoll "-4611686018427387905"|}
+    ]
+    ~f:(fun line ->
+      run ({|
+external atoll : string -> C.int64 = "atoll"
+|} ^ line));
+  [%expect
+    {|
+    val atoll : string -> int
+    val max : int
+    -- evaluated at compile time
+    -- evaluated
+    (atoll <fun>)
+    (max 4611686018427387903)
+    val atoll : string -> int
+    val too_big : int
+    -- evaluated at compile time
+    -- evaluated
+    (atoll <fun>)
+    ("The external atoll could not be called: it returned 4611686018427387904, which is out of the range of int (63 bits)"
+     @ t.stag:3:14-41)
+    val atoll : string -> int
+    val min : int
+    -- evaluated at compile time
+    -- evaluated
+    (atoll <fun>)
+    (min -4611686018427387904)
+    val atoll : string -> int
+    val too_small : int
+    -- evaluated at compile time
+    -- evaluated
+    (atoll <fun>)
+    ("The external atoll could not be called: it returned -4611686018427387905, which is out of the range of int (63 bits)"
+     @ t.stag:3:16-44)
+    |}]
+;;
+
+let%expect_test "strings are passed to C as NUL-terminated copies" =
+  run
+    {|
+external strlen : string -> C.size_t = "strlen"
+external atoi : string -> C.int = "atoi"
+external strcmp : string -> string -> C.int = "strcmp"
+let len = strlen "hello"
+let empty = strlen ""
+let parsed = atoi "-42"
+let compared = (strcmp "a" "b", strcmp "b" "b")
+|};
+  [%expect
+    {|
+    val strlen : string -> int
+    val atoi : string -> int
+    val strcmp : string -> string -> int
+    val len : int
+    val empty : int
+    val parsed : int
+    val compared : int * int
+    -- evaluated at compile time
+    -- evaluated
+    (strlen <fun>)
+    (atoi <fun>)
+    (strcmp <fun>)
+    (len 5)
+    (empty 0)
+    (parsed -42)
+    (compared (Tuple -1 0))
+    |}];
+  run
+    {|
+external strlen : string -> C.size_t = "strlen"
+let nul = strlen "a\000b"
+|};
+  [%expect
+    {|
+    val strlen : string -> int
+    val nul : int
+    -- evaluated at compile time
+    -- evaluated
+    (strlen <fun>)
+    ("The external strlen could not be called: argument 1, the string \"a\\000b\", has a NUL character, so can't be passed to C"
+     @ t.stag:3:10-25)
+    |}];
+  run
+    {|
+external strcmp : string -> string -> C.int = "strcmp"
+let long = strcmp "fine" "a string longer than is shown in an error, \000 with a NUL"
+|};
+  [%expect
+    {|
+    val strcmp : string -> string -> int
+    val long : int
+    -- evaluated at compile time
+    -- evaluated
+    (strcmp <fun>)
+    ("The external strcmp could not be called: argument 2, the string \"a string longer than is shown in\"..., has a NUL character, so can't be passed to C"
+     @ t.stag:3:11-85)
+    |}];
+  run
+    {|
+external abs3 : C.int -> C.uint8 -> C.int8 -> C.int = "abs"
+let second = abs3 1 256 0
+|};
+  [%expect
+    {|
+    val abs3 : int -> int -> int -> int
+    val second : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs3 <fun>)
+    ("The external abs could not be called: argument 2 (256) is out of the range of C.uint8"
+     @ t.stag:3:13-25)
+    |}];
+  run
+    {|
+external abs3 : C.int -> C.uint8 -> C.int8 -> C.int = "abs"
+let third = abs3 1 2 128
+|};
+  [%expect
+    {|
+    val abs3 : int -> int -> int -> int
+    val third : int
+    -- evaluated at compile time
+    -- evaluated
+    (abs3 <fun>)
+    ("The external abs could not be called: argument 3 (128) is out of the range of C.int8"
+     @ t.stag:3:12-24)
+    |}]
+;;
+
+let%expect_test "an external's C integer types and strings, with modes" =
+  modes
+    {|
+external strlen : string @ local -> C.size_t @ portable = "strlen"
+let f (s @ local) = strlen s
+external r : int -> C.int8 = "r"
+|};
+  [%expect
+    {|
+    val strlen : string @ local -> int @ portable
+    val f : string @ 'm0 -> int @ _ with local <= 'm0 and 'm0 <= gc
+    val r : int -> int
+    |}];
+  modes {|external c : C.int -> string = "c"|};
+  [%expect
+    {| The external c has no C signature: string would be returned by C as a pointer, which is not supported yet |}]
 ;;

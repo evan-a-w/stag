@@ -489,7 +489,14 @@ and check_external
             ~loc:declared.loc
             (Invalid_external { symbol = symbol.txt; problem }))
      | Ok signature ->
-       ignore (Scope.unifies t scope ~ty1:ty ~ty2:declared_ty ~loc : bool);
+       ignore
+         (Scope.unifies
+            t
+            scope
+            ~ty1:ty
+            ~ty2:(C_signature.value_type declared_ty)
+            ~loc
+          : bool);
        { desc = External { symbol = symbol.txt; signature; at_compile_time }
        ; ty
        ; loc
