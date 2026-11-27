@@ -1,12 +1,7 @@
 open! Import
 
-(* The examples here match only the cases they reflect. *)
-let partial_matches source = {|[@@@warning "-non-exhaustive"]|} ^ source
-let check ?run source = File_check.check ?run (partial_matches source)
-
-let run source =
-  Source_helpers.run ~prelude:false (partial_matches source) ~eval:false
-;;
+let check = File_check.check
+let run source = Source_helpers.run ~prelude:false source ~eval:false
 
 let%expect_test "the type of a type" =
   check
@@ -80,7 +75,7 @@ let h = g (type list[string])
 
 (* [head ty] is the ref of the declared type [ty] is an instance of. *)
 let reflect =
-  {|
+  {|[@@@warning "-non-exhaustive"]
 let head ty =
   match Stag.Type.expr ty with
   | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r

@@ -20,9 +20,10 @@ val pattern_type
 
 val add_case : t -> Typed.Pattern.t -> t
 
-(** Without a top level catch-all, a variant scrutinee may only have the tags of
-    the cases, and an empty match's none, unless the scrutinee is already known
-    to be an empty nominal type. *)
+(** Without a top level catch-all, an open variant scrutinee is closed to the
+    tags of the cases, and an empty match's to none, unless the scrutinee is
+    already known to be an empty nominal type. A variant scrutinee whose row is
+    already closed without shadowed tags is left to exhaustiveness checking. *)
 val close
   :  Fresh.t
   -> Scope.t

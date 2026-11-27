@@ -73,7 +73,7 @@ and t =
   ; position : Position.t
   ; warnings : Warning.Settings.t
   ; hidden : Member.t option
-    (* Not visible from here, but from the enclosing module: of [nonrec]. *)
+  (* Not visible from here, but from the enclosing module: of [nonrec]. *)
   }
 
 and entry =
@@ -137,6 +137,7 @@ let join path = String.concat path ~sep:"."
 let sexp_of_t t = Sexp.Atom (join t.module_.path)
 let canonical_name t name = join (t.module_.path @ [ name ])
 let path t = t.module_.path
+
 let at_end module_ =
   { module_; position = End; warnings = module_.warnings; hidden = None }
 ;;

@@ -87,7 +87,9 @@ let only_minus_one t = match t with A -1 -> 0
 let matched = only_minus_one (A -1)
 let failure = only_minus_one (A -2)
 |};
-  eval "[@@@warning \"-non-exhaustive\"]\nlet tag_failure = match `B -3 with `B 0 -> 0";
+  eval
+    "[@@@warning \"-non-exhaustive\"]\n\
+     let tag_failure = match `B -3 with `B 0 -> 0";
   [%expect
     {|
     (lits (Tuple -1 -4611686018427387904 1 5))
@@ -96,7 +98,7 @@ let failure = only_minus_one (A -2)
     (only_minus_one <fun>)
     (matched 0)
     ("Match failure: no case matches the value A (-2)" @ t.stag:6:23-45)
-    ((Non_exhaustive_match "`B 1") @ t.stag:1:18-44)
+    ("Match failure: no case matches the value `B (-3)" @ t.stag:2:18-44)
     |}]
 ;;
 

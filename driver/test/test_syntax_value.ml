@@ -1048,9 +1048,19 @@ let%expect_test "generated syntax the parser does not make" =
     let one_tuple = C ((1, Ptr.make (D 2)))
     let first = match one_tuple with C ((a, b)) -> a
     |}];
-  Source_helpers.run_program ~prelude:false program;
+  Source_helpers.run_program
+    ~prelude:false
+    (parse {|[@@@warning "-non-exhaustive"]|} @ program);
   [%expect
-    {| (Non_exhaustive_match "D _") |}]
+    {|
+    type t = C of (int * ptr[t]) | D of int
+    val one_tuple : t
+    val first : int
+    -- evaluated at compile time
+    -- evaluated
+    (one_tuple (C (Tuple 1 (Ptr (D 2)))))
+    (first 1)
+    |}]
 ;;
 
 let%expect_test "reflected types print as paths" =
