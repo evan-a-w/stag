@@ -8,6 +8,12 @@ let join prefix name =
   if String.is_empty prefix then name else prefix ^ "." ^ name
 ;;
 
+let add_decl t ~name ~decl =
+  match Map.find t name with
+  | Some _ -> t
+  | None -> Map.set t ~key:name ~data:decl
+;;
+
 let rec add_items declarations ~prefix items =
   List.fold
     items
@@ -16,10 +22,10 @@ let rec add_items declarations ~prefix items =
       match item with
       | Value _ | Exception _ -> declarations
       | Type declaration ->
-        let name = join prefix declaration.name in
-        (match Map.find declarations name with
-         | Some _ -> declarations
-         | None -> Map.set declarations ~key:name ~data:declaration)
+        add_decl
+          declarations
+          ~name:(join prefix declaration.name)
+          ~decl:declaration
       | Module { name; items } ->
         add_items declarations ~prefix:(join prefix name) items)
 ;;
