@@ -55,10 +55,21 @@ module type S = sig
     -> info:Typed.Ident_info.t
     -> unit
 
-  (** Queues [scc]. Its toplevels are evaluated by [eval_toplevel], or earlier
-      when first used, eg. by a toplevel splice: each at most once, and the
-      component's functions are bound when any member is. *)
-  val add_scc : t -> Typed.Scc.t -> unit
+  (** Registers the checked type declaration [decl] under its canonical [name]
+      ([decl.name] is the short name). Builtin types ([int], [bool], [string],
+      [char], [unit], [exn], [ptr], [<error>]) are not pushed. Each canonical
+      name is pushed at most once, when its declaration is checked: non-splice
+      declarations reachable from an SCC or evaluated expression before it runs,
+      and declarations involving splices when their definitions are checked
+      (which may also happen re-entrantly during [run] or [splice], eg. via
+      [reflect]). *)
+  val add_type_decl : t -> name:string -> decl:Signature.Type_decl.t -> unit
+
+  (** Queues [scc], with the mode-inferred [allocations] of its sites. Its
+      toplevels are evaluated by [eval_toplevel], or earlier when first used,
+      eg. by a toplevel splice: each at most once, and the component's functions
+      are bound when any member is. *)
+  val add_scc : t -> Typed.Scc.t -> allocations:Typed.Allocation.t list -> unit
 
   (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
       binding the values it embeds globally. Returns that code with fresh

@@ -11,10 +11,14 @@ type t
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
+(** The canonical names of [builtins]. *)
+val builtin_names : String.Set.t
+
 (** With [record_references], [references] are recorded. [evaluate_splice]
     evaluates a type splice [.~e] at [loc], in the scope it is written in, to
     the type it gives (located at [loc]). Types and exceptions are always
-    declarations, so evaluate theirs. *)
+    declarations, so evaluate theirs. [on_type_decl] is called whenever a
+    declared type is checked, with its canonical [name] and [decl]. *)
 val create
   :  ?record_references:bool
   -> Fresh.t
@@ -24,6 +28,7 @@ val create
         -> Syntax.Expr.t
         -> loc:Loc.t
         -> (Syntax.Type_expr.t, Typecheck_error.t) Result.t)
+  -> on_type_decl:(name:string -> decl:Signature.Type_decl.t -> unit)
   -> t
 
 (** Declares [decl], a member of [module_], whose parameters are distinct. Types
@@ -218,3 +223,16 @@ val layout_of : t -> Type.ty -> Var_layout.Layout_of.t
 
 (** The layouts of the variables of its types. *)
 val layouts : t -> Var_layout.t
+
+(** Checks the declared type of canonical [name] (and transitively the
+    declarations reachable from its definition) if it is not currently being
+    checked and does not require evaluating a splice, so [on_type_decl] has been
+    called for all of them. *)
+val ensure_decl : t -> string -> unit
+
+(** As [ensure_decl] for every declared type reachable from [ty]. *)
+val ensure_types : t -> Type.ty -> unit
+
+(** As [ensure_types] for every type in [expr], its sub-expressions and match
+    patterns. *)
+val ensure_expr_types : t -> Typed.Expr.t -> unit

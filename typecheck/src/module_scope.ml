@@ -1046,6 +1046,101 @@ let unbound_head t namespace (path : Decl_path.t) ~loc ~unbound ~blocked =
     Typecheck_error.create ~loc (with_note kind ~blocked ~after))
 ;;
 
+module Peek = struct
+  type t =
+    | Found of string
+    | Needs_splice
+    | Not_found
+end
+
+let lookup_unforced (t : t) member =
+  match Hashtbl.find t.module_.members member with
+  | Some None -> `Visible
+  | Some (Some splice) ->
+    if is_before splice t.position then `Visible else `Hidden
+  | None ->
+    if Queue.exists t.module_.includes ~f:(fun splice ->
+         may_generate splice member
+         && is_before splice t.position
+         &&
+         match splice.state with
+         | Pending | Forcing -> true
+         | Done _ | Failed -> false)
+    then `Needs_splice
+    else `Absent
+;;
+
+let find_scope_unforced t member =
+  let rec search (t : t) =
+    if Option.exists t.hidden ~f:([%compare.equal: Member.t] member)
+    then outward t
+    else (
+      match lookup_unforced t member with
+      | `Visible -> `Found t
+      | `Needs_splice -> `Needs_splice
+      | `Hidden | `Absent -> outward t)
+  and outward (t : t) =
+    match t.module_.enclosing with
+    | Some t -> search t
+    | None -> `Not_found
+  in
+  search t
+;;
+
+let open_module_unforced (module_ : module_) name =
+  let module_ = Hashtbl.find_exn module_.modules name in
+  match module_.splice with
+  | None -> `Ok module_
+  | Some splice ->
+    (match splice.state with
+     | Done _ -> `Ok module_
+     | Pending | Forcing -> `Needs_splice
+     | Failed -> `Not_found)
+;;
+
+let rec find_member_unforced (module_ : module_) namespace names =
+  let scope = at_end module_ in
+  match names with
+  | [] -> assert false
+  | [ name ] ->
+    (match lookup_unforced scope (Member namespace, name) with
+     | `Visible -> Peek.Found (canonical_name scope name)
+     | `Needs_splice -> Needs_splice
+     | `Hidden | `Absent -> Not_found)
+  | head :: rest ->
+    (match lookup_unforced scope (Module, head) with
+     | `Visible ->
+       (match open_module_unforced module_ head with
+        | `Ok sub -> find_member_unforced sub namespace rest
+        | `Needs_splice -> Needs_splice
+        | `Not_found -> Not_found)
+     | `Needs_splice -> Needs_splice
+     | `Hidden | `Absent -> Not_found)
+;;
+
+let peek t namespace (path : Decl_path.t) : Peek.t =
+  match path with
+  | Resolved name -> Found name
+  | Path _ | Root _ ->
+    let t, names = start t path in
+    (match (names :> string list) with
+     | [] -> assert false
+     | [ name ] ->
+       (match find_scope_unforced t (Member namespace, name) with
+        | `Found scope -> Found (canonical_name scope name)
+        | `Needs_splice -> Needs_splice
+        | `Not_found -> Not_found)
+     | head :: rest ->
+       (match find_scope_unforced t (Module, head) with
+        | `Found scope ->
+          (match open_module_unforced scope.module_ head with
+           | `Ok module_ -> find_member_unforced module_ namespace rest
+           | `Needs_splice -> Needs_splice
+           | `Not_found -> Not_found)
+        | `Needs_splice -> Needs_splice
+        | `Not_found -> Not_found))
+;;
+
 let find t namespace path ~loc ~unbound =
   match%bind.Result find_path t namespace path ~loc ~unbound with
   | Found name, None -> Ok name

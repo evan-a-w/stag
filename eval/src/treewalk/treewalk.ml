@@ -210,7 +210,9 @@ let add_ident_info t ~ident ~info =
   Hashtbl.set t.ident_info ~key:ident ~data:info
 ;;
 
-let add_scc t (scc : Typed.Scc.t) =
+let add_type_decl _t ~name:_ ~decl:_ = ()
+
+let add_scc t (scc : Typed.Scc.t) ~allocations:_ =
   List.iter scc.members ~f:(fun { ident; _ } ->
     match Hashtbl.find t.toplevels ident with
     | Some (Evaluating | Evaluated) ->

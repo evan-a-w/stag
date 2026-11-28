@@ -29,7 +29,11 @@ let add_ident_info (T ((module I), t)) ~ident ~info =
   I.add_ident_info t ~ident ~info
 ;;
 
-let add_scc (T ((module I), t)) scc = I.add_scc t scc
+let add_type_decl (T ((module I), t)) ~name ~decl =
+  I.add_type_decl t ~name ~decl
+;;
+
+let add_scc (T ((module I), t)) scc ~allocations = I.add_scc t scc ~allocations
 
 let splice (T ((module I), t)) ~code ~level ~entry ~reflect =
   I.splice t ~code ~level ~entry ~reflect

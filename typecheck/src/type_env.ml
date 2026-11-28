@@ -52,6 +52,7 @@ module Decl = struct
     ; mutable value_parameters : Int.Set.t option
     ; mutable variances : Variance.t list option
     ; mutable checked : Signature.Type_decl.t option
+    ; mutable checking : bool
     ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
     (** Once checked, unless abstract. *)
@@ -153,17 +154,27 @@ type t =
   (** Constructors and fields, whose names differ by case. *)
   ; references : Name_reference.t Loc.Table.t option
   ; report : Typecheck_error.t -> unit
+  ; on_type_decl : name:string -> decl:Signature.Type_decl.t -> unit
+  ; ensured_types : String.Hash_set.t
   ; layouts : Var_layout.t Set_once.t
   (** Set by [create]: what a layout is depends on the types declared. *)
   ; link_layouts : Link_layout.t Int.Table.t
   (** Of [Link]s of type variables, by id. *)
   }
 
-let create_tables fresh ~record_references ~report ~evaluate_splice =
+let create_tables
+  fresh
+  ~record_references
+  ~report
+  ~evaluate_splice
+  ~on_type_decl
+  =
   { fresh
   ; evaluate_splice
   ; type_splices = Loc.Table.create ()
   ; report
+  ; on_type_decl
+  ; ensured_types = String.Hash_set.create ()
   ; types = String.Table.create ()
   ; exceptions = String.Table.create ()
   ; constructors = String.Table.create ()
@@ -196,6 +207,11 @@ let builtins =
       ; nonrec_ = false
       }
     ]
+;;
+
+let builtin_names =
+  List.map builtins ~f:(fun (decl : Type_decl.t) -> decl.name.txt)
+  |> String.Set.of_list
 ;;
 
 let find_resolved t module_ namespace path ~loc ~unbound ~find =
@@ -1266,6 +1282,7 @@ let declare
       ; value_parameters = None
       ; variances = None
       ; checked = None
+      ; checking = false
       ; failed =
           (match decl.kind with
            | Malformed _ -> true
@@ -1597,6 +1614,8 @@ let define t (decl : Decl.t) =
     }
   in
   decl.checked <- Some checked;
+  if not (Set.mem builtin_names decl.name)
+  then t.on_type_decl ~name:decl.name ~decl:checked;
   (match kind with
    | Alias _ | Abstract -> ()
    | Variant constructors ->
@@ -1934,27 +1953,219 @@ let rec check t name =
   | None ->
     Undo.permanent
     @@ fun () ->
-    (match decl.decl.kind with
-     | Splice _ ->
-       Module_scope.force_definition
-         decl.module_
-         decl.decl.name.txt
-         ~loc:decl.decl.name.loc
-       |> Result.map_error ~f:decl.wrap_error
-     | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok ())
-    |> Result.bind ~f:(fun () ->
-      if decl.failed then Error Typecheck_error.already_reported else Ok ())
-    |> Result.bind ~f:(fun () -> define t decl)
-    |> Result.map ~f:(fun checked ->
-      decide_pending t decl ~check:(check t);
-      checked)
-    |> Result.map_error ~f:(fun error ->
-      decl.failed <- true;
-      (* Reported here, as the code that first used the declaration may be
-         abandoned, and later uses are [Already_reported]. *)
-      if not (Typecheck_error.is_already_reported error)
-      then t.report (decl.wrap_error error);
-      Typecheck_error.already_reported)
+    let was_checking = decl.checking in
+    decl.checking <- true;
+    Exn.protect
+      ~finally:(fun () -> decl.checking <- was_checking)
+      ~f:(fun () ->
+        (match decl.decl.kind with
+         | Splice _ ->
+           Module_scope.force_definition
+             decl.module_
+             decl.decl.name.txt
+             ~loc:decl.decl.name.loc
+           |> Result.map_error ~f:decl.wrap_error
+         | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok ())
+        |> Result.bind ~f:(fun () ->
+          if decl.failed then Error Typecheck_error.already_reported else Ok ())
+        |> Result.bind ~f:(fun () -> define t decl)
+        |> Result.map ~f:(fun checked ->
+          decide_pending t decl ~check:(check t);
+          checked)
+        |> Result.map_error ~f:(fun error ->
+          decl.failed <- true;
+          (* Reported here, as the code that first used the declaration may be
+             abandoned, and later uses are [Already_reported]. *)
+          if not (Typecheck_error.is_already_reported error)
+          then t.report (decl.wrap_error error);
+          Typecheck_error.already_reported))
+;;
+
+(* Whether checking [root] could evaluate a splice (directly, or through an
+   unchecked declaration whose definition or by-value layout it would force). *)
+let decl_reaches_splice t root =
+  let seen = String.Hash_set.create () in
+  let rec visit_decl (decl : Decl.t) =
+    if Option.is_some decl.checked || decl.failed
+    then false
+    else if decl.checking
+    then true
+    else if not
+              (Hash_set.strict_add seen decl.name
+               |> Hash_set.Ok_or_duplicate.is_ok)
+    then false
+    else
+      kind_has_splice decl.decl.kind
+      || kind_reaches_splice decl.module_ decl.decl.kind
+  and kind_reaches_splice module_ = function
+    | Splice _ -> true
+    | Abstract -> false
+    | Alias ty -> expr_reaches_splice module_ ~by_value:true ty
+    | Variant constructors ->
+      List.exists constructors ~f:(fun (_, args) ->
+        List.exists args ~f:(expr_reaches_splice module_ ~by_value:true))
+    | Record fields ->
+      List.exists fields ~f:(fun (_, ty) ->
+        expr_reaches_splice module_ ~by_value:true ty)
+    | Malformed kind -> kind_reaches_splice module_ kind
+  and expr_reaches_splice module_ ~by_value (expr : Type_expr.t) =
+    match expr.txt with
+    | Splice _ -> true
+    | Var _ -> false
+    | Arrow (a, b) ->
+      expr_reaches_splice module_ ~by_value:false a
+      || expr_reaches_splice module_ ~by_value:false b
+    | Code { inner; context } ->
+      expr_reaches_splice module_ ~by_value:false inner
+      || row_reaches_splice module_ ~by_value:false context
+    | Tuple tys -> List.exists tys ~f:(expr_reaches_splice module_ ~by_value)
+    | Record row | Variant row -> row_reaches_splice module_ ~by_value row
+    | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Modality (ty, _)
+      -> expr_reaches_splice module_ ~by_value ty
+    | Con (path, args) ->
+      (match Module_scope.peek module_ Type path.txt with
+       | Needs_splice -> true
+       | Not_found ->
+         List.exists args ~f:(function
+           | Ty ty -> expr_reaches_splice module_ ~by_value ty
+           | Row row -> row_reaches_splice module_ ~by_value row
+           | Mode _ -> false)
+       | Found name ->
+         let target = Hashtbl.find t.types name in
+         let is_opaque_ptr =
+           match target with
+           | Some d ->
+             String.equal d.name Type.ptr_name
+             || String.equal d.name Type.box_name
+           | None -> false
+         in
+         let arg_by_value = by_value && not is_opaque_ptr in
+         let args_reach =
+           List.exists args ~f:(function
+             | Ty ty -> expr_reaches_splice module_ ~by_value:arg_by_value ty
+             | Row row -> row_reaches_splice module_ ~by_value:arg_by_value row
+             | Mode _ -> false)
+         in
+         let target_reaches =
+           match target with
+           | None -> false
+           | Some target ->
+             (match target.decl.kind with
+              | Splice _ | Alias _ -> visit_decl target
+              | Variant _ | Record _ | Abstract | Malformed _ ->
+                by_value && visit_decl target)
+         in
+         args_reach || target_reaches)
+  and row_reaches_splice module_ ~by_value (row : Type_expr.row) =
+    match row.txt with
+    | Empty | Var _ -> false
+    | Extend (_, ty, rest) ->
+      expr_reaches_splice module_ ~by_value ty
+      || row_reaches_splice module_ ~by_value rest
+  in
+  visit_decl root
+;;
+
+let ensure_with t ~visited =
+  let visit id =
+    Hash_set.strict_add visited id |> Hash_set.Ok_or_duplicate.is_ok
+  in
+  let rec walk_ty (ty : Type.ty) =
+    match ty with
+    | TVar { id; state = Link next; _ } -> if visit id then walk_ty next
+    | TVar { state = Unbound _ | Generic; _ } -> ()
+    | TCon (name, args) ->
+      List.iter args ~f:walk_arg;
+      ensure_con name
+    | TArrow (arg, res, _) ->
+      walk_ty arg;
+      walk_ty res
+    | TTuple tys -> List.iter tys ~f:walk_ty
+    | TCode { inner; context } ->
+      walk_ty inner;
+      walk_row context
+    | TRecord { id; row } | TVariant { id; row } ->
+      if visit id then walk_row row
+  and walk_arg (arg : Type.arg) =
+    match arg with
+    | ATy ty -> walk_ty ty
+    | ARow row -> walk_row row
+    | AMode _ -> ()
+  and walk_row (row : Type.row) =
+    match row with
+    | REmpty -> ()
+    | RVar { id; state = Link next; _ } -> if visit id then walk_row next
+    | RVar { state = Unbound _ | Generic; _ } -> ()
+    | RExtend (_, _, _, ty, rest) ->
+      walk_ty ty;
+      walk_row rest
+  and ensure_con name =
+    if (not (Set.mem builtin_names name))
+       && not (Hash_set.mem t.ensured_types name)
+    then (
+      match Hashtbl.find t.types name with
+      | None -> ()
+      | Some decl ->
+        let checked =
+          match decl.checked with
+          | Some checked -> Some checked
+          | None ->
+            if decl.checking || decl_reaches_splice t decl
+            then None
+            else Result.ok (check t name)
+        in
+        (match checked with
+         | Some checked ->
+           Hash_set.add t.ensured_types name;
+           walk_kind checked.kind
+         | None -> if decl.failed then Hash_set.add t.ensured_types name))
+  and walk_kind (kind : Signature.Type_decl.Kind.t) =
+    match kind with
+    | Abstract -> ()
+    | Alias ty -> walk_ty ty
+    | Variant constructors ->
+      List.iter constructors ~f:(fun (c : Signature.Constructor.t) ->
+        List.iter c.args ~f:walk_ty)
+    | Record fields ->
+      List.iter fields ~f:(fun (f : Signature.Field.t) -> walk_ty f.ty)
+  in
+  walk_ty, ensure_con
+;;
+
+let ensure_decl t name =
+  let _, ensure_con = ensure_with t ~visited:(Int.Hash_set.create ()) in
+  ensure_con name
+;;
+
+let ensure_types t ty =
+  let walk_ty, _ = ensure_with t ~visited:(Int.Hash_set.create ()) in
+  walk_ty ty
+;;
+
+let ensure_expr_types t root =
+  let walk_ty, _ = ensure_with t ~visited:(Int.Hash_set.create ()) in
+  let rec walk_pattern (pattern : Typed.Pattern.t) =
+    walk_ty pattern.ty;
+    match pattern.desc with
+    | Any | Var _ | Lit _ | Poly_variant (_, None) -> ()
+    | Deref p | Poly_variant (_, Some p) -> walk_pattern p
+    | Tuple ps | Construct (_, ps) | Error ps -> List.iter ps ~f:walk_pattern
+    | Record fields -> List.iter fields ~f:(fun (_, p) -> walk_pattern p)
+    | Poly_record { fields; rest = _ } ->
+      List.iter fields ~f:(fun (_, p) -> walk_pattern p)
+    | Or (p1, p2) ->
+      walk_pattern p1;
+      walk_pattern p2
+  and walk_expr (expr : Typed.Expr.t) =
+    walk_ty expr.ty;
+    (match expr.desc with
+     | Match { scrutinee = _; cases; exception_cases } ->
+       List.iter cases ~f:(fun (pattern, _) -> walk_pattern pattern);
+       List.iter exception_cases ~f:(fun (pattern, _) -> walk_pattern pattern)
+     | _ -> ());
+    Typed.Expr.iter_children expr ~f:(fun _ child -> walk_expr child)
+  in
+  walk_expr root
 ;;
 
 let members t type_name ~kind ~members =
@@ -2101,8 +2312,21 @@ let layout_of t ty : Var_layout.Layout_of.t =
   layout_of' t ~check:(check t) (`Ty ty)
 ;;
 
-let create ?(record_references = false) fresh ~report ~evaluate_splice =
-  let t = create_tables fresh ~record_references ~report ~evaluate_splice in
+let create
+  ?(record_references = false)
+  fresh
+  ~report
+  ~evaluate_splice
+  ~on_type_decl
+  =
+  let t =
+    create_tables
+      fresh
+      ~record_references
+      ~report
+      ~evaluate_splice
+      ~on_type_decl
+  in
   Fresh.set_cons
     fresh
     { value_parameters =

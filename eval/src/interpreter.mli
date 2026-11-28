@@ -18,7 +18,8 @@ val set_argv : t -> string list -> unit
 val with_output : t -> (string -> unit) -> f:(unit -> 'a) @ local -> 'a
 val set_limits : t -> Limits.t -> unit
 val add_ident_info : t -> ident:Typed.Ident.t -> info:Typed.Ident_info.t -> unit
-val add_scc : t -> Typed.Scc.t -> unit
+val add_type_decl : t -> name:string -> decl:Signature.Type_decl.t -> unit
+val add_scc : t -> Typed.Scc.t -> allocations:Typed.Allocation.t list -> unit
 
 val splice
   :  t

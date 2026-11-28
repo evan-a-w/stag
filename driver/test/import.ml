@@ -17,6 +17,7 @@ module Typed = Stag_ir.Typed
 module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
 module Treewalk = Stag_treewalk
 module Interpreter = Stag_eval.Interpreter
+module Interpreter_intf = Stag_eval.Interpreter_intf
 module Generated_syntax = Stag_eval.Generated_syntax
 module Typecheck = Stag_typecheck.Typecheck
 module Typecheck_error = Stag_typecheck.Typecheck_error
