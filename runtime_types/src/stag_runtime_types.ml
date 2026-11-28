@@ -15,6 +15,18 @@ let rec map_result list ~f =
 
 let default_ptr_name = "ptr"
 let ptr_name = default_ptr_name
+let stag_type_name = Prelude_path.canonical "Stag.Type.t"
+
+let nullary_meta_names =
+  List.map
+    [ "Stag.Type_ref.t"
+    ; "Stag.Constructor_ref.t"
+    ; "Stag.Field_ref.t"
+    ; "Stag.Value_ref.t"
+    ]
+    ~f:Prelude_path.canonical
+  |> String.Set.of_list
+;;
 
 (* How a declaration's parameter is instantiated. A row has the id of the record
    a type parameter bound to it stands for, made once per binding: records are
@@ -154,7 +166,7 @@ let max_expansions = 1000
 let max_work = 100_000
 
 type t =
-  { resolver : Resolver.t
+  { mutable resolver : Resolver.t
   ; ptr_name : string
   ; cache : Cache.t
   ; ids : int ref
@@ -163,6 +175,12 @@ type t =
 let create ?(ptr_name = default_ptr_name) resolver =
   { resolver; ptr_name; cache = Cache.create (); ids = ref 0 }
 ;;
+
+let add_decl t ~name ~decl =
+  t.resolver <- Resolver.add_decl t.resolver ~name ~decl
+;;
+
+let resolver t = t.resolver
 
 let fresh_id ids =
   decr ids;
@@ -304,19 +322,22 @@ and arity ~name ~args expected =
   then Ok ()
   else Error (Error.Wrong_arity { name; expected; got = List.length args })
 
-(* Scalars the language has from the start. [bool] is a byte with only 0 and 1,
-   so has [option]'s niche. *)
+(* Builtin types and prelude meta types handled directly as scalars or pointers.
+   [bool] is a byte with only 0 and 1, so has [option]'s niche. *)
 and builtin ~name ~args : (Shape.t, Error.t) Result.t option =
   let scalar scalar = Shape.Scalar { scalar; valid = None } in
-  let nullary shape =
-    Some (Result.map (arity ~name ~args 0) ~f:(fun () -> shape))
+  let with_arity expected shape =
+    Some (Result.map (arity ~name ~args expected) ~f:(fun () -> shape))
   in
   match name with
-  | "int" -> nullary (scalar Scalar.I64)
-  | "char" -> nullary (scalar Scalar.I8)
-  | "bool" -> nullary (Shape.Scalar { scalar = Scalar.I8; valid = Some (0, 1) })
-  | "unit" -> nullary (Struct { repr = Repr.Default; fields = [] })
-  | "string" | "exn" -> nullary Ptr
+  | "int" -> with_arity 0 (scalar Scalar.I64)
+  | "char" -> with_arity 0 (scalar Scalar.I8)
+  | "bool" ->
+    with_arity 0 (Shape.Scalar { scalar = Scalar.I8; valid = Some (0, 1) })
+  | "unit" -> with_arity 0 (Struct { repr = Repr.Default; fields = [] })
+  | "string" | "exn" -> with_arity 0 Ptr
+  | _ when String.equal name stag_type_name -> with_arity 1 Ptr
+  | _ when Set.mem nullary_meta_names name -> with_arity 0 Ptr
   | _ -> None
 
 and subst_args context args =

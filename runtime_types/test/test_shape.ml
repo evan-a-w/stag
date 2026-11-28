@@ -930,3 +930,213 @@ let%expect_test "which bound is hit does not depend on the cache" =
     (Error (Too_large 100000))
     |}]
 ;;
+
+let%expect_test "prelude meta types" =
+  let stag_type = Prelude_path.canonical "Stag.Type.t" in
+  let refs =
+    List.map
+      [ "Stag.Type_ref.t"
+      ; "Stag.Constructor_ref.t"
+      ; "Stag.Field_ref.t"
+      ; "Stag.Value_ref.t"
+      ]
+      ~f:Prelude_path.canonical
+  in
+  let option_param = var () in
+  let option_decl =
+    decl
+      ~name:"option"
+      ~params:[ Type.ATy (Type.TVar option_param) ]
+      (variant [ ctor "None" []; ctor "Some" [ Type.TVar option_param ] ])
+  in
+  let abstract_decl = decl ~name:"abstract" Signature.Type_decl.Kind.Abstract in
+  (* Registering the prelude's abstract declarations for the meta types must
+     still produce [Ptr], not [Abstract_type]. *)
+  let meta_decls =
+    let param = var () in
+    List.fold
+      refs
+      ~init:
+        (Resolver.empty
+         |> Resolver.add_decl ~name:"option" ~decl:option_decl
+         |> Resolver.add_decl ~name:"abstract" ~decl:abstract_decl
+         |> Resolver.add_decl
+              ~name:stag_type
+              ~decl:
+                (decl
+                   ~name:"t"
+                   ~params:[ Type.ATy (Type.TVar param) ]
+                   Signature.Type_decl.Kind.Abstract))
+      ~f:(fun acc name ->
+        Resolver.add_decl
+          acc
+          ~name
+          ~decl:(decl ~name:"t" Signature.Type_decl.Kind.Abstract))
+  in
+  let t = Runtime_types.create meta_decls in
+  let show label ty =
+    print_s
+      [%sexp
+        (label : string)
+        , (Runtime_types.shape t ty : (Shape.t, Error.t) Result.t)]
+  in
+  show "Stag.Type.t[int]" (tycon stag_type [ int ]);
+  show "Stag.Type.t[abstract]" (tycon stag_type [ tycon "abstract" [] ]);
+  show "Stag.Type.t['a]" (tycon stag_type [ Type.TVar (var ()) ]);
+  show "Stag.Type.t[missing]" (tycon stag_type [ tycon "missing" [] ]);
+  show
+    "Stag.Type.t[row]"
+    (Type.TCon (stag_type, [ Type.ARow (present "a" int Type.REmpty) ]));
+  List.iter refs ~f:(fun name -> show name (tycon name []));
+  (* Arity errors, including unexpected mode arguments. *)
+  show "Stag.Type.t[]" (tycon stag_type []);
+  show "Stag.Type.t[int, bool]" (tycon stag_type [ int; bool ]);
+  show
+    "Stag.Type.t[int, @gc]"
+    (Type.TCon (stag_type, [ Type.ATy int; Type.AMode Mode_arg.gc ]));
+  show
+    "Stag.Type_ref.t[@gc]"
+    (Type.TCon
+       (Prelude_path.canonical "Stag.Type_ref.t", [ Type.AMode Mode_arg.gc ]));
+  List.iter refs ~f:(fun name -> show (name ^ "[int]") (tycon name [ int ]));
+  (* Niche optimization: [option[Stag.Type.t[int]]] fits in one pointer word. *)
+  layout t (tycon "option" [ tycon stag_type [ int ] ]);
+  layout
+    t
+    (tycon "option" [ tycon (Prelude_path.canonical "Stag.Type_ref.t") [] ]);
+  [%expect
+    {|
+    (Stag.Type.t[int] (Ok Ptr))
+    (Stag.Type.t[abstract] (Ok Ptr))
+    (Stag.Type.t['a] (Ok Ptr))
+    (Stag.Type.t[missing] (Ok Ptr))
+    (Stag.Type.t[row] (Ok Ptr))
+    (prelude.Stag.Type_ref.t (Ok Ptr))
+    (prelude.Stag.Constructor_ref.t (Ok Ptr))
+    (prelude.Stag.Field_ref.t (Ok Ptr))
+    (prelude.Stag.Value_ref.t (Ok Ptr))
+    (Stag.Type.t[]
+     (Error (Wrong_arity (name prelude.Stag.Type.t) (expected 1) (got 0))))
+    ("Stag.Type.t[int, bool]"
+     (Error (Wrong_arity (name prelude.Stag.Type.t) (expected 1) (got 2))))
+    ("Stag.Type.t[int, @gc]"
+     (Error (Wrong_arity (name prelude.Stag.Type.t) (expected 1) (got 2))))
+    (Stag.Type_ref.t[@gc]
+     (Error (Wrong_arity (name prelude.Stag.Type_ref.t) (expected 0) (got 1))))
+    (prelude.Stag.Type_ref.t[int]
+     (Error (Wrong_arity (name prelude.Stag.Type_ref.t) (expected 0) (got 1))))
+    (prelude.Stag.Constructor_ref.t[int]
+     (Error
+      (Wrong_arity (name prelude.Stag.Constructor_ref.t) (expected 0) (got 1))))
+    (prelude.Stag.Field_ref.t[int]
+     (Error (Wrong_arity (name prelude.Stag.Field_ref.t) (expected 0) (got 1))))
+    (prelude.Stag.Value_ref.t[int]
+     (Error (Wrong_arity (name prelude.Stag.Value_ref.t) (expected 0) (got 1))))
+    (0 1
+     ((Niche (leaf (Ptr (ptr_index 0))) (untagged 1) (first 0) (last 0)
+       (start 0))))
+    (0 1
+     ((Niche (leaf (Ptr (ptr_index 0))) (untagged 1) (first 0) (last 0)
+       (start 0))))
+    |}]
+;;
+
+let%expect_test "incremental add_decl" =
+  let kind_of r name = Option.map (Resolver.find r name) ~f:(fun d -> d.kind) in
+  let r =
+    Resolver.empty
+    |> Resolver.add_decl ~name:"t" ~decl:(decl ~name:"t" (alias int))
+    |> Resolver.add_decl ~name:"t" ~decl:(decl ~name:"t" (alias bool))
+  in
+  print_s [%sexp (kind_of r "t" : Signature.Type_decl.Kind.t option)];
+  let t = Runtime_types.create Resolver.empty in
+  shape t (tycon "a" []);
+  Runtime_types.add_decl t ~name:"a" ~decl:(decl ~name:"a" (alias int));
+  shape t (tycon "a" []);
+  (* First-added wins: duplicate [add_decl] keeps the first declaration. *)
+  Runtime_types.add_decl t ~name:"a" ~decl:(decl ~name:"a" (alias bool));
+  shape t (tycon "a" []);
+  print_s
+    [%sexp
+      (kind_of (Runtime_types.resolver t) "a"
+       : Signature.Type_decl.Kind.t option)];
+  (* An [Abstract] declaration stays [Abstract_type] even if a concrete one is
+     added later under the same name. *)
+  Runtime_types.add_decl
+    t
+    ~name:"opaque"
+    ~decl:(decl ~name:"opaque" Signature.Type_decl.Kind.Abstract);
+  shape t (tycon "opaque" []);
+  Runtime_types.add_decl
+    t
+    ~name:"opaque"
+    ~decl:(decl ~name:"opaque" (alias int));
+  shape t (tycon "opaque" []);
+  (* Incremental registration of mutually referencing declarations: [first]
+     references [second] by value and [second] references [ptr[first]]. *)
+  Runtime_types.add_decl
+    t
+    ~name:"first"
+    ~decl:(decl ~name:"first" (variant [ ctor "F" [ tycon "second" [] ] ]));
+  shape t (tycon "first" []);
+  Runtime_types.add_decl
+    t
+    ~name:"second"
+    ~decl:
+      (decl
+         ~name:"second"
+         (record
+            [ field "n" int; field "next" (tycon "ptr" [ tycon "first" [] ]) ]));
+  shape t (tycon "first" []);
+  shape t (tycon "second" []);
+  (* A new declaration referencing already-cached [first]. *)
+  Runtime_types.add_decl
+    t
+    ~name:"wrap"
+    ~decl:(decl ~name:"wrap" (alias (Type.TTuple [ tycon "first" []; bool ])));
+  shape t (tycon "wrap" []);
+  (* Verify cached results agree with a fresh uncached instance from the same
+     resolver. *)
+  let fresh_rt = Runtime_types.create (Runtime_types.resolver t) in
+  let agrees name =
+    let ty = tycon name [] in
+    Sexp.equal
+      [%sexp (Runtime_types.shape t ty : (Shape.t, Error.t) Result.t)]
+      [%sexp (Runtime_types.shape fresh_rt ty : (Shape.t, Error.t) Result.t)]
+  in
+  print_s
+    [%sexp
+      (List.map [ "a"; "opaque"; "first"; "second"; "wrap" ] ~f:(fun name ->
+         name, agrees name)
+       : (string * bool) list)];
+  [%expect
+    {|
+    ((Alias (TCon int ())))
+    (Error (Unknown_type a))
+    (Ok (Scalar (scalar I64) (valid ())))
+    (Ok (Scalar (scalar I64) (valid ())))
+    ((Alias (TCon int ())))
+    (Error (Abstract_type opaque))
+    (Error (Abstract_type opaque))
+    (Error (Unknown_type second))
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default)
+         (fields
+          ((Struct (repr Default)
+            (fields ((Scalar (scalar I64) (valid ())) Ptr))))))))))
+    (Ok (Struct (repr Default) (fields ((Scalar (scalar I64) (valid ())) Ptr))))
+    (Ok
+     (Struct (repr Default)
+      (fields
+       ((Union (repr Default)
+         (cases
+          ((Struct (repr Default)
+            (fields
+             ((Struct (repr Default)
+               (fields ((Scalar (scalar I64) (valid ())) Ptr)))))))))
+        (Scalar (scalar I8) (valid ((0 1))))))))
+    ((a true) (opaque true) (first true) (second true) (wrap true))
+    |}]
+;;

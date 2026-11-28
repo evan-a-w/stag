@@ -27,9 +27,19 @@ type t
 
 val create : ?ptr_name:string -> Resolver.t -> t
 
+(** Adds [decl] under canonical [name], as [Resolver.add_decl] (first-added
+    wins). Previously cached shapes remain valid: only successful expansions are
+    cached, and first-added-wins never replaces an existing declaration. *)
+val add_decl : t -> name:string -> decl:Signature.Type_decl.t -> unit
+
+val resolver : t -> Resolver.t
+
 (** [shape].
     - [int] is [I64], [char] and [bool] [I8] ([bool] 0 or 1 only), [unit] empty,
       [string] and [exn] [Ptr].
+    - [ptr], [box], [Stag.Type.t] and the prelude ref types ([Stag.Type_ref.t],
+      [Stag.Constructor_ref.t], [Stag.Field_ref.t], [Stag.Value_ref.t]) are
+      [Ptr].
     - A tuple is a [Struct] of its components, in order.
     - A nominal record or variant is a [Struct] or [Union] of its fields or
       constructors, in declaration order.
