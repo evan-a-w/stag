@@ -2173,6 +2173,7 @@ and annotate
    is reported as the expression's. *)
 and splice_syntax ?expected ~hint t (scope : Scope.t) ~at ~code ~loc =
   let program = scope.program in
+  Type_env.ensure_expr_types program.type_env code;
   let%bind.Result value =
     Program_env.at_compile_time
       ~loc
@@ -2266,6 +2267,7 @@ and expand
     Hash_set.add used name;
     entry name
   in
+  Type_env.ensure_expr_types program.type_env code;
   let%bind.Result generated =
     Program_env.at_compile_time
       ~loc
@@ -2878,6 +2880,7 @@ let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error 
   if program.reported > reported
   then Error Typecheck_error.already_reported
   else (
+    Type_env.ensure_expr_types program.type_env expr;
     let%map.Result value =
       Program_env.at_compile_time
         ~loc
@@ -3149,10 +3152,9 @@ let check_declarations t (program : Program_env.t) module_ =
         (match decl.kind with
          | Malformed _ -> Program_env.mark_syntax_errors program
          | Variant _ | Record _ | Alias _ | Abstract | Splice _ -> ());
-        Type_env.check
-          program.type_env
-          (Module_scope.canonical_name module_ decl.name.txt)
-        |> report_if_error
+        let name = Module_scope.canonical_name module_ decl.name.txt in
+        Type_env.check program.type_env name |> report_if_error;
+        Type_env.ensure_decl program.type_env name
       | Malformed_exception _ -> Program_env.mark_syntax_errors program
       | Exception (name, _) ->
         Type_env.check_exception
@@ -3177,11 +3179,6 @@ let check_declarations t (program : Program_env.t) module_ =
       | Module _ | Module_splice _ | Include _ | Attributed _ | Attribute _ ->
         ());
   Queue.to_list deferred
-;;
-
-let builtin_names =
-  List.map Type_env.builtins ~f:(fun (decl : Syntax.Type_decl.t) ->
-    decl.name.txt)
 ;;
 
 let no_splices splice : (_, Module_scope.Force_error.t) Result.t =
@@ -3230,7 +3227,7 @@ let invalid_prelude error =
 let add_prelude (program : Program_env.t) toplevels ~warnings =
   let builtins =
     Module_scope.create_root
-      ~types:builtin_names
+      ~types:(Set.to_list Type_env.builtin_names)
       ~declare:(fun _ _ ~generated_by:_ -> ())
       ~force:no_splices
       ~report:invalid_prelude
@@ -3339,7 +3336,9 @@ let program_env
         t
         ~report:(fun error -> Program_env.report (force program_env) error)
         ~evaluate_splice:(fun module_ expr ~loc ->
-          evaluate_type_splice t (force program_env) module_ expr ~loc))
+          evaluate_type_splice t (force program_env) module_ expr ~loc)
+        ~on_type_decl:(fun ~name ~decl ->
+          Interpreter.add_type_decl interpreter ~name ~decl))
     ~stamps
     ~modes
     ~const_toplevels
@@ -3352,7 +3351,7 @@ let root t program_env ~enclosing ~warnings =
   Module_scope.create_root
     ~enclosing
     ~warnings
-    ~types:builtin_names
+    ~types:(Set.to_list Type_env.builtin_names)
     ~declare:(declare program_env ~in_prelude:false)
     ~force:(generate t program_env)
     ~report:(Program_env.report program_env)
@@ -3415,11 +3414,19 @@ let check_module t (program_env : Program_env.t) module_
     List.map deferred ~f:(fun (module_, (kind : Deferred.t), loc, generated) ->
       match kind with
       | Expect_test (name, body) ->
-        Either.First
-          (check_expect_test t program_env module_ ~name ~body ~loc ~generated)
+        let test =
+          check_expect_test t program_env module_ ~name ~body ~loc ~generated
+        in
+        Type_env.ensure_expr_types program_env.type_env test.body;
+        Either.First test
       | Bench (name, param, body) ->
-        Either.Second
-          (check_bench t program_env module_ ~name ~param ~body ~loc ~generated))
+        let bench =
+          check_bench t program_env module_ ~name ~param ~body ~loc ~generated
+        in
+        Type_env.ensure_expr_types program_env.type_env bench.body;
+        Option.iter bench.param ~f:(fun (_, args) ->
+          List.iter args ~f:(Type_env.ensure_expr_types program_env.type_env));
+        Either.Second bench)
   in
   let expect_tests, benches = List.partition_map checked ~f:Fn.id in
   let program =

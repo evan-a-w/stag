@@ -131,6 +131,18 @@ val find
   -> unbound:(Syntax.Decl_path.t -> Typecheck_error.Kind.t)
   -> (string, Typecheck_error.t) Result.t
 
+module Peek : sig
+  type t =
+    | Found of string
+    | Needs_splice
+    | Not_found
+end
+
+(** Like [find], without forcing any unforced splices or reporting errors.
+    Returns [Needs_splice] if resolving [path] would need an unforced include or
+    spliced module. *)
+val peek : t -> Namespace.t -> Syntax.Decl_path.t -> Peek.t
+
 module Value : sig
   type t =
     | Toplevel of string (** By canonical name. *)

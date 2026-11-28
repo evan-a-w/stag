@@ -152,11 +152,11 @@ let at_compile_time (program : t) f ~loc ~error =
   let reflect name =
     let reflected =
       let%bind.Result decl = Type_env.reflect program.type_env name in
+      let decl_type_name = Prelude_path.canonical "Stag.Type.Decl.t" in
       let%map.Result decl_type =
-        Type_env.record_type
-          program.type_env
-          (Prelude_path.canonical "Stag.Type.Decl.t")
+        Type_env.record_type program.type_env decl_type_name
       in
+      Type_env.ensure_decl program.type_env decl_type_name;
       { Reflected_decl.Reflection.decl; decl_type }
     in
     Result.map_error reflected ~f:(fun reflection_error ->

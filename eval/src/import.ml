@@ -10,6 +10,7 @@ module Typed = Stag_ir.Typed
 module Lexer = Stag_syntax.Lexer
 module Source_file = Stag_syntax.Source_file
 module Prelude_path = Stag_types.Prelude_path
+module Signature = Stag_types.Signature
 module Parser = Stag_syntax.Parser
 module Intrinsic = Stag_ir.Intrinsic
 module Lift = Stag_syntax.Lift

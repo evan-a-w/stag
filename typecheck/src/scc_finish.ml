@@ -168,6 +168,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
       (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty));
     List.iter awaiting.schemes ~f:(fun (name, ty) ->
       default_mode_args t ty ~name);
+    List.iter schemes ~f:(Type_env.ensure_types program.type_env);
     awaiting.uses <- uses;
     List.iter uses ~f:(fun use -> await awaiting (awaited use)))
 ;;
@@ -186,7 +187,8 @@ let settle t (program : Program_env.t) (members : Toplevel_binding.t list) =
               let awaited = Program_env.toplevel program added.awaited.name in
               Toplevel_binding.add_pending_use awaited added)
           in
-          ignore (relate_use t program use ~ty : bool))))
+          ignore (relate_use t program use ~ty : bool);
+          Type_env.ensure_types program.type_env use.ty)))
 ;;
 
 let finish_scc
@@ -348,20 +350,33 @@ let finish_scc
            (Module_scope.within
               first.module_
               (Typecheck_error.create ~loc:first.expr.loc (Mode_error error)))));
+  (* Ensure reachable non-splice declarations before mutating SCC state. *)
+  List.map2_exn members tys ~f:(fun member ty ->
+    match member.state with
+    | In_progress { index; body = Some body; _ } -> index, (ty, body)
+    | In_progress { body = None; _ } | Unchecked | Done _ ->
+      raise_s
+        [%message
+          "finish_scc: member not checked" (member : Toplevel_binding.t)])
+  |> List.sort ~compare:(Comparable.lift Int.compare ~f:fst)
+  |> List.iter ~f:(fun (_, (ty, body)) ->
+    Type_env.ensure_types program.type_env ty;
+    Type_env.ensure_expr_types program.type_env body);
   (* Once the join variables are settled, and before generalizing, while the
      result may still be constrained. *)
-  List.iter
-    (Allocation_sites.place
-       ~rank:0
-       (List.map2_exn members tys ~f:(fun member ty ->
-          match member.state with
-          | In_progress { sites; _ } -> sites, ty
-          | Unchecked | Done _ ->
-            raise_s
-              [%message
-                "finish_scc: member not checked" (member : Toplevel_binding.t)]))
-       ~awaiting:(List.map others ~f:(fun (use : Quoted_use.t) -> use.ty)))
-    ~f:(Queue.enqueue program.allocations);
+  let allocations =
+    Allocation_sites.place
+      ~rank:0
+      (List.map2_exn members tys ~f:(fun member ty ->
+         match member.state with
+         | In_progress { sites; _ } -> sites, ty
+         | Unchecked | Done _ ->
+           raise_s
+             [%message
+               "finish_scc: member not checked" (member : Toplevel_binding.t)]))
+      ~awaiting:(List.map others ~f:(fun (use : Quoted_use.t) -> use.ty))
+  in
+  List.iter allocations ~f:(Queue.enqueue program.allocations);
   let awaiting =
     if generalize
     then (
@@ -431,5 +446,5 @@ let finish_scc
   in
   let scc = { Typed.Scc.members } in
   Queue.enqueue program.sccs scc;
-  Interpreter.add_scc program.interpreter scc
+  Interpreter.add_scc program.interpreter scc ~allocations
 ;;

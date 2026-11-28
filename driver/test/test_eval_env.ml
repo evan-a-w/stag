@@ -184,7 +184,10 @@ let%expect_test "a toplevel already evaluated can't be queued again" =
       print_s
         [%sexp
           (Or_error.try_with (fun () ->
-             Interpreter.add_scc interpreter { members = [ member ] })
+             Interpreter.add_scc
+               interpreter
+               { members = [ member ] }
+               ~allocations:[])
            : unit Or_error.t)]));
   [%expect
     {|
