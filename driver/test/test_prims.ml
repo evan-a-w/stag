@@ -366,7 +366,7 @@ let main = print_int a; print_int b; print_int c
 ;;
 
 let%expect_test "IO prims" =
-  let dir = Core_unix.mkdtemp "/tmp/stag_io" in
+  let dir = Filename_unix.temp_dir "stag_io" "" in
   let file = dir ^/ "f.txt" in
   run
     (sprintf

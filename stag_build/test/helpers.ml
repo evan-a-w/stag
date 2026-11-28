@@ -1,7 +1,7 @@
 open! Import
 
 let rec remove path =
-  if Sys_unix.is_directory_exn path
+  if Sys_unix.is_directory_exn ~follow_symlinks:false path
   then (
     Array.iter (Sys_unix.readdir path) ~f:(fun name -> remove (path ^/ name));
     Core_unix.rmdir path)
