@@ -141,7 +141,7 @@ Runtime errors are located, and output before them is printed first.
 Tabs before an error keep the caret aligned.
 
   $ printf 'let x =\n\tInt.add 1 true\n' > tab.stag
-  $ stag check tab.stag 2>&1 | sed 's/\t/<tab>/g'
+  $ stag check tab.stag 2>&1 | awk '{ gsub(/\t/, "<tab>"); print }'
   File "tab.stag", line 2, characters 11-15:
   2 | <tab>Int.add 1 true
       <tab>          ^^^^

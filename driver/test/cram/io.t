@@ -56,7 +56,7 @@ stdin is read a line at a time, without its newline, or all at once.
 
 Only [\n] and [\r\n] end a line: a lone [\r], even ending the input, is kept.
 
-  $ printf 'crlf\r\nmid\rdle\r\nend\r' | stag run lines.stag | od -c | sed 's/  */ /g'
+  $ printf 'crlf\r\nmid\rdle\r\nend\r' | stag run lines.stag | od -c | sed 's/  */ /g; s/ $//'
   0000000 | c r l f \n | m i d \r d l e
   0000020 \n | e n d \r \n
   0000030
@@ -199,9 +199,19 @@ they change.
   Note: The error was raised here
   [1]
 
-Writing to stdout can fail, eg. when it is closed or the disk is full. A prim
-whose write fails raises [Sys_error], as does the flush before a C call.
+Writing to stdout can fail, eg. when it is closed or hits a file size limit. A
+prim whose write fails raises [Sys_error], as does the flush before a C call.
+The helpers pipe the other stream out through [cat] so it does not hit the
+limit when the test runner writes to a file.
 
+  $ full_out() {
+  >   { (trap '' XFSZ; ulimit -f 0; "$@" > out); echo "$?" > rc; } 2>&1 | cat >&2
+  >   return "$(cat rc)"
+  > }
+  $ full_err() {
+  >   { (trap '' XFSZ; ulimit -f 0; "$@" 2> err); echo "$?" > rc; } | cat
+  >   return "$(cat rc)"
+  > }
   $ cat > flush_fails.stag <<'EOF'
   > let main =
   >   print_string "x";
@@ -209,8 +219,8 @@ whose write fails raises [Sys_error], as does the flush before a C call.
   >   | () -> ()
   >   | exception Sys_error message -> exit 7
   > EOF
-  $ stag run flush_fails.stag > /dev/full
-  Error: Writing to stdout failed: No space left on device
+  $ full_out stag run flush_fails.stag
+  Error: Writing to stdout failed: File too large
   [7]
   $ cat > prerr_fails.stag <<'EOF'
   > let main = print_string "x"; prerr_endline "e"
@@ -221,12 +231,12 @@ whose write fails raises [Sys_error], as does the flush before a C call.
                                    ^^^^^^^^^^^^^^^^^
   Error: Uncaught exception Sys_error "Bad file descriptor"
   [1]
-  $ stag run prerr_fails.stag > /dev/full
+  $ full_out stag run prerr_fails.stag
   File "prerr_fails.stag", line 1, characters 29-46:
   1 | let main = print_string "x"; prerr_endline "e"
                                    ^^^^^^^^^^^^^^^^^
-  Error: Uncaught exception Sys_error "No space left on device"
-  Error: Writing to stdout failed: No space left on device
+  Error: Uncaught exception Sys_error "File too large"
+  Error: Writing to stdout failed: File too large
   [1]
   $ cat > catch_prerr.stag <<'EOF'
   > let main =
@@ -237,8 +247,8 @@ whose write fails raises [Sys_error], as does the flush before a C call.
   $ stag run catch_prerr.stag 2>&-
   Bad file descriptor
   [5]
-  $ stag run catch_prerr.stag 2>/dev/full
-  No space left on device
+  $ full_err stag run catch_prerr.stag
+  File too large
   [5]
   $ cat > c_flush_fails.stag <<'EOF'
   > external labs : int -> int = "labs"
@@ -261,8 +271,8 @@ Printing more than the buffer holds writes it, so may raise too.
   >   | () -> ()
   >   | exception Sys_error message -> exit 8
   > EOF
-  $ stag run print_fails.stag > /dev/full
-  Error: Writing to stdout failed: No space left on device
+  $ full_out stag run print_fails.stag
+  Error: Writing to stdout failed: File too large
   [8]
 
 The output left when the program ends is flushed then, and a failure is an
@@ -274,18 +284,18 @@ error, whatever the exit code would have been.
   $ stag run final_flush.stag >&-
   Error: Writing to stdout failed: Bad file descriptor
   [1]
-  $ stag run final_flush.stag > /dev/full
-  Error: Writing to stdout failed: No space left on device
+  $ full_out stag run final_flush.stag
+  Error: Writing to stdout failed: File too large
   [1]
-  $ stag run exit.stag > /dev/full
-  Error: Writing to stdout failed: No space left on device
+  $ full_out stag run exit.stag
+  Error: Writing to stdout failed: File too large
   [3]
 
 Even when stderr can't be written either, it exits cleanly with its code.
 
   $ stag run final_flush.stag >&- 2>&-
   [1]
-  $ stag run exit.stag > /dev/full 2>&-
+  $ (trap '' XFSZ; ulimit -f 0; stag run exit.stag > out 2>&-)
   [3]
-  $ stag run exit.stag > /dev/full 2>/dev/full
+  $ (trap '' XFSZ; ulimit -f 0; stag run exit.stag > out 2> err)
   [3]

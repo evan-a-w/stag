@@ -36,6 +36,15 @@ don't consider work done until tests are present and working. Prefer
 having human readable test output (in expect test style) rather than checking
 (eg. don't just [assert_true] some condition, print something demonstrating it).
 
+Make sure tests are cross-platform (working across Linux and macOS). Avoid
+Linux-only paths (`/dev/full`, `/proc`), GNU-only tool flags/escapes (eg.
+`sed 's/\t/'` or `sed -i` without a backup suffix), and relying on directory
+listing order. Don't weaken a test to make it portable: if there is no
+equivalent cross-platform option, segregate those tests into libraries or cram
+tests that only run on the supported platforms using dune's
+`(enabled_if (= %{system} linux))` (see `driver/test/linux/dune`; for cram
+tests, `(cram (applies_to ...) (enabled_if (= %{system} linux)))`).
+
 Use subagents to
 1. Parallelize work, where relevant
 2. Just delegate, so that you are more responsive to the user - you can wait on subagent output and therefore in the meantime while it works, be ready to respond to the user. This is important.

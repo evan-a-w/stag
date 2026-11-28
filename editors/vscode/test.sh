@@ -15,11 +15,23 @@ run() {
   fi
 }
 
+run_with_timeout() {
+  local seconds=$1
+  shift
+  if command -v timeout >/dev/null; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null; then
+    gtimeout "$seconds" "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV' "$seconds" "$@"
+  fi
+}
+
 if [ ! package-lock.json -ot node_modules/.package-lock.json ]; then
   run npm ci
 fi
 if command -v dune >/dev/null; then
-  (cd ../.. && timeout 900 dune build driver/bin/main.exe)
+  (cd ../.. && run_with_timeout 900 dune build driver/bin/main.exe)
 fi
 run npm test
 if ! git diff --quiet -- syntaxes/stag.tmLanguage.json; then
