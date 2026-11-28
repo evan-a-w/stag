@@ -4,6 +4,8 @@
   (pps ppx_jane))
  (libraries
   core
+  stdlib_stable
+  stdlib_upstream_compatible
   stag_common
   stag_mode
   stag_types
