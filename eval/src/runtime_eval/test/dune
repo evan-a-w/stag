@@ -1,0 +1,18 @@
+(library
+ (name test_runtime_eval)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries
+  core
+  stag_common
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_eval
+  stag_treewalk
+  stag_driver
+  stag_typecheck
+  stag_runtime
+  stag_runtime_types
+  stag_runtime_eval))
